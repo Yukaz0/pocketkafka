@@ -22,6 +22,16 @@ storage:
     check_interval_ms: 300000  # 5 minutes
     retention_hours: 168       # 7 days
     retention_bytes: -1        # -1 = unlimited
+  tiered:
+    enabled: false             # S3/MinIO cold offload (set true to enable)
+    endpoint: "http://localhost:9000"
+    bucket: "go-kafka-neu"
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
+    region: "us-east-1"
+    prefix: "segments"
+    offload_after_hours: 24
+    check_interval_ms: 300000
 
 topics:
   auto_create: true

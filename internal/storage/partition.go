@@ -23,6 +23,9 @@ type Partition struct {
 	highWatermark   int64      // HWM: offset safe for consumers to read
 	maxSegmentBytes int64
 	indexInterval   int64
+
+	// remoteFetch downloads an object-store key (set when tiering is enabled).
+	remoteFetch func(key string) ([]byte, error)
 }
 
 // OpenPartition opens (or creates) a partition directory and recovers its state.
@@ -53,16 +56,24 @@ func (p *Partition) recover() error {
 	var bases []int64
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasSuffix(name, ".log") {
+		if strings.HasSuffix(name, ".log") || strings.HasSuffix(name, ".remote") {
 			var base int64
-			if _, err := fmt.Sscanf(name, "%020d.log", &base); err != nil {
-				continue
+			if _, err := fmt.Sscanf(name, "%020d.log", &base); err == nil {
+				bases = append(bases, base)
+			} else if _, err := fmt.Sscanf(name, "%020d.remote", &base); err == nil {
+				bases = append(bases, base)
 			}
-			bases = append(bases, base)
 		}
 	}
 	sort.Slice(bases, func(i, j int) bool { return bases[i] < bases[j] })
-	for _, base := range bases {
+	// De-duplicate base offsets (a segment may have both a .log and a .remote).
+	uniq := bases[:0]
+	for i, b := range bases {
+		if i == 0 || b != bases[i-1] {
+			uniq = append(uniq, b)
+		}
+	}
+	for _, base := range uniq {
 		seg, err := openSegment(p.dir, base, p.maxSegmentBytes, p.indexInterval)
 		if err != nil {
 			return err
@@ -143,6 +154,11 @@ func (p *Partition) Read(startOffset int64, maxBytes int32) ([]byte, int64, erro
 		if int32(len(out)) >= maxBytes {
 			break
 		}
+		if segs[idx].isRemote() {
+			if err := p.restoreSegmentLocked(segs[idx]); err != nil {
+				return out, p.highWatermark, err
+			}
+		}
 		data, err := segs[idx].read(startOffset, maxBytes-int32(len(out)))
 		if err != nil {
 			return out, p.highWatermark, err
@@ -151,6 +167,26 @@ func (p *Partition) Read(startOffset int64, maxBytes int32) ([]byte, int64, erro
 		startOffset = segs[idx].logEndOffset()
 	}
 	return out, p.highWatermark, nil
+}
+
+// restoreSegmentLocked downloads an offloaded segment's data and restores it.
+func (p *Partition) restoreSegmentLocked(seg *Segment) error {
+	if p.remoteFetch == nil {
+		return fmt.Errorf("remote segment %d has no fetcher configured", seg.baseOffset)
+	}
+	logKey, indexKey, err := seg.remoteKeys()
+	if err != nil {
+		return err
+	}
+	logData, err := p.remoteFetch(logKey)
+	if err != nil {
+		return err
+	}
+	indexData, err := p.remoteFetch(indexKey)
+	if err != nil {
+		return err
+	}
+	return seg.restoreFrom(logData, indexData)
 }
 
 // orderedSegmentsLocked returns the segments in offset order (closed then active).

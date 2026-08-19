@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Segment is a single append-only log file (.log) with its associated sparse
@@ -20,6 +21,8 @@ type Segment struct {
 	dir             string
 	maxSegmentBytes int64
 	indexInterval   int64
+	remote          bool   // true when this segment is offloaded to object storage
+	remoteStub      string // path to the .remote pointer file
 }
 
 // openSegment opens (or creates) a segment whose base offset is baseOffset and
@@ -29,6 +32,25 @@ func openSegment(dir string, baseOffset int64, maxSegmentBytes, indexInterval in
 	name := fmt.Sprintf("%020d", baseOffset)
 	logPath := filepath.Join(dir, name+".log")
 	idxPath := filepath.Join(dir, name+".index")
+	remotePath := filepath.Join(dir, name+".remote")
+
+	// If the segment has been offloaded, there is no local .log; it will be
+	// restored on demand before reads.
+	if _, err := os.Stat(remotePath); err == nil {
+		_, _, next, err := readRemoteStub(remotePath)
+		if err != nil {
+			return nil, err
+		}
+		return &Segment{
+			baseOffset:      baseOffset,
+			nextOffset:      next,
+			dir:             dir,
+			maxSegmentBytes: maxSegmentBytes,
+			indexInterval:   indexInterval,
+			remote:          true,
+			remoteStub:      remotePath,
+		}, nil
+	}
 
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
@@ -55,6 +77,7 @@ func openSegment(dir string, baseOffset int64, maxSegmentBytes, indexInterval in
 		dir:             dir,
 		maxSegmentBytes: maxSegmentBytes,
 		indexInterval:   indexInterval,
+		remoteStub:      remotePath,
 	}
 	if err := seg.recover(); err != nil {
 		seg.close()
@@ -188,14 +211,98 @@ func (s *Segment) logEndOffset() int64 { return s.nextOffset }
 // sizeBytes returns the current on-disk log size.
 func (s *Segment) sizeBytes() int64 { return s.size }
 
+// isRemote reports whether the segment is offloaded to object storage.
+func (s *Segment) isRemote() bool { return s.remote }
+
+// markRemote writes a .remote pointer file and releases the local segment files.
+// The stub stores the log/index keys and the segment's nextOffset so LEO can be
+// recovered after a restart.
+func (s *Segment) markRemote(logKey, indexKey string) error {
+	content := fmt.Sprintf("%s\n%s\n%d", logKey, indexKey, s.nextOffset)
+	if err := os.WriteFile(s.remoteStub, []byte(content), 0o644); err != nil {
+		return err
+	}
+	if s.logFile != nil {
+		s.logFile.Close()
+	}
+	if s.index != nil {
+		s.index.close()
+	}
+	s.logFile = nil
+	s.index = nil
+	s.size = 0
+	s.remote = true
+	os.Remove(trimSuffix(s.logPath(), ".log"))
+	os.Remove(trimSuffix(s.indexPath(), ".index"))
+	return nil
+}
+
+// remoteKeys returns the object store keys for the offloaded segment.
+func (s *Segment) remoteKeys() (string, string, error) {
+	data, err := os.ReadFile(s.remoteStub)
+	if err != nil {
+		return "", "", err
+	}
+	lines := strings.SplitN(strings.TrimSpace(string(data)), "\n", 3)
+	if len(lines) < 2 {
+		return "", "", fmt.Errorf("malformed remote stub %s", s.remoteStub)
+	}
+	return lines[0], lines[1], nil
+}
+
+// readRemoteStub parses a .remote stub, returning keys and the segment LEO.
+func readRemoteStub(path string) (string, string, int64, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", 0, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 3 {
+		return "", "", 0, fmt.Errorf("malformed remote stub %s", path)
+	}
+	var next int64
+	fmt.Sscanf(lines[2], "%d", &next)
+	return lines[0], lines[1], next, nil
+}
+
+// restoreFrom writes the downloaded .log and .index back and reopens the segment.
+func (s *Segment) restoreFrom(logData, indexData []byte) error {
+	if err := os.WriteFile(s.logPath(), logData, 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(s.indexPath(), indexData, 0o644); err != nil {
+		return err
+	}
+	os.Remove(s.remoteStub)
+	seg, err := openSegment(s.dir, s.baseOffset, s.maxSegmentBytes, s.indexInterval)
+	if err != nil {
+		return err
+	}
+	*s = *seg
+	return nil
+}
+
+func (s *Segment) logPath() string {
+	return filepath.Join(s.dir, fmt.Sprintf("%020d.log", s.baseOffset))
+}
+
+func (s *Segment) indexPath() string {
+	return filepath.Join(s.dir, fmt.Sprintf("%020d.index", s.baseOffset))
+}
+
 func (s *Segment) close() error {
+	if s.logFile == nil {
+		return nil
+	}
 	if err := s.logFile.Sync(); err != nil {
 		s.logFile.Close()
 		return err
 	}
-	if err := s.index.close(); err != nil {
-		s.logFile.Close()
-		return err
+	if s.index != nil {
+		if err := s.index.close(); err != nil {
+			s.logFile.Close()
+			return err
+		}
 	}
 	return s.logFile.Close()
 }

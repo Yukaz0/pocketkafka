@@ -222,6 +222,17 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 			cfg.Storage.Retention.RetentionHours = getInt(r, "retention_hours", cfg.Storage.Retention.RetentionHours)
 			cfg.Storage.Retention.RetentionBytes = getInt64(r, "retention_bytes", cfg.Storage.Retention.RetentionBytes)
 		}
+		if t := asMap(s, "tiered"); t != nil {
+			cfg.Storage.Tiered.Enabled = getBool(t, "enabled", cfg.Storage.Tiered.Enabled)
+			cfg.Storage.Tiered.Endpoint = getString(t, "endpoint", cfg.Storage.Tiered.Endpoint)
+			cfg.Storage.Tiered.Bucket = getString(t, "bucket", cfg.Storage.Tiered.Bucket)
+			cfg.Storage.Tiered.AccessKey = getString(t, "access_key", cfg.Storage.Tiered.AccessKey)
+			cfg.Storage.Tiered.SecretKey = getString(t, "secret_key", cfg.Storage.Tiered.SecretKey)
+			cfg.Storage.Tiered.Region = getString(t, "region", cfg.Storage.Tiered.Region)
+			cfg.Storage.Tiered.Prefix = getString(t, "prefix", cfg.Storage.Tiered.Prefix)
+			cfg.Storage.Tiered.OffloadAfterHours = getInt(t, "offload_after_hours", cfg.Storage.Tiered.OffloadAfterHours)
+			cfg.Storage.Tiered.CheckIntervalMs = getInt(t, "check_interval_ms", cfg.Storage.Tiered.CheckIntervalMs)
+		}
 	}
 	if t := asMap(m, "topics"); t != nil {
 		cfg.Topics.AutoCreate = getBool(t, "auto_create", cfg.Topics.AutoCreate)

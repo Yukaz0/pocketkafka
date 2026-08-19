@@ -7,6 +7,9 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
+
+	"github.com/neu/go-kafka-neu/internal/tier"
 )
 
 // Topic groups the partitions that make up one logical topic.
@@ -24,6 +27,8 @@ type Store struct {
 	compacted       map[string]bool // topics with cleanup.policy=compact
 	maxSegmentBytes int64
 	indexInterval   int64
+	s3              *tier.S3Client
+	tierThreshold   time.Duration
 }
 
 // NewStore opens (or creates) the data directory and recovers existing topics.
@@ -72,6 +77,7 @@ func (s *Store) recover() error {
 			if err != nil {
 				return err
 			}
+			s.attach(p)
 			t.Partitions[int32(pid)] = p
 		}
 		if len(t.Partitions) > 0 {
@@ -151,6 +157,7 @@ func (s *Store) createLocked(name string, partitions int) (*Topic, bool, error) 
 			}
 			return nil, false, err
 		}
+		s.attach(p)
 		t.Partitions[int32(i)] = p
 	}
 	s.topics[name] = t

@@ -30,12 +30,26 @@ type Retention struct {
 	RetentionBytes  int64 `yaml:"retention_bytes"`
 }
 
+// Tiered configures S3/MinIO cold offload.
+type Tiered struct {
+	Enabled           bool   `yaml:"enabled"`
+	Endpoint          string `yaml:"endpoint"`
+	Bucket            string `yaml:"bucket"`
+	AccessKey         string `yaml:"access_key"`
+	SecretKey         string `yaml:"secret_key"`
+	Region            string `yaml:"region"`
+	Prefix            string `yaml:"prefix"`
+	OffloadAfterHours int    `yaml:"offload_after_hours"`
+	CheckIntervalMs   int    `yaml:"check_interval_ms"`
+}
+
 // Storage configures the commit log.
 type Storage struct {
 	DataDir            string    `yaml:"data_dir"`
 	SegmentMaxBytes    int64     `yaml:"segment_max_bytes"`
 	IndexIntervalBytes int64     `yaml:"index_interval_bytes"`
 	Retention          Retention `yaml:"retention"`
+	Tiered             Tiered    `yaml:"tiered"`
 }
 
 // Topics configures topic auto creation.

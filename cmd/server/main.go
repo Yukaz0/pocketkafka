@@ -20,6 +20,7 @@ import (
 	"github.com/neu/go-kafka-neu/internal/schemaregistry"
 	"github.com/neu/go-kafka-neu/internal/server"
 	"github.com/neu/go-kafka-neu/internal/storage"
+	"github.com/neu/go-kafka-neu/internal/tier"
 	"github.com/neu/go-kafka-neu/internal/web"
 )
 
@@ -109,6 +110,23 @@ func main() {
 
 	// Background log compaction for cleanup.policy=compact topics.
 	stopCompaction := store.StartCompaction(60 * time.Second)
+
+	// S3/MinIO tiered (cold) storage.
+	if cfg.Storage.Tiered.Enabled {
+		client := tier.NewS3Client(
+			cfg.Storage.Tiered.Endpoint, cfg.Storage.Tiered.Bucket,
+			cfg.Storage.Tiered.AccessKey, cfg.Storage.Tiered.SecretKey,
+			cfg.Storage.Tiered.Region, cfg.Storage.Tiered.Prefix,
+		)
+		interval := time.Duration(cfg.Storage.Tiered.CheckIntervalMs) * time.Millisecond
+		if interval <= 0 {
+			interval = 5 * time.Minute
+		}
+		threshold := time.Duration(cfg.Storage.Tiered.OffloadAfterHours) * time.Hour
+		stopTiering := store.EnableTiering(client, threshold, interval)
+		defer stopTiering()
+		log.Printf("go-kafka-neu tiered storage enabled -> %s/%s", cfg.Storage.Tiered.Endpoint, cfg.Storage.Tiered.Bucket)
+	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
