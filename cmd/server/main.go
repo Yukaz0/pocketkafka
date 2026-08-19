@@ -15,7 +15,9 @@ import (
 
 	"github.com/neu/go-kafka-neu/internal/config"
 	"github.com/neu/go-kafka-neu/internal/coordinator"
+	"github.com/neu/go-kafka-neu/internal/gateway"
 	"github.com/neu/go-kafka-neu/internal/handler"
+	"github.com/neu/go-kafka-neu/internal/schemaregistry"
 	"github.com/neu/go-kafka-neu/internal/server"
 	"github.com/neu/go-kafka-neu/internal/storage"
 	"github.com/neu/go-kafka-neu/internal/web"
@@ -68,6 +70,25 @@ func main() {
 		log.Printf("go-kafka-neu web UI on http://%s", cfg.Web.Listen)
 		if err := webSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("web server error: %v", err)
+		}
+	}()
+
+	// Embedded Schema Registry (port 8081, Confluent-compatible).
+	sr := schemaregistry.New()
+	srSrv := &http.Server{Addr: cfg.SchemaRegistry.Listen, Handler: sr.Handler()}
+	go func() {
+		log.Printf("go-kafka-neu schema registry on http://%s", cfg.SchemaRegistry.Listen)
+		if err := srSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("schema registry error: %v", err)
+		}
+	}()
+
+	// HTTP REST Proxy gateway (port 8082).
+	gwSrv := &http.Server{Addr: cfg.Gateway.Listen, Handler: gateway.NewRESTProxy(store).Handler()}
+	go func() {
+		log.Printf("go-kafka-neu REST proxy on http://%s", cfg.Gateway.Listen)
+		if err := gwSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("rest proxy error: %v", err)
 		}
 	}()
 

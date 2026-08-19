@@ -47,3 +47,9 @@ logging:
 
 web:
   listen: "0.0.0.0:8080"  # Embedded dashboard (REST + WebSocket live tail)
+
+schema_registry:
+  listen: "0.0.0.0:8081"  # Confluent-compatible Schema Registry
+
+gateway:
+  listen: "0.0.0.0:8082"  # HTTP REST Proxy

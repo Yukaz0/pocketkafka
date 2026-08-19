@@ -73,6 +73,16 @@ type Web struct {
 	Listen string `yaml:"listen"`
 }
 
+// SchemaRegistry configures the embedded Confluent-compatible registry.
+type SchemaRegistry struct {
+	Listen string `yaml:"listen"`
+}
+
+// Gateway configures the HTTP REST proxy.
+type Gateway struct {
+	Listen string `yaml:"listen"`
+}
+
 // Config is the root configuration document.
 type Config struct {
 	Broker              Broker            `yaml:"broker"`
@@ -84,6 +94,8 @@ type Config struct {
 	Network             Network           `yaml:"network"`
 	Logging             Logging           `yaml:"logging"`
 	Web                 Web               `yaml:"web"`
+	SchemaRegistry      SchemaRegistry    `yaml:"schema_registry"`
+	Gateway             Gateway           `yaml:"gateway"`
 }
 
 // Default returns a Config populated with the documented default values.
@@ -122,8 +134,10 @@ func Default() Config {
 			WriteBufferBytes:    65536,
 			MaxRequestSizeBytes: 104857600,
 		},
-		Logging: Logging{Level: "info", Format: "json"},
-		Web:     Web{Listen: "0.0.0.0:8080"},
+		Logging:        Logging{Level: "info", Format: "json"},
+		Web:            Web{Listen: "0.0.0.0:8080"},
+		SchemaRegistry: SchemaRegistry{Listen: "0.0.0.0:8081"},
+		Gateway:        Gateway{Listen: "0.0.0.0:8082"},
 	}
 }
 

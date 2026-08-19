@@ -204,4 +204,10 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 	if w := asMap(m, "web"); w != nil {
 		cfg.Web.Listen = getString(w, "listen", cfg.Web.Listen)
 	}
+	if sr := asMap(m, "schema_registry"); sr != nil {
+		cfg.SchemaRegistry.Listen = getString(sr, "listen", cfg.SchemaRegistry.Listen)
+	}
+	if gw := asMap(m, "gateway"); gw != nil {
+		cfg.Gateway.Listen = getString(gw, "listen", cfg.Gateway.Listen)
+	}
 }
