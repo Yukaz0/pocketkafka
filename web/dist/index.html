@@ -139,6 +139,7 @@ function topicsHTML(){
         <select id="topicSel" style="width:220px"><option value="">Select topic</option>${opts}</select>
         <button id="loadMsgs" class="ghost">Load Messages</button>
         <button id="newTopic" class="ghost">+ New Topic</button>
+        <button id="delTopic" class="ghost" style="color:var(--red);border-color:var(--red)">Delete Topic</button>
       </div>
     </div>
     <div class="card">
@@ -190,6 +191,7 @@ function bindTopics(){
   viewtabs.forEach(t=>t.addEventListener('click',()=>{ viewtabs.forEach(x=>x.classList.remove('active')); t.classList.add('active'); state.viewMode=t.dataset.viewmode; renderSelected(); }));
   load.addEventListener('click', ()=>{ if(sel.value) loadMessages(sel.value, 0, 100); });
   nl.addEventListener('click', async ()=>{ const name=prompt('New topic name:'); if(!name) return; try{ await api('/api/v1/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,partitions:1})}); await refreshTopics(); render(); }catch(e){ alert(e.message);} });
+  $('#delTopic').addEventListener('click', async ()=>{ const name=$('#topicSel').value; if(!name) return; if(!confirm('Delete topic "'+name+'" and all its data?')) return; try{ await api('/api/v1/topics/'+encodeURIComponent(name),{method:'DELETE'}); await refreshTopics(); render(); }catch(e){ alert(e.message);} });
   $('#liveToggle').addEventListener('click', ()=>{ toggleTail(sel.value); });
   if(sel.value) loadMessages(sel.value, 0, 100);
 }

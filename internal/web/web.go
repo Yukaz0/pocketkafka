@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/neu/go-kafka-neu/internal/coordinator"
@@ -36,11 +37,40 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/cluster", s.handleCluster)
 	mux.HandleFunc("GET /api/v1/topics", s.handleTopics)
 	mux.HandleFunc("POST /api/v1/topics", s.handleCreateTopic)
+	mux.HandleFunc("DELETE /api/v1/topics/{topic}", s.handleDeleteTopic)
 	mux.HandleFunc("GET /api/v1/topics/{topic}/messages", s.handleGetMessages)
 	mux.HandleFunc("POST /api/v1/topics/{topic}/messages", s.handlePostMessage)
 	mux.HandleFunc("GET /api/v1/groups", s.handleGroups)
 	mux.HandleFunc("GET /api/v1/topics/{topic}/tail", s.handleTailWS)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	return mux
+}
+
+// handleMetrics exposes go-kafka-neu metrics in Prometheus text format.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	var b strings.Builder
+	topics := s.store.TopicsSnapshot()
+	var partitions int
+	var totalBytes, totalMsgs int64
+	for _, t := range topics {
+		for pid, p := range t.Partitions {
+			partitions++
+			leo := p.LogEndOffset()
+			earliest := p.EarliestOffset()
+			bytes := p.SizeBytes()
+			totalBytes += bytes
+			totalMsgs += leo - earliest
+			fmt.Fprintf(&b, "go_kafka_topic_log_end_offset{topic=%q,partition=\"%d\"} %d\n", t.Name, pid, leo)
+			fmt.Fprintf(&b, "go_kafka_topic_bytes{topic=%q,partition=\"%d\"} %d\n", t.Name, pid, bytes)
+		}
+	}
+	fmt.Fprintf(&b, "go_kafka_broker_info{cluster_id=%q} 1\n", s.clusterID)
+	fmt.Fprintf(&b, "go_kafka_topics %d\n", len(topics))
+	fmt.Fprintf(&b, "go_kafka_partitions %d\n", partitions)
+	fmt.Fprintf(&b, "go_kafka_total_bytes %d\n", totalBytes)
+	fmt.Fprintf(&b, "go_kafka_total_messages %d\n", totalMsgs)
+	w.Write([]byte(b.String()))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -150,6 +180,19 @@ func (s *Server) handleCreateTopic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 201, map[string]interface{}{"name": req.Name, "partitions": req.Partitions})
+}
+
+func (s *Server) handleDeleteTopic(w http.ResponseWriter, r *http.Request) {
+	topic := r.PathValue("topic")
+	if s.store.GetTopic(topic) == nil {
+		writeErr(w, 404, "unknown topic")
+		return
+	}
+	if err := s.store.DeleteTopic(topic); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"deleted": topic})
 }
 
 // ---------------------------------------------------------------------------

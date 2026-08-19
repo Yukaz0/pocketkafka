@@ -114,6 +114,9 @@ func (cg *ConsumerGroup) findCoordinator(ctx context.Context) error {
 
 // joinAndSync performs the join -> (leader assign) -> sync handshake.
 func (cg *ConsumerGroup) joinAndSync(ctx context.Context) error {
+	// Ensure the topic/partition metadata is fresh before computing assignments.
+	cg.client.RefreshMetadata()
+
 	// Determine the topic subscription: explicit if set, else all known topics.
 	var topics []string
 	if len(cg.subTopics) > 0 {

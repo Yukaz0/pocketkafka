@@ -17,6 +17,7 @@ security. The module's `go.mod` has **no third-party requires**.
 | REST Proxy | 8082 | Publish/consume messages over plain HTTP |
 | MQTT Bridge | 1883 | IoT MQTT 3.1.1 topics bridged to Kafka |
 | TLS (SSL) | 9093 | Optional encrypted listener |
+| Metrics | 8080 `/metrics` | Prometheus text-format metrics |
 
 The Docker image (`< 29MB`) runs all of the above from a single binary.
 
@@ -26,9 +27,17 @@ The Docker image (`< 29MB`) runs all of the above from a single binary.
 # build
 go build -o bin/server ./cmd/server
 go build -o bin/client-example ./cmd/client-example
+go build -o bin/kctl ./cmd/kctl   # admin CLI
 
 # run the broker (config/config.yaml)
 ./bin/server -config config/config.yaml
+
+# admin CLI examples
+./bin/kctl -b localhost:9092 topics
+./bin/kctl -b localhost:9092 create demo -p 1
+./bin/kctl -b localhost:9092 produce demo "hello"
+./bin/kctl -b localhost:9092 consume demo -g g1 -n 5
+./bin/kctl -b localhost:9092 delete demo
 
 # in another terminal: publish and consume via the bundled SDK
 ./bin/client-example -brokers localhost:9092 -topic demo -mode produce -count 5
