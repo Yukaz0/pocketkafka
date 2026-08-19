@@ -1,0 +1,23 @@
+# Minimal single-service stack: go-kafka-neu only (no portainer/kadeck/postgres).
+services:
+  kafka-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: go-kafka-neu:latest
+    container_name: go-kafka-neu
+    restart: unless-stopped
+    ports:
+      - "9092:9092"   # Kafka API
+      - "29092:29092" # Kafka internal
+      - "8080:8080"   # Web UI
+      - "8081:8081"   # Schema Registry
+      - "8082:8082"   # REST Proxy
+      - "1883:1883"   # MQTT Bridge
+    environment:
+      - KAFKA_DATA_DIR=/var/lib/go-kafka/data
+    volumes:
+      - kafka_data:/var/lib/go-kafka/data
+
+volumes:
+  kafka_data:

@@ -38,6 +38,30 @@ go build -o bin/client-example ./cmd/client-example
 Open the dashboard at <http://localhost:8080> (create topics, explore messages,
 produce via the simulator, watch live tail).
 
+## Run with Docker
+
+The recommended way to run go-kafka-neu in Docker is the minimal single-service
+compose file (no portainer/kadeck/postgres extras):
+
+```sh
+docker compose -f docker-compose.minimal.yml up -d --build
+# stop
+docker compose -f docker-compose.minimal.yml down
+```
+
+This maps all service ports to the host (Kafka 9092/29092, Web UI 8080, Schema
+Registry 8081, REST Proxy 8082, MQTT 1883) and persists data in a `kafka_data`
+volume.
+
+> **Port conflict note**: go-kafka-neu uses the same ports as Redpanda/Kadeck
+> (9092/29092/8080/8081). Do **not** run the host binary and the container at the
+> same time, and do **not** run this together with the `~/docker-infra` stack
+> (Redpanda + Kadeck) — they will fight over the ports. Pick one.
+
+The default `docker-compose.yml` bundles optional `portainer`, `postgres`, and
+`kadeck-web` services; use it only if you want that full stack, and ensure the
+extra container names/ports are free.
+
 ## Feature Highlights
 
 - **Kafka wire protocol** (`pkg/protocol`): hand-written BigEndian reader/writer,
