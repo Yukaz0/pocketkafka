@@ -137,6 +137,10 @@ func (s *Server) handleCreateTopic(w http.ResponseWriter, r *http.Request) {
 	if req.Partitions <= 0 {
 		req.Partitions = 1
 	}
+	if err := storage.ValidateTopicName(req.Name); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	if s.store.GetTopic(req.Name) != nil {
 		writeErr(w, 409, "topic already exists")
 		return

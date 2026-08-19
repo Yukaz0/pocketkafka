@@ -5,6 +5,7 @@ package handler
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/neu/go-kafka-neu/internal/config"
@@ -307,12 +308,19 @@ func (h *Handler) handleCreateTopics(version int16, body []byte) ([]byte, error)
 			resp.Topics = append(resp.Topics, ct)
 			continue
 		}
-		if h.store.GetTopic(t.Topic) != nil {
+		if err := storage.ValidateTopicName(t.Topic); err != nil {
+			ct.ErrorCode = protocol.ErrInvalidTopic
+		} else if h.store.GetTopic(t.Topic) != nil {
 			ct.ErrorCode = protocol.ErrTopicAlreadyExists
 		} else if t.NumPartitions <= 0 {
 			ct.ErrorCode = protocol.ErrInvalidPartitions
 		} else if _, err := h.store.CreateTopic(t.Topic, int(t.NumPartitions)); err != nil {
 			ct.ErrorCode = protocol.ErrUnknownServerError
+		} else if isCompacted(t.Configs) {
+			// Log compaction is requested; persist the topic flag.
+			if err := h.store.MarkCompacted(t.Topic, true); err != nil {
+				ct.ErrorCode = protocol.ErrUnknownServerError
+			}
 		}
 		resp.Topics = append(resp.Topics, ct)
 	}
@@ -415,6 +423,35 @@ func (h *Handler) longPoll(part *storage.Partition, fetchOffset int64, maxWait i
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// isCompacted reports whether a topic creation request sets cleanup.policy=compact.
+func isCompacted(configs []protocol.CreateTopicsConfig) bool {
+	for _, c := range configs {
+		if c.Name == "cleanup.policy" && c.Value != nil {
+			for _, tok := range splitComma(*c.Value) {
+				if tok == "compact" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func splitComma(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == ',' {
+			tok := strings.TrimSpace(s[start:i])
+			if tok != "" {
+				out = append(out, tok)
+			}
+			start = i + 1
+		}
+	}
+	return out
 }
 
 // unsupportedVersion builds a response body reporting UNSUPPORTED_VERSION. For

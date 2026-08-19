@@ -100,11 +100,15 @@ func main() {
 	}
 	stopRetention := store.StartRetention(retention)
 
+	// Background log compaction for cleanup.policy=compact topics.
+	stopCompaction := store.StartCompaction(60 * time.Second)
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	log.Printf("shutting down")
 	stopRetention()
+	stopCompaction()
 	srv.Close()
 }
 

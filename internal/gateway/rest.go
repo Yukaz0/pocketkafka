@@ -61,6 +61,10 @@ func (p *RESTProxy) publish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if p.store.GetTopic(topic) == nil {
+		if err := storage.ValidateTopicName(topic); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
 		p.store.EnsureTopic(topic, 1)
 	}
 	part := p.store.GetPartition(topic, 0)

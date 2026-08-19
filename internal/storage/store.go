@@ -21,6 +21,7 @@ type Store struct {
 	mu              sync.RWMutex
 	dir             string
 	topics          map[string]*Topic
+	compacted       map[string]bool // topics with cleanup.policy=compact
 	maxSegmentBytes int64
 	indexInterval   int64
 }
@@ -33,10 +34,14 @@ func NewStore(dir string, maxSegmentBytes, indexInterval int64) (*Store, error) 
 	s := &Store{
 		dir:             dir,
 		topics:          make(map[string]*Topic),
+		compacted:       make(map[string]bool),
 		maxSegmentBytes: maxSegmentBytes,
 		indexInterval:   indexInterval,
 	}
 	if err := s.recover(); err != nil {
+		return nil, err
+	}
+	if err := s.loadManifest(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -81,9 +86,32 @@ func (s *Store) partitionDir(topic string, partition int32) string {
 	return filepath.Join(s.dir, topic, fmt.Sprintf("%d", partition))
 }
 
+// ValidateTopicName checks that a topic name is safe to use as a directory name
+// and conforms to reasonable Kafka constraints.
+func ValidateTopicName(name string) error {
+	if name == "" {
+		return fmt.Errorf("topic name is empty")
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("invalid topic name %q", name)
+	}
+	if len(name) > 249 {
+		return fmt.Errorf("topic name too long")
+	}
+	for _, c := range name {
+		if c == '/' || c == '\\' || c == ':' || c == ' ' || c < 0x20 || c == 0x7f {
+			return fmt.Errorf("invalid character %q in topic name", c)
+		}
+	}
+	return nil
+}
+
 // EnsureTopic creates a topic with the given partition count if it does not
 // already exist. If it exists, it is returned unchanged.
 func (s *Store) EnsureTopic(name string, partitions int) (*Topic, bool, error) {
+	if err := ValidateTopicName(name); err != nil {
+		return nil, false, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if partitions <= 0 {
@@ -97,6 +125,9 @@ func (s *Store) EnsureTopic(name string, partitions int) (*Topic, bool, error) {
 
 // CreateTopic creates a brand new topic, erroring if it already exists.
 func (s *Store) CreateTopic(name string, partitions int) (*Topic, error) {
+	if err := ValidateTopicName(name); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.topics[name]; ok {
