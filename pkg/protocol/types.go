@@ -6,20 +6,22 @@ package protocol
 
 // Kafka API keys (ApiKey values in the request header).
 const (
-	APKProduce         int16 = 0
-	APKFetch           int16 = 1
-	APKListOffsets     int16 = 2
-	APKMetadata        int16 = 3
-	APKOffsetCommit    int16 = 8
-	APKOffsetFetch     int16 = 9
-	APKFindCoordinator int16 = 10
-	APKJoinGroup       int16 = 11
-	APKHeartbeat       int16 = 12
-	APKLeaveGroup      int16 = 13
-	APKSyncGroup       int16 = 14
-	APKApiVersions     int16 = 18
-	APKCreateTopics    int16 = 19
-	APKDeleteTopics    int16 = 20
+	APKProduce          int16 = 0
+	APKFetch            int16 = 1
+	APKListOffsets      int16 = 2
+	APKMetadata         int16 = 3
+	APKOffsetCommit     int16 = 8
+	APKOffsetFetch      int16 = 9
+	APKFindCoordinator  int16 = 10
+	APKJoinGroup        int16 = 11
+	APKHeartbeat        int16 = 12
+	APKLeaveGroup       int16 = 13
+	APKSyncGroup        int16 = 14
+	APKSaslHandshake    int16 = 17
+	APKApiVersions      int16 = 18
+	APKCreateTopics     int16 = 19
+	APKDeleteTopics     int16 = 20
+	APKSaslAuthenticate int16 = 36
 )
 
 // RecordBatch magic byte for the modern (v2) record format.
@@ -48,8 +50,10 @@ const (
 	ErrInvalidCommitOffsetSize     int16 = 28
 	ErrTopicAuthorizationFailed    int16 = 29
 	ErrGroupAuthorizationFailed    int16 = 30
+	ErrIllegalSaslState            int16 = 34
 	ErrUnsupportedVersion          int16 = 35
 	ErrTopicAlreadyExists          int16 = 36
+	ErrSaslAuthenticationFailed    int16 = 58
 	ErrInvalidPartitions           int16 = 37
 	ErrInvalidReplicationFactor    int16 = 38
 	ErrInvalidReplicaAssignment    int16 = 39
@@ -62,20 +66,22 @@ const (
 // key. All chosen maxima are at or below the "flexible" protocol threshold, so
 // the codecs only need to handle the classic (non-compact) wire format.
 var maxVersions = map[int16]int16{
-	APKProduce:         3, // v3 makes clients use RecordBatch v2 (magic 2)
-	APKFetch:           5,
-	APKListOffsets:     5,
-	APKMetadata:        8,
-	APKOffsetCommit:    7,
-	APKOffsetFetch:     5, // v6+ is flexible
-	APKFindCoordinator: 2, // v3+ is flexible
-	APKJoinGroup:       5, // v6+ is flexible (cooperative-sticky needs v5)
-	APKHeartbeat:       3,
-	APKLeaveGroup:      3,
-	APKSyncGroup:       3, // v4+ is flexible
-	APKApiVersions:     2,
-	APKCreateTopics:    4,
-	APKDeleteTopics:    3,
+	APKProduce:          3, // v3 makes clients use RecordBatch v2 (magic 2)
+	APKFetch:            5,
+	APKListOffsets:      5,
+	APKMetadata:         8,
+	APKOffsetCommit:     7,
+	APKOffsetFetch:      5, // v6+ is flexible
+	APKFindCoordinator:  2, // v3+ is flexible
+	APKJoinGroup:        5, // v6+ is flexible (cooperative-sticky needs v5)
+	APKHeartbeat:        3,
+	APKLeaveGroup:       3,
+	APKSyncGroup:        3, // v4+ is flexible
+	APKSaslHandshake:    1,
+	APKApiVersions:      2,
+	APKCreateTopics:     4,
+	APKDeleteTopics:     3,
+	APKSaslAuthenticate: 2,
 }
 
 // SupportsKey reports whether the broker implements the given API key.

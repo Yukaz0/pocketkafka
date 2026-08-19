@@ -56,3 +56,9 @@ gateway:
 
 mqtt:
   listen: "0.0.0.0:1883"  # MQTT Bridge (IoT)
+
+security:
+  enabled: false          # SASL/PLAIN auth (set true to require login)
+  users:
+    - username: "app"
+      password: "changeme"

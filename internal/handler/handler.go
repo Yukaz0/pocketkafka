@@ -50,9 +50,11 @@ func (h *Handler) supportedKeys() []protocol.ApiKeySupport {
 		{ApiKey: protocol.APKHeartbeat, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKHeartbeat)},
 		{ApiKey: protocol.APKLeaveGroup, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKLeaveGroup)},
 		{ApiKey: protocol.APKSyncGroup, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKSyncGroup)},
+		{ApiKey: protocol.APKSaslHandshake, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKSaslHandshake)},
 		{ApiKey: protocol.APKApiVersions, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKApiVersions)},
 		{ApiKey: protocol.APKCreateTopics, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKCreateTopics)},
 		{ApiKey: protocol.APKDeleteTopics, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKDeleteTopics)},
+		{ApiKey: protocol.APKSaslAuthenticate, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKSaslAuthenticate)},
 	}
 }
 

@@ -5,12 +5,27 @@ import (
 	"strings"
 )
 
-// parseYAML parses a small YAML subset: nested maps of scalars, with indentation
-// based structure and '#' comments. Lists are not supported. This is enough for
-// config/config.yaml and keeps the module free of external dependencies.
+// parseYAML parses a small YAML subset: nested maps of scalars plus sequences of
+// maps (e.g. security.users). Indentation is significant and '#' starts a
+// comment. This is enough for config/config.yaml and keeps the module free of
+// external dependencies.
 func parseYAML(data []byte) (map[string]interface{}, error) {
 	root := map[string]interface{}{}
-	lines := strings.Split(string(data), "\n")
+
+	type yamlLine struct {
+		indent  int
+		content string
+	}
+	var lines []yamlLine
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := stripComment(raw)
+		trimmed := strings.TrimRight(line, " \t\r")
+		c := strings.TrimSpace(trimmed)
+		if c == "" {
+			continue
+		}
+		lines = append(lines, yamlLine{leadingSpaces(trimmed), c})
+	}
 
 	// stack of (indent, map) for nested scopes.
 	type scope struct {
@@ -19,31 +34,60 @@ func parseYAML(data []byte) (map[string]interface{}, error) {
 	}
 	stack := []scope{{indent: -1, m: root}}
 
-	for _, raw := range lines {
-		line := stripComment(raw)
-		trimmed := strings.TrimRight(line, " \t\r")
-		if strings.TrimSpace(trimmed) == "" {
-			continue
-		}
-		indent := leadingSpaces(trimmed)
-		content := strings.TrimSpace(trimmed)
-
-		for len(stack) > 1 && indent <= stack[len(stack)-1].indent {
+	for i := 0; i < len(lines); i++ {
+		ln := lines[i]
+		for len(stack) > 1 && ln.indent <= stack[len(stack)-1].indent {
 			stack = stack[:len(stack)-1]
 		}
 		parent := stack[len(stack)-1].m
 
-		key, val, hasVal := splitKeyValue(content)
+		if strings.HasPrefix(ln.content, "- ") {
+			// A sequence item; append a fresh element map to the parent's list.
+			seqKey := lastSeqKey(parent)
+			if seqKey == "" {
+				continue
+			}
+			item := map[string]interface{}{}
+			rest := strings.TrimSpace(ln.content[2:])
+			k, v, has := splitKeyValue(rest)
+			if has {
+				item[k] = parseScalar(v)
+			} else {
+				item[k] = ""
+			}
+			parent[seqKey] = append(parent[seqKey].([]interface{}), item)
+			// Subsequent deeper lines populate this element map.
+			stack = append(stack, scope{indent: ln.indent, m: item})
+			continue
+		}
+
+		key, val, hasVal := splitKeyValue(ln.content)
 		if !hasVal {
-			// Nested map start.
 			child := map[string]interface{}{}
+			// A key with no value is a nested map, unless its children are
+			// sequence items, in which case it is a list.
+			if i+1 < len(lines) && lines[i+1].indent > ln.indent && strings.HasPrefix(lines[i+1].content, "- ") {
+				parent[key] = []interface{}{}
+				continue
+			}
 			parent[key] = child
-			stack = append(stack, scope{indent: indent, m: child})
+			stack = append(stack, scope{indent: ln.indent, m: child})
 			continue
 		}
 		parent[key] = parseScalar(val)
 	}
 	return root, nil
+}
+
+// lastSeqKey returns a key in m whose value is a list (used to place sequence
+// items). Config sections have at most one list, so this is unambiguous here.
+func lastSeqKey(m map[string]interface{}) string {
+	for k, v := range m {
+		if _, ok := v.([]interface{}); ok {
+			return k
+		}
+	}
+	return ""
 }
 
 func stripComment(line string) string {
@@ -212,5 +256,18 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 	}
 	if mq := asMap(m, "mqtt"); mq != nil {
 		cfg.MQTT.Listen = getString(mq, "listen", cfg.MQTT.Listen)
+	}
+	if sec := asMap(m, "security"); sec != nil {
+		cfg.Security.Enabled = getBool(sec, "enabled", cfg.Security.Enabled)
+		if users, ok := sec["users"].([]interface{}); ok {
+			for _, u := range users {
+				if um, ok := u.(map[string]interface{}); ok {
+					cfg.Security.Users = append(cfg.Security.Users, SecurityUser{
+						Username: getString(um, "username", ""),
+						Password: getString(um, "password", ""),
+					})
+				}
+			}
+		}
 	}
 }

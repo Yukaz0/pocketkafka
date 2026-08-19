@@ -88,6 +88,18 @@ type MQTT struct {
 	Listen string `yaml:"listen"`
 }
 
+// SecurityUser is a SASL/PLAIN credential.
+type SecurityUser struct {
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+}
+
+// Security configures SASL/PLAIN authentication.
+type Security struct {
+	Enabled bool           `yaml:"enabled"`
+	Users   []SecurityUser `yaml:"users"`
+}
+
 // Config is the root configuration document.
 type Config struct {
 	Broker              Broker            `yaml:"broker"`
@@ -102,6 +114,7 @@ type Config struct {
 	SchemaRegistry      SchemaRegistry    `yaml:"schema_registry"`
 	Gateway             Gateway           `yaml:"gateway"`
 	MQTT                MQTT              `yaml:"mqtt"`
+	Security            Security          `yaml:"security"`
 }
 
 // Default returns a Config populated with the documented default values.
