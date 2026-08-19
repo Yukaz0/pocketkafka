@@ -79,18 +79,6 @@ func WriteResponseFrame(corrID int32, body []byte) []byte {
 	return out
 }
 
-// WriteResponseFrameFlexible builds a response frame whose header includes the
-// flexible (KIP-482) tagged fields section. A single zero byte is appended
-// after the correlation ID to represent an empty tagged field set.
-func WriteResponseFrameFlexible(corrID int32, body []byte) []byte {
-	out := make([]byte, 0, len(body)+9)
-	out = appendInt32(out, int32(len(body)+5))
-	out = appendInt32(out, corrID)
-	out = append(out, 0x00) // empty tagged fields
-	out = append(out, body...)
-	return out
-}
-
 func appendInt32(dst []byte, v int32) []byte {
 	var b [4]byte
 	binary.BigEndian.PutUint32(b[:], uint32(v))

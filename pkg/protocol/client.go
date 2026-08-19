@@ -173,6 +173,11 @@ func DecodeMetadataResponse(version int16, body []byte) (*MetadataResponse, erro
 		}
 		resp.Topics = append(resp.Topics, t)
 	}
+	if version >= 8 && version <= 10 {
+		if resp.ClusterAuthorizedOperations, err = r.ReadInt32(); err != nil {
+			return nil, err
+		}
+	}
 	return resp, nil
 }
 
@@ -183,6 +188,9 @@ func DecodeMetadataResponse(version int16, body []byte) (*MetadataResponse, erro
 // EncodeProduceRequest serializes the request body.
 func EncodeProduceRequest(req *ProduceRequest) ([]byte, error) {
 	w := NewWriter(128)
+	if req.Version >= 3 {
+		w.WriteNullableString(nil) // transactional_id
+	}
 	w.WriteInt16(req.Acks)
 	w.WriteInt32(req.Timeout)
 	w.WriteArrayLen(len(req.Topics))

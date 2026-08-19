@@ -1,8 +1,7 @@
-# go-kafka-neu Docker Compose stack: custom broker engine + Kadeck Web UI.
-# See docs/DEPLOYMENT_AND_OPS.md.
+version: "3.8"
 
 services:
-  # 1. Portainer (GUI Docker)
+  # 1. Portainer (GUI Management untuk Docker)
   portainer:
     image: portainer/portainer-ce:latest
     container_name: local-portainer
@@ -32,7 +31,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  # 3. Custom Go Kafka Engine (go-kafka-neu). Ultra-lightweight, zero deps.
+  # 3. All-in-One Custom Go Kafka Engine (go-kafka-neu)
+  #    Single Binary Container:
+  #    - Port 9092 & 29092: Kafka Wire Protocol (Menggantikan Redpanda/Kafka)
+  #    - Port 8080: Embedded Web UI Dashboard (Menggantikan Kadeck Web)
+  #    - Port 8081: Embedded Schema Registry (Menggantikan cp-schema-registry)
+  #    - Port 8082: HTTP REST Proxy
+  #    Konsumsi RAM: < 60MB (Ultra Lightweight)
   kafka-engine:
     build:
       context: .
@@ -45,12 +50,18 @@ services:
           memory: 128M
     restart: always
     ports:
-      - "9092:9092"
-      - "29092:29092"
+      - "9092:9092"   # Kafka API (host / luar container)
+      - "29092:29092" # Kafka API (internal docker network)
+      - "8080:8080"   # Embedded Web UI Dashboard (Buka di browser)
+      - "8081:8081"   # Embedded Schema Registry
+      - "8082:8082"   # HTTP REST Proxy Gateway
     environment:
       - KAFKA_BROKER_ID=0
       - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://local-kafka:29092,PLAINTEXT_HOST://localhost:9092
+      - KAFKA_ENABLE_WEB_UI=true
+      - KAFKA_ENABLE_SCHEMA_REGISTRY=true
+      - KAFKA_ENABLE_REST_PROXY=true
       - KAFKA_DATA_DIR=/var/lib/go-kafka/data
       - KAFKA_LOG_LEVEL=info
     volumes:
@@ -61,23 +72,7 @@ services:
       timeout: 3s
       retries: 5
 
-  # 4. Kadeck Web UI (GUI management for Kafka)
-  kadeck-web:
-    image: xeotek/kadeck:latest
-    container_name: local-kadeck-web
-    restart: always
-    ports:
-      - "8080:8080"
-    environment:
-      - xeotek_kadeck_free=jaffrhere23@gmail.com
-      - xeotek_kadeck_port=8080
-    volumes:
-      - kadeck_data:/root/.kadeck/
-    depends_on:
-      - kafka-engine
-
 volumes:
   portainer_data:
   postgres_data:
   kafka_data:
-  kadeck_data:

@@ -99,12 +99,9 @@ func (s *Server) handleConn(conn net.Conn) {
 			log.Printf("request error key=%d v=%d: %v", hdr.ApiKey, hdr.ApiVersion, err)
 			return
 		}
-		var frame []byte
-		if hdr.ApiKey == protocol.APKApiVersions && hdr.ApiVersion >= 3 {
-			frame = protocol.WriteResponseFrameFlexible(hdr.CorrelationID, respBody)
-		} else {
-			frame = protocol.WriteResponseFrame(hdr.CorrelationID, respBody)
-		}
+		// The ApiVersions response header is always classic (non-flexible) per
+		// KIP-482, even when the request version is >= 3 (flexible body).
+		frame := protocol.WriteResponseFrame(hdr.CorrelationID, respBody)
 		if _, err := conn.Write(frame); err != nil {
 			return
 		}

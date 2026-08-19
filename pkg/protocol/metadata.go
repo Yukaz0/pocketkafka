@@ -79,12 +79,13 @@ type MetadataTopic struct {
 
 // MetadataResponse (Key 3), encoded at v8.
 type MetadataResponse struct {
-	Version        int16
-	ThrottleTimeMs int32
-	Brokers        []MetadataBroker
-	ClusterID      *string
-	ControllerID   int32
-	Topics         []MetadataTopic
+	Version                     int16
+	ThrottleTimeMs              int32
+	Brokers                     []MetadataBroker
+	ClusterID                   *string
+	ControllerID                int32
+	Topics                      []MetadataTopic
+	ClusterAuthorizedOperations int32 // v8-v10, after the topics array
 }
 
 // EncodeMetadataResponse serializes the response body.
@@ -132,6 +133,9 @@ func EncodeMetadataResponse(resp *MetadataResponse) ([]byte, error) {
 		if resp.Version >= 8 {
 			w.WriteInt32(t.AuthorizedOperations)
 		}
+	}
+	if resp.Version >= 8 && resp.Version <= 10 {
+		w.WriteInt32(resp.ClusterAuthorizedOperations)
 	}
 	return w.Bytes(), nil
 }

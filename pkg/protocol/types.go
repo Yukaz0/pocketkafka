@@ -62,17 +62,17 @@ const (
 // key. All chosen maxima are at or below the "flexible" protocol threshold, so
 // the codecs only need to handle the classic (non-compact) wire format.
 var maxVersions = map[int16]int16{
-	APKProduce:         2,
+	APKProduce:         3, // v3 makes clients use RecordBatch v2 (magic 2)
 	APKFetch:           5,
 	APKListOffsets:     5,
 	APKMetadata:        8,
 	APKOffsetCommit:    7,
-	APKOffsetFetch:     6,
-	APKFindCoordinator: 3,
-	APKJoinGroup:       6,
+	APKOffsetFetch:     5, // v6+ is flexible
+	APKFindCoordinator: 2, // v3+ is flexible
+	APKJoinGroup:       5, // v6+ is flexible (cooperative-sticky needs v5)
 	APKHeartbeat:       3,
 	APKLeaveGroup:      3,
-	APKSyncGroup:       4,
+	APKSyncGroup:       3, // v4+ is flexible
 	APKApiVersions:     2,
 	APKCreateTopics:    4,
 	APKDeleteTopics:    3,

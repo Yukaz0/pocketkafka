@@ -108,9 +108,12 @@ func (h *Handler) handleApiVersions(version int16, body []byte) ([]byte, error) 
 		ErrorCode: protocol.ErrNone,
 	}
 	if version > protocol.MaxVersion(protocol.APKApiVersions) {
-		// Respond in the requested (flexible) format with UNSUPPORTED_VERSION so
-		// the client downgrades to our advertised max (2).
+		// Per KIP-511 a broker that does not support the requested ApiVersions
+		// version replies with UNSUPPORTED_VERSION and the supported keys
+		// encoded in the non-flexible version 0 format, so the client can
+		// downgrade.
 		resp.ErrorCode = protocol.ErrUnsupportedVersion
+		resp.Version = 0
 	}
 	return protocol.EncodeApiVersionsResponse(resp)
 }
@@ -121,8 +124,9 @@ func (h *Handler) handleMetadata(version int16, body []byte) ([]byte, error) {
 		return nil, err
 	}
 	resp := &protocol.MetadataResponse{
-		Version:        version,
-		ThrottleTimeMs: 0,
+		Version:                     version,
+		ThrottleTimeMs:              0,
+		ClusterAuthorizedOperations: -2147483648,
 		Brokers: []protocol.MetadataBroker{{
 			NodeID: h.nodeID,
 			Host:   h.advertisedHost,
@@ -145,7 +149,9 @@ func (h *Handler) handleMetadata(version int16, body []byte) ([]byte, error) {
 		mt := protocol.MetadataTopic{Name: name, IsInternal: false}
 		t := h.store.GetTopic(name)
 		if t == nil {
-			if req.AllowAutoTopicCreation && h.cfg.Topics.AutoCreate {
+			// Auto-create a referenced topic when auto creation is enabled,
+			// regardless of the request flag, for robust client interop.
+			if h.cfg.Topics.AutoCreate {
 				h.store.EnsureTopic(name, h.cfg.Topics.DefaultPartitions)
 				t = h.store.GetTopic(name)
 			}
