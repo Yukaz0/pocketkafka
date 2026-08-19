@@ -83,6 +83,11 @@ type Gateway struct {
 	Listen string `yaml:"listen"`
 }
 
+// MQTT configures the MQTT bridge.
+type MQTT struct {
+	Listen string `yaml:"listen"`
+}
+
 // Config is the root configuration document.
 type Config struct {
 	Broker              Broker            `yaml:"broker"`
@@ -96,6 +101,7 @@ type Config struct {
 	Web                 Web               `yaml:"web"`
 	SchemaRegistry      SchemaRegistry    `yaml:"schema_registry"`
 	Gateway             Gateway           `yaml:"gateway"`
+	MQTT                MQTT              `yaml:"mqtt"`
 }
 
 // Default returns a Config populated with the documented default values.
@@ -138,6 +144,7 @@ func Default() Config {
 		Web:            Web{Listen: "0.0.0.0:8080"},
 		SchemaRegistry: SchemaRegistry{Listen: "0.0.0.0:8081"},
 		Gateway:        Gateway{Listen: "0.0.0.0:8082"},
+		MQTT:           MQTT{Listen: "0.0.0.0:1883"},
 	}
 }
 

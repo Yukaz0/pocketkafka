@@ -53,3 +53,6 @@ schema_registry:
 
 gateway:
   listen: "0.0.0.0:8082"  # HTTP REST Proxy
+
+mqtt:
+  listen: "0.0.0.0:1883"  # MQTT Bridge (IoT)

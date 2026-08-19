@@ -92,6 +92,13 @@ func main() {
 		}
 	}()
 
+	// MQTT Bridge (port 1883) bridging IoT topics to Kafka.
+	mqttBridge := gateway.NewMQTTBridge(store)
+	if err := mqttBridge.Start(cfg.MQTT.Listen); err != nil {
+		log.Printf("mqtt bridge error: %v", err)
+	}
+	defer mqttBridge.Close()
+
 	// Background retention cleanup.
 	retention := storage.Retention{
 		CheckInterval:  time.Duration(cfg.Storage.Retention.CheckIntervalMs) * time.Millisecond,

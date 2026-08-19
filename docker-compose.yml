@@ -55,6 +55,7 @@ services:
       - "8080:8080"   # Embedded Web UI Dashboard (Buka di browser)
       - "8081:8081"   # Embedded Schema Registry
       - "8082:8082"   # HTTP REST Proxy Gateway
+      - "1883:1883"   # MQTT Bridge (IoT)
     environment:
       - KAFKA_BROKER_ID=0
       - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092

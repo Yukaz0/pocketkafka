@@ -210,4 +210,7 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 	if gw := asMap(m, "gateway"); gw != nil {
 		cfg.Gateway.Listen = getString(gw, "listen", cfg.Gateway.Listen)
 	}
+	if mq := asMap(m, "mqtt"); mq != nil {
+		cfg.MQTT.Listen = getString(mq, "listen", cfg.MQTT.Listen)
+	}
 }
