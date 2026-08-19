@@ -44,3 +44,6 @@ network:
 logging:
   level: "info"
   format: "json"
+
+web:
+  listen: "0.0.0.0:8080"  # Embedded dashboard (REST + WebSocket live tail)

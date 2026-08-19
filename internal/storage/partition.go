@@ -210,6 +210,13 @@ func (p *Partition) EarliestOffset() int64 {
 	return p.earliestOffsetLocked()
 }
 
+// SizeBytes returns the total on-disk size of the partition in bytes.
+func (p *Partition) SizeBytes() int64 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.totalSizeLocked()
+}
+
 // Close closes all segment file descriptors.
 func (p *Partition) Close() error {
 	p.mu.Lock()

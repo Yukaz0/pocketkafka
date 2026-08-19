@@ -25,8 +25,8 @@ RUN apk add --no-cache ca-certificates tzdata netcat-openbsd
 COPY --from=builder /app/bin/go-kafka-neu /usr/local/bin/go-kafka-neu
 COPY config/config.yaml /etc/go-kafka/config.yaml
 
-# Kafka TCP Plaintext & Internal listeners + metrics placeholder
-EXPOSE 9092 29092
+# Kafka TCP Plaintext & Internal listeners + Embedded Web UI (8080)
+EXPOSE 9092 29092 8080
 
 VOLUME ["/var/lib/go-kafka/data"]
 

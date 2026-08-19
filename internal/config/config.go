@@ -68,6 +68,11 @@ type Logging struct {
 	Format string `yaml:"format"`
 }
 
+// Web configures the embedded dashboard server.
+type Web struct {
+	Listen string `yaml:"listen"`
+}
+
 // Config is the root configuration document.
 type Config struct {
 	Broker              Broker            `yaml:"broker"`
@@ -78,6 +83,7 @@ type Config struct {
 	Coordinator         Coordinator       `yaml:"coordinator"`
 	Network             Network           `yaml:"network"`
 	Logging             Logging           `yaml:"logging"`
+	Web                 Web               `yaml:"web"`
 }
 
 // Default returns a Config populated with the documented default values.
@@ -117,6 +123,7 @@ func Default() Config {
 			MaxRequestSizeBytes: 104857600,
 		},
 		Logging: Logging{Level: "info", Format: "json"},
+		Web:     Web{Listen: "0.0.0.0:8080"},
 	}
 }
 

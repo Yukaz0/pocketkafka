@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/neu/go-kafka-neu/internal/handler"
 	"github.com/neu/go-kafka-neu/internal/server"
 	"github.com/neu/go-kafka-neu/internal/storage"
+	"github.com/neu/go-kafka-neu/internal/web"
 )
 
 var version = "dev"
@@ -56,6 +58,18 @@ func main() {
 	if err := srv.Start(); err != nil {
 		log.Fatalf("start server: %v", err)
 	}
+
+	// Embedded Web UI dashboard (port 8080).
+	webSrv := &http.Server{
+		Addr:    cfg.Web.Listen,
+		Handler: web.New(store, gm, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).Handler(),
+	}
+	go func() {
+		log.Printf("go-kafka-neu web UI on http://%s", cfg.Web.Listen)
+		if err := webSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("web server error: %v", err)
+		}
+	}()
 
 	// Background retention cleanup.
 	retention := storage.Retention{

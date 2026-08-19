@@ -115,6 +115,26 @@ func (s *OffsetStore) Partitions(group, topic string) []int32 {
 	return out
 }
 
+// GroupOffsets returns all committed offsets for a group as topic -> partition
+// -> offset.
+func (s *OffsetStore) GroupOffsets(group string) map[string]map[int32]int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	gt, ok := s.offsets[group]
+	if !ok {
+		return nil
+	}
+	out := make(map[string]map[int32]int64, len(gt))
+	for topic, tp := range gt {
+		parts := make(map[int32]int64, len(tp))
+		for p, off := range tp {
+			parts[p] = off.Offset
+		}
+		out[topic] = parts
+	}
+	return out
+}
+
 func (s *OffsetStore) load() error {
 	f, err := os.Open(s.path)
 	if err != nil {

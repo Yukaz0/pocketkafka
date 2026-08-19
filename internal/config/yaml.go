@@ -201,4 +201,7 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 		cfg.Logging.Level = getString(lg, "level", cfg.Logging.Level)
 		cfg.Logging.Format = getString(lg, "format", cfg.Logging.Format)
 	}
+	if w := asMap(m, "web"); w != nil {
+		cfg.Web.Listen = getString(w, "listen", cfg.Web.Listen)
+	}
 }

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-kafka-neu</title>
+<style>
+  :root{ --bg:#0f172a; --panel:#1e293b; --panel2:#172033; --line:#334155; --text:#e2e8f0; --muted:#94a3b8;
+         --accent:#06b6d4; --accent2:#3b82f6; --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;min-height:100vh}
+  /* Sidebar */
+  .sidebar{width:220px;background:#0b1220;border-right:1px solid var(--line);padding:20px 0;flex-shrink:0;position:sticky;top:0;height:100vh}
+  .brand{padding:0 20px 20px;font-size:18px;font-weight:700;letter-spacing:.3px}
+  .brand .dot{color:var(--green)}
+  .nav{padding:0 10px}
+  .nav a{display:block;padding:10px 14px;margin:2px 0;border-radius:8px;color:var(--muted);cursor:pointer;text-decoration:none;font-size:14px}
+  .nav a:hover{background:var(--panel);color:var(--text)}
+  .nav a.active{background:var(--panel);color:var(--accent)}
+  .main{flex:1;padding:24px 32px;overflow:auto}
+  h1{font-size:22px;margin-bottom:4px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .stat .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+  .stat .v{font-size:22px;font-weight:700;margin-top:4px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.5px}
+  tr:hover td{background:var(--panel2)}
+  .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+  .b-green{background:rgba(34,197,94,.15);color:var(--green)}
+  .b-amber{background:rgba(245,158,11,.15);color:var(--amber)}
+  .b-red{background:rgba(239,68,68,.15);color:var(--red)}
+  .b-blue{background:rgba(59,130,246,.15);color:var(--accent2)}
+  pre{font-family:var(--mono);font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+  .mono{font-family:var(--mono)}
+  button{background:var(--accent);border:none;color:#062a2e;font-weight:600;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px}
+  button:hover{filter:brightness(1.1)}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+  input,select,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;width:100%}
+  label{display:block;color:var(--muted);font-size:12px;margin:10px 0 4px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .viewtabs span{cursor:pointer;padding:4px 10px;border-radius:6px;color:var(--muted);font-size:12px;border:1px solid transparent}
+  .viewtabs span.active{background:var(--panel2);color:var(--accent);border-color:var(--line)}
+  .hidden{display:none}
+  .pill{font-family:var(--mono);font-size:11px;background:var(--panel2);border:1px solid var(--line);padding:2px 6px;border-radius:5px}
+  .kvs{display:flex;gap:10px}
+  .kvs input{flex:1}
+  .msgrow{display:grid;grid-template-columns:140px 70px 70px 1fr auto;gap:8px;align-items:start;padding:8px;border-bottom:1px solid var(--line)}
+  .msgrow .val{font-family:var(--mono);font-size:12px;cursor:pointer;word-break:break-word}
+  .msgrow .val:hover{color:var(--accent)}
+  .live{display:inline-flex;align-items:center;gap:6px}
+  .live .livedot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+  .live.on .livedot{background:var(--green);box-shadow:0 0 8px var(--green)}
+</style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand">go-kafka<span class="dot">-neu</span></div>
+  <nav class="nav">
+    <a data-view="overview" class="active">Overview</a>
+    <a data-view="topics">Topics</a>
+    <a data-view="consumers">Consumers</a>
+    <a data-view="producer">Producer Simulator</a>
+  </nav>
+</aside>
+<main class="main" id="main"></main>
+
+<script>
+const $ = (s, el=document)=>el.querySelector(s);
+const state = { view:'overview', topics:[], groups:[], cluster:null, selectedTopic:null, tailSocket:null, tailOn:false, viewMode:'json' };
+
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+
+async function refreshCluster(){
+  state.cluster = await api('/api/v1/cluster');
+}
+async function refreshTopics(){
+  state.topics = await api('/api/v1/topics');
+}
+async function refreshGroups(){
+  state.groups = await api('/api/v1/groups');
+}
+
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtBytes(n){ if(n<1024) return n+' B'; if(n<1048576) return (n/1024).toFixed(1)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
+function statusBadge(s){ s=s.toLowerCase();
+  if(s==='stable'||s==='green') return '<span class="badge b-green">Healthy</span>';
+  if(s.includes('rebalanc')||s==='amber') return '<span class="badge b-amber">Rebalancing</span>';
+  return '<span class="badge b-red">'+esc(s)+'</span>';
+}
+
+async function render(){
+  try { await Promise.all([refreshCluster(), refreshTopics(), refreshGroups()]); } catch(e){ console.error(e); }
+  const main = $('#main');
+  const html = {
+    overview: overviewHTML(),
+    topics: topicsHTML(),
+    consumers: consumersHTML(),
+    producer: producerHTML(),
+  }[state.view];
+  main.innerHTML = html;
+  bindView();
+  if(state.view==='topics') bindTopics();
+  if(state.view==='producer') bindProducer();
+}
+
+function overviewHTML(){
+  const c = state.cluster||{};
+  const rows = state.topics.map(t=>`<tr><td class="mono">${esc(t.name)}</td><td>${t.partitions.length}</td><td class="mono">${fmtBytes(t.totalBytes)}</td></tr>`).join('');
+  return `
+    <h1>Cluster Overview</h1>
+    <div class="sub">${esc(c.clusterId||'')} &middot; broker ${c.brokerId} &middot; ${statusBadge(c.status||'green')}</div>
+    <div class="grid">
+      <div class="stat"><div class="k">Topics</div><div class="v">${c.topics??0}</div></div>
+      <div class="stat"><div class="k">Partitions</div><div class="v">${c.partitions??0}</div></div>
+      <div class="stat"><div class="k">Total Data</div><div class="v">${fmtBytes(c.totalBytes||0)}</div></div>
+      <div class="stat"><div class="k">Consumer Groups</div><div class="v">${c.groups??0}</div></div>
+    </div>
+    <div class="card"><h3 style="margin-bottom:10px">Topics</h3><table>
+      <thead><tr><th>Name</th><th>Partitions</th><th>Size</th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="3" style="color:var(--muted)">No topics yet. Use the Producer Simulator to create one.</td></tr>'}</tbody>
+    </table></div>`;
+}
+
+function topicsHTML(){
+  const opts = state.topics.map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
+  return `
+    <div class="row" style="justify-content:space-between">
+      <h1>Topics & Data Explorer</h1>
+      <div class="row">
+        <select id="topicSel" style="width:220px"><option value="">Select topic</option>${opts}</select>
+        <button id="loadMsgs" class="ghost">Load Messages</button>
+        <button id="newTopic" class="ghost">+ New Topic</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+        <div class="viewtabs">
+          <span data-viewmode="json" class="active">JSON</span>
+          <span data-viewmode="plain">Plaintext</span>
+          <span data-viewmode="hex">Hex</span>
+        </div>
+        <span id="liveToggle" class="live"><span class="livedot"></span> Live Tail</span>
+      </div>
+      <div id="msgList" style="max-height:60vh;overflow:auto"><p style="color:var(--muted)">Select a topic and load messages.</p></div>
+      <div id="msgDetail" class="hidden"><h3 style="margin:12px 0 6px">Payload Inspector</h3><pre id="detailPre"></pre></div>
+    </div>`;
+}
+
+function consumersHTML(){
+  if(!state.groups.length) return `<h1>Consumers</h1><div class="card"><p style="color:var(--muted)">No consumer groups yet.</p></div>`;
+  const cards = state.groups.map(g=>`
+    <div class="card"><h3 style="margin-bottom:6px">${esc(g.name)} ${statusBadge(g.state)} <span class="pill">gen ${g.generation}</span></h3>
+      <div class="sub">Leader: <span class="mono">${esc(g.leader)}</span> &middot; Members: ${g.members.map(esc).join(', ')||'none'}</div>
+      <table><thead><tr><th>Topic-Partition</th><th>Lag</th></tr></thead><tbody>
+        ${Object.entries(g.lag).map(([k,l])=>`<tr><td class="mono">${esc(k)}</td><td><span class="badge ${l>0?'b-amber':'b-green'}">${l}</span></td></tr>`).join('')||'<tr><td colspan="2" style="color:var(--muted)">No committed offsets</td></tr>'}
+      </tbody></table></div>`).join('');
+  return `<h1>Consumer Groups</h1>${cards}`;
+}
+
+function producerHTML(){
+  return `
+    <h1>Producer Simulator</h1>
+    <div class="card" style="max-width:640px">
+      <label>Topic</label>
+      <input id="pTopic" list="topicList" placeholder="my-topic (auto-created if missing)">
+      <datalist id="topicList">${state.topics.map(t=>`<option value="${esc(t.name)}">`).join('')}</datalist>
+      <label>Key</label><input id="pKey" placeholder="optional key">
+      <label>Payload (JSON or text)</label><textarea id="pValue" rows="5">{"event":"hello","ts":1700000000}</textarea>
+      <label>Custom Headers (key=value, one per line)</label><textarea id="pHeaders" rows="2" placeholder="source=web"></textarea>
+      <div style="margin-top:14px"><button id="pSend">Send Message</button> <span id="pResult"></span></div>
+    </div>`;
+}
+
+function bindView(){
+  document.querySelectorAll('.nav a').forEach(a=>a.addEventListener('click', ()=>{ state.view=a.dataset.view; document.querySelectorAll('.nav a').forEach(x=>x.classList.remove('active')); a.classList.add('active'); render(); }));
+}
+
+function bindTopics(){
+  const sel=$('#topicSel'), load=$('#loadMsgs'), nl=$('#newTopic');
+  const viewtabs=document.querySelectorAll('[data-viewmode]');
+  viewtabs.forEach(t=>t.addEventListener('click',()=>{ viewtabs.forEach(x=>x.classList.remove('active')); t.classList.add('active'); state.viewMode=t.dataset.viewmode; renderSelected(); }));
+  load.addEventListener('click', ()=>{ if(sel.value) loadMessages(sel.value, 0, 100); });
+  nl.addEventListener('click', async ()=>{ const name=prompt('New topic name:'); if(!name) return; try{ await api('/api/v1/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,partitions:1})}); await refreshTopics(); render(); }catch(e){ alert(e.message);} });
+  $('#liveToggle').addEventListener('click', ()=>{ toggleTail(sel.value); });
+  if(sel.value) loadMessages(sel.value, 0, 100);
+}
+
+async function loadMessages(topic, offset, limit){
+  state.selectedTopic=topic;
+  const recs = await api(`/api/v1/topics/${encodeURIComponent(topic)}/messages?offset=${offset}&limit=${limit}`);
+  renderRecords(recs);
+}
+
+function renderSelected(){
+  const rows=[...document.querySelectorAll('.msgrow')];
+  rows.forEach(r=>{
+    const rec = JSON.parse(r.dataset.rec);
+    const valEl=$('.val', r);
+    valEl.textContent = formatValue(rec);
+    if(rec.isJSON && state.viewMode==='json') valEl.textContent = JSON.stringify(JSON.parse(rec.value||'null'),null,2);
+  });
+}
+
+function formatValue(rec){
+  if(state.viewMode==='json' && rec.isJSON){ try{ return JSON.stringify(JSON.parse(rec.value),null,2); }catch(e){} }
+  if(state.viewMode==='hex') return hex(rec.valueB64);
+  return rec.value;
+}
+
+function hex(b64){
+  const bin=atob(b64||''); let s='';
+  for(let i=0;i<bin.length;i++) s+=bin.charCodeAt(i).toString(16).padStart(2,'0')+' ';
+  return s.trim();
+}
+
+function renderRecords(recs){
+  const el=$('#msgList'); el.innerHTML='';
+  if(!recs.length){ el.innerHTML='<p style="color:var(--muted)">No messages.</p>'; return; }
+  recs.slice().reverse().forEach(r=>{
+    const row=document.createElement('div'); row.className='msgrow';
+    row.dataset.rec=JSON.stringify(r);
+    row.innerHTML=`<span class="pill">${new Date(r.timestamp).toISOString()}</span>
+      <span class="mono">p${r.partition}</span><span class="mono">${r.offset}</span>
+      <div class="val">${esc(formatValue(r))}</div>
+      <span class="badge ${r.isJSON?'b-green':'b-blue'}">${r.valueSize} B</span>`;
+    row.querySelector('.val').addEventListener('click',()=>{ showDetail(r); });
+    el.prepend(row);
+  });
+}
+
+function showDetail(r){
+  $('#msgDetail').classList.remove('hidden');
+  const d={
+    topic:r.topic, partition:r.partition, offset:r.offset, timestamp:new Date(r.timestamp).toISOString(),
+    key:r.key||'', headers:r.headers, valueSize:r.valueSize,
+  };
+  $('#detailPre').textContent = 'METADATA\n'+JSON.stringify(d,null,2)+'\n\nPAYLOAD\n'+formatValue(r);
+}
+
+function toggleTail(topic){
+  const t=$('#liveToggle'); state.tailOn=!state.tailOn; t.classList.toggle('on',state.tailOn);
+  if(state.tailSocket){ state.tailSocket.close(); state.tailSocket=null; }
+  if(!state.tailOn) return;
+  const proto = location.protocol==='https:'?'wss':'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/api/v1/topics/${encodeURIComponent(topic)}/tail`);
+  state.tailSocket=ws;
+  ws.onmessage=(ev)=>{
+    const recs=JSON.parse(ev.data);
+    if(!recs.length) return;
+    const el=$('#msgList');
+    recs.slice().reverse().forEach(r=>{
+      const row=document.createElement('div'); row.className='msgrow'; row.dataset.rec=JSON.stringify(r);
+      row.innerHTML=`<span class="pill">${new Date(r.timestamp).toISOString()}</span><span class="mono">p${r.partition}</span><span class="mono">${r.offset}</span><div class="val">${esc(formatValue(r))}</div><span class="badge ${r.isJSON?'b-green':'b-blue'}">${r.valueSize} B</span>`;
+      row.querySelector('.val').addEventListener('click',()=>showDetail(r));
+      el.prepend(row);
+    });
+  };
+}
+
+function bindProducer(){
+  $('#pSend').addEventListener('click', async ()=>{
+    const body={ key:$('#pKey').value, value:$('#pValue').value };
+    const headers={};
+    $('#pHeaders').value.split('\n').forEach(l=>{ const i=l.indexOf('='); if(i>0) headers[l.slice(0,i).trim()]=l.slice(i+1).trim(); });
+    if(Object.keys(headers).length) body.headers=headers;
+    try{
+      const r=await api('/api/v1/topics/'+encodeURIComponent($('#pTopic').value||'demo')+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      $('#pResult').textContent=`Published to offset ${r.offset} ✓`;
+      await refreshTopics();
+    }catch(e){ $('#pResult').textContent='Error: '+e.message; }
+  });
+}
+
+render();
+</script>
+</body>
+</html>

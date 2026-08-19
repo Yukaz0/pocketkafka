@@ -107,6 +107,45 @@ func (gm *GroupManager) nextMemberID() string {
 	return fmt.Sprintf("go-kafka-neu-%d", seq)
 }
 
+// GroupInfo is a read-only snapshot of a consumer group for the web UI.
+type GroupInfo struct {
+	Name       string
+	State      string
+	Generation int32
+	LeaderID   string
+	Members    []string
+	Offsets    map[string]map[int32]int64 // topic -> partition -> committed offset
+}
+
+// ListGroups returns a snapshot of all consumer groups.
+func (gm *GroupManager) ListGroups() []GroupInfo {
+	gm.mu.RLock()
+	names := make([]string, 0, len(gm.groups))
+	for n := range gm.groups {
+		names = append(names, n)
+	}
+	gm.mu.RUnlock()
+
+	out := make([]GroupInfo, 0, len(names))
+	for _, name := range names {
+		g := gm.getOrCreate(name)
+		g.mu.Lock()
+		info := GroupInfo{
+			Name:       name,
+			State:      g.State.String(),
+			Generation: g.Generation,
+			LeaderID:   g.LeaderID,
+			Offsets:    gm.offsets.GroupOffsets(name),
+		}
+		for _, id := range g.JoinOrder {
+			info.Members = append(info.Members, id)
+		}
+		g.mu.Unlock()
+		out = append(out, info)
+	}
+	return out
+}
+
 // FindCoordinator returns this broker's identity as the coordinator.
 func (gm *GroupManager) FindCoordinator(req *protocol.FindCoordinatorRequest) *protocol.FindCoordinatorResponse {
 	return &protocol.FindCoordinatorResponse{
