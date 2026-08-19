@@ -98,6 +98,15 @@ type SecurityUser struct {
 type Security struct {
 	Enabled bool           `yaml:"enabled"`
 	Users   []SecurityUser `yaml:"users"`
+	TLS     TLS            `yaml:"tls"`
+}
+
+// TLS configures an optional TLS (SSL) listener.
+type TLS struct {
+	Enabled  bool   `yaml:"enabled"`
+	Listen   string `yaml:"listen"`
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
 }
 
 // Config is the root configuration document.
@@ -158,6 +167,7 @@ func Default() Config {
 		SchemaRegistry: SchemaRegistry{Listen: "0.0.0.0:8081"},
 		Gateway:        Gateway{Listen: "0.0.0.0:8082"},
 		MQTT:           MQTT{Listen: "0.0.0.0:1883"},
+		Security:       Security{TLS: TLS{Listen: "0.0.0.0:9093"}},
 	}
 }
 

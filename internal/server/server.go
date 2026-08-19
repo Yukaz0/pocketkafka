@@ -4,6 +4,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -22,6 +23,7 @@ type Server struct {
 	handler    *handler.Handler
 	maxReqSize int64
 	listeners  []net.Listener
+	tlsConf    *tls.Config
 	wg         sync.WaitGroup
 	closeCh    chan struct{}
 }
@@ -52,6 +54,24 @@ func (s *Server) Start() error {
 		s.listeners = append(s.listeners, ln)
 		log.Printf("go-kafka-neu listening on %s", addr)
 	}
+
+	// Optional TLS (SSL) listener.
+	if s.cfg.Security.TLS.Enabled {
+		cert, err := tls.LoadX509KeyPair(s.cfg.Security.TLS.CertFile, s.cfg.Security.TLS.KeyFile)
+		if err != nil {
+			s.Close()
+			return fmt.Errorf("load TLS cert: %w", err)
+		}
+		s.tlsConf = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+		ln, err := net.Listen("tcp", s.cfg.Security.TLS.Listen)
+		if err != nil {
+			s.Close()
+			return fmt.Errorf("listen TLS on %s: %w", s.cfg.Security.TLS.Listen, err)
+		}
+		s.listeners = append(s.listeners, ln)
+		log.Printf("go-kafka-neu TLS listening on %s", s.cfg.Security.TLS.Listen)
+	}
+
 	for _, ln := range s.listeners {
 		s.wg.Add(1)
 		go s.acceptLoop(ln)
@@ -74,6 +94,9 @@ func (s *Server) acceptLoop(ln net.Listener) {
 				continue
 			}
 			return
+		}
+		if s.tlsConf != nil {
+			conn = tls.Server(conn, s.tlsConf)
 		}
 		s.wg.Add(1)
 		go s.handleConn(conn)

@@ -269,5 +269,11 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 				}
 			}
 		}
+		if t := asMap(sec, "tls"); t != nil {
+			cfg.Security.TLS.Enabled = getBool(t, "enabled", cfg.Security.TLS.Enabled)
+			cfg.Security.TLS.Listen = getString(t, "listen", cfg.Security.TLS.Listen)
+			cfg.Security.TLS.CertFile = getString(t, "cert_file", cfg.Security.TLS.CertFile)
+			cfg.Security.TLS.KeyFile = getString(t, "key_file", cfg.Security.TLS.KeyFile)
+		}
 	}
 }
