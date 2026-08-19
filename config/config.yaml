@@ -1,0 +1,46 @@
+# go-kafka-neu broker configuration.
+# See docs/CONFIG_SPEC.md for the full parameter reference and env overrides.
+
+broker:
+  id: 0
+  cluster_id: "go-kafka-neu-local"
+  rack: ""
+
+listeners:
+  plain: "0.0.0.0:9092"
+  internal: "0.0.0.0:29092"
+
+advertised_listeners:
+  plain: "localhost:9092"
+  internal: "local-kafka:29092"
+
+storage:
+  data_dir: "./data"
+  segment_max_bytes: 104857600 # 100MB (default), 10MB for dev
+  index_interval_bytes: 4096   # 4KB sparse index interval
+  retention:
+    check_interval_ms: 300000  # 5 minutes
+    retention_hours: 168       # 7 days
+    retention_bytes: -1        # -1 = unlimited
+
+topics:
+  auto_create: true
+  default_partitions: 1
+  default_replication_factor: 1
+
+coordinator:
+  session_timeout_ms: 45000     # 45s
+  rebalance_timeout_ms: 60000   # 60s
+  heartbeat_interval_ms: 3000   # 3s
+  offsets_retention_minutes: 10080 # 7 days
+  storage_backend: "inmemory"   # inmemory | file
+
+network:
+  max_connections: 10000
+  read_buffer_bytes: 65536
+  write_buffer_bytes: 65536
+  max_request_size_bytes: 104857600 # 100MB
+
+logging:
+  level: "info"
+  format: "json"

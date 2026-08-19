@@ -1,0 +1,83 @@
+# go-kafka-neu Docker Compose stack: custom broker engine + Kadeck Web UI.
+# See docs/DEPLOYMENT_AND_OPS.md.
+
+services:
+  # 1. Portainer (GUI Docker)
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: local-portainer
+    restart: always
+    ports:
+      - "9443:9443"
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+  # 2. PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: local-postgres
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: always
+    environment:
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: devdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 3. Custom Go Kafka Engine (go-kafka-neu). Ultra-lightweight, zero deps.
+  kafka-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: go-kafka-neu:latest
+    container_name: local-kafka
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    restart: always
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      - KAFKA_BROKER_ID=0
+      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://local-kafka:29092,PLAINTEXT_HOST://localhost:9092
+      - KAFKA_DATA_DIR=/var/lib/go-kafka/data
+      - KAFKA_LOG_LEVEL=info
+    volumes:
+      - kafka_data:/var/lib/go-kafka/data
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "9092"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # 4. Kadeck Web UI (GUI management for Kafka)
+  kadeck-web:
+    image: xeotek/kadeck:latest
+    container_name: local-kadeck-web
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - xeotek_kadeck_free=jaffrhere23@gmail.com
+      - xeotek_kadeck_port=8080
+    volumes:
+      - kadeck_data:/root/.kadeck/
+    depends_on:
+      - kafka-engine
+
+volumes:
+  portainer_data:
+  postgres_data:
+  kafka_data:
+  kadeck_data:

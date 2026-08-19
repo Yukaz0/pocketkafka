@@ -1,0 +1,97 @@
+// Command server runs the go-kafka-neu broker engine.
+package main
+
+import (
+	"flag"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/neu/go-kafka-neu/internal/config"
+	"github.com/neu/go-kafka-neu/internal/coordinator"
+	"github.com/neu/go-kafka-neu/internal/handler"
+	"github.com/neu/go-kafka-neu/internal/server"
+	"github.com/neu/go-kafka-neu/internal/storage"
+)
+
+var version = "dev"
+
+func main() {
+	cfgPath := flag.String("config", "config/config.yaml", "path to YAML config file")
+	flag.Parse()
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+
+	log.Printf("go-kafka-neu v%s starting (cluster=%s data_dir=%s)",
+		version, cfg.Broker.ClusterID, cfg.Storage.DataDir)
+
+	// Storage engine.
+	store, err := storage.NewStore(cfg.Storage.DataDir, cfg.Storage.SegmentMaxBytes, cfg.Storage.IndexIntervalBytes)
+	if err != nil {
+		log.Fatalf("init storage: %v", err)
+	}
+	defer store.Close()
+
+	// Offsets + group coordinator.
+	offsetDir := cfg.Storage.DataDir + "/__coordinator"
+	offsetStore, err := coordinator.NewOffsetStore(cfg.Coordinator.StorageBackend, offsetDir)
+	if err != nil {
+		log.Fatalf("init offset store: %v", err)
+	}
+	advHost, advPort := advertised(cfg)
+	gm := coordinator.NewGroupManager(offsetStore, int32(cfg.Broker.ID), advHost, advPort, int32(cfg.Coordinator.SessionTimeoutMs))
+
+	// Handlers + server.
+	h := handler.New(store, gm, &cfg, int32(cfg.Broker.ID), advHost, advPort)
+	srv := server.New(&cfg, h)
+
+	if err := srv.Start(); err != nil {
+		log.Fatalf("start server: %v", err)
+	}
+
+	// Background retention cleanup.
+	retention := storage.Retention{
+		CheckInterval:  time.Duration(cfg.Storage.Retention.CheckIntervalMs) * time.Millisecond,
+		RetentionTime:  time.Duration(cfg.Storage.Retention.RetentionHours) * time.Hour,
+		RetentionBytes: cfg.Storage.Retention.RetentionBytes,
+	}
+	stopRetention := store.StartRetention(retention)
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
+	log.Printf("shutting down")
+	stopRetention()
+	srv.Close()
+}
+
+// advertised extracts the host and port of the primary advertised listener.
+func advertised(cfg config.Config) (string, int32) {
+	addr := cfg.AdvertisedListeners["plain"]
+	if addr == "" {
+		for _, v := range cfg.AdvertisedListeners {
+			addr = v
+			break
+		}
+	}
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "localhost", 9092
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "localhost"
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(portStr))
+	if err != nil {
+		port = 9092
+	}
+	return host, int32(port)
+}
