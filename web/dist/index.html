@@ -140,6 +140,43 @@
   /* partition bars */
   .pbar{height:6px;border-radius:4px;background:var(--surface3);overflow:hidden;margin-top:4px}
   .pbar>span{display:block;height:100%;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:4px}
+
+  /* ---- Fitur 3.2: filter builder ---- */
+  .filterPanel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px}
+  .filterRow{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+  .filterRow select,.filterRow input{width:auto;flex:0 1 auto}
+  .filterRow .fField{width:200px}
+  .filterRow .fOp{width:120px}
+  .filterRow .fVal{width:180px}
+  .frmBtn{background:transparent;border:none;color:var(--danger);cursor:pointer;font-size:15px;line-height:1}
+  .autocomplete{position:relative}
+  .acList{position:absolute;top:100%;left:0;right:0;background:var(--surface3);border:1px solid var(--border);border-radius:8px;max-height:180px;overflow:auto;z-index:60;box-shadow:var(--shadow)}
+  .acList div{padding:7px 11px;cursor:pointer;font-family:var(--font-mono);font-size:11px}
+  .acList div:hover,.acList div.act{background:var(--primary-soft);color:var(--primary-text)}
+  .presetChip{display:inline-flex;align-items:center;gap:4px;background:var(--primary-soft);color:var(--primary-text);border-radius:6px;padding:2px 9px;font-size:11px;margin:2px 4px 2px 0;cursor:pointer}
+  .presetChip button{background:none;border:none;color:inherit;cursor:pointer;font-size:11px;padding:0 2px}
+
+  /* ---- Fitur 3.3: column projection ---- */
+  .projBar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .projTag{display:inline-flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:11px;font-family:var(--font-mono)}
+  .projTag button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px}
+  .projTag button:hover{color:var(--danger)}
+
+  /* ---- Fitur 3.4: message diff ---- */
+  .diffPanel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:16px}
+  .diffWrap{display:flex;gap:14px}
+  .diffCol{flex:1;min-width:0}
+  .diffCol h4{font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;margin-bottom:8px}
+  .diffCol pre{max-height:360px;overflow:auto}
+  .d-rem{background:rgba(239,68,68,.15);color:#fca5a5}
+  .d-add{background:rgba(16,185,129,.15);color:#6ee7b7}
+  .d-ctx{color:var(--muted)}
+
+  /* ---- Fitur 3.5: replay / DLQ ---- */
+  .overlay{position:fixed;inset:0;background:rgba(8,12,20,.6);backdrop-filter:blur(4px);z-index:70;display:flex;align-items:center;justify-content:center}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;width:min(620px,94vw);box-shadow:var(--shadow)}
+  .modal h3{font-size:15px;margin-bottom:14px}
+  .chkCell{width:32px;text-align:center}
 </style>
 </head>
 <body>
@@ -169,7 +206,14 @@ const I={server:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" str
   moon:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>',
   gear:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'};
 
-const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null};
+const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,
+  /* Fitur 3.2 filter builder */
+  filters:[], fieldHint:[], filterPanel:false,
+  /* Fitur 3.3 column projection */
+  projCols:(JSON.parse(localStorage.getItem('pk_proj')||'[]')),
+  /* Fitur 3.4 message diff */
+  diffSel:[], diffOpen:false,
+};
 const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.users],['schemas','Schemas',I.code],['producer','Producer Studio',I.send]];
 
 /* ---- Fitur 15: auto theme detection (prefers-color-scheme) ---- */
@@ -361,7 +405,7 @@ function viewDataBrowser(){
     <div class="toolbar">
       <div class="group"><button class="pill ${state.tail?'active':''}" id="liveBtn" onclick="toggleTail()">${state.tail?'<span class="live-dot"></span> Pause':'&#9654; Live Tail'}</button></div>
       <div class="group"><button class="pill" onclick="seek(-2)">&#9198; Beginning</button><button class="pill" onclick="seek(-1)">&#9197; Latest</button><button class="pill" onclick="seekOffset()">&#8505; Offset</button></div>
-      <select id="topicSel" onchange="state.topic=this.value;state.partition='all';loadMsgs()" style="width:180px"><option value="">Select topic</option>${opts}</select>
+      <select id="topicSel" onchange="state.topic=this.value;state.partition='all';state.filters=[];loadMsgs()" style="width:180px"><option value="">Select topic</option>${opts}</select>
       <div class="group">${pills}</div>
       <select id="decoder" onchange="state.decoder=this.value;renderMsgRows()">
         <option value="auto" ${state.decoder==='auto'?'selected':''}>Auto-Detect (JSON/Text)</option>
@@ -371,19 +415,26 @@ function viewDataBrowser(){
       </select>
     </div>
     <div class="toolbar">
-      <input id="searchBox" placeholder="Filter key/value..." value="${esc(state.search)}" style="max-width:220px" onkeydown="if(event.key==='Enter')loadMsgs()">
-      <input id="fromTs" placeholder="From (ms epoch)" value="${esc(state.fromTs)}" style="max-width:140px">
-      <input id="toTs" placeholder="To (ms epoch)" value="${esc(state.toTs)}" style="max-width:140px">
+      <input id="searchBox" placeholder="Filter key/value..." value="${esc(state.search)}" style="max-width:180px" onkeydown="if(event.key==='Enter')loadMsgs()">
+      <input id="fromTs" placeholder="From (ms epoch)" value="${esc(state.fromTs)}" style="max-width:120px">
+      <input id="toTs" placeholder="To (ms epoch)" value="${esc(state.toTs)}" style="max-width:120px">
       <button class="btn ghost" onclick="loadMsgs()">Apply</button>
+      <div class="group"><button class="pill ${state.filterPanel?'active':''}" onclick="toggleFilterPanel()">&#128269; Filter</button></div>
+      <div class="group"><button class="pill ${state.projCols.length?'active':''}" onclick="openProj()">&#128208; Columns</button></div>
+      <div class="group"><button class="pill" onclick="exportMsgs('jsonl')">&#11015; .jsonl</button><button class="pill" onclick="exportMsgs('csv')">&#11015; .csv</button></div>
+      <div class="group"><button class="pill ${state.diffSel.length>=2?'active':''}" onclick="runDiff()">&#8646; Diff</button></div>
       <button class="btn ghost" onclick="prevPage()">&#9664; Prev</button>
       <button class="btn ghost" onclick="nextPage()">Next &#9654;</button>
       <span class="muted" id="pageInfo"></span>
     </div>
+    ${state.filterPanel?filterPanelHtml():''}
+    ${state.projCols.length?projBarHtml():''}
     <div class="card" style="padding:0;overflow:hidden">
-      <table><thead><tr><th>Timestamp</th><th>Partition</th><th>Offset</th><th>Key</th><th>Headers</th><th>Value</th></tr></thead>
-      <tbody id="rows"><tr><td colspan="6" class="muted" style="padding:20px">${state.topic?'Load...':'Select a topic'}</td></tr></tbody></table>
+      <table><thead><tr><th class="chkCell"></th><th>Timestamp</th><th>Partition</th><th>Offset</th><th>Key</th><th>Headers</th>${state.projCols.map(c=>`<th class="mono">${esc(c)}</th>`).join('')}<th>Value</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="${8+state.projCols.length}" class="muted" style="padding:20px">${state.topic?'Load...':'Select a topic'}</td></tr></tbody></table>
     </div>
-    <div class="inspector hidden" id="inspector"><h3>Message Inspector</h3><pre id="insp"></pre><div style="margin-top:8px"><button class="btn ghost" onclick="copyInsp()">Copy JSON</button></div></div>`;
+    <div class="inspector hidden" id="inspector"><h3>Message Inspector</h3><pre id="insp"></pre><div style="margin-top:8px;display:flex;gap:8px"><button class="btn ghost" onclick="copyInsp()">Copy JSON</button><button class="btn ghost" onclick="replaySelected()">&#8635; Replay / DLQ</button></div></div>
+    <div id="diffPanel"></div>`;
 }
 window.setPart=p=>{state.partition=p;loadMsgs();};
 async function loadMsgs(){ if(!state.topic)return; try{
@@ -395,6 +446,7 @@ async function loadMsgs(){ if(!state.topic)return; try{
   if(state.off)qs.set('offset',state.off);
   const res=await api(`/api/v1/topics/${encodeURIComponent(state.topic)}/messages?${qs.toString()}`);
   state.msgs=res.records||res;
+  refreshFieldHints();
   const pi=$('#pageInfo'); if(pi)pi.textContent=res.count!=null?`${res.count} shown`:'';
   renderMsgRows();
 }catch(e){toast(e.message);} }
@@ -403,8 +455,10 @@ function prevPage(){ if(!state.msgs.length)return; const first=Math.min(...state
 window.prevPage=prevPage;
 function nextPage(){ if(!state.msgs.length)return; const last=Math.max(...state.msgs.map(m=>m.offset)); state.off=last+1; loadMsgs(); }
 window.nextPage=nextPage;
-function renderMsgRows(){ const rows=$('#rows'); if(!rows)return; if(!state.msgs.length){rows.innerHTML='<tr><td colspan="6" class="muted" style="padding:20px">No messages.</td></tr>';return;} function rowHtml(m){const val=fmtValue(m);return `<td><div>${rel(m.timestamp)}</div><div class="rel">${new Date(m.timestamp).toISOString()}</div></td><td><span class="chip">P${m.partition}</span></td><td>${m.offset}</td><td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td><td><div class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</div></td><td style="max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td>`;}
-rows.innerHTML=state.msgs.slice().reverse().map(m=>'<tr class="rowclick" onclick="insp('+JSON.stringify(m).replace(/"/g,'&quot;')+')">'+rowHtml(m)+'</tr>').join(''); }
+function filteredMsgs(){ if(!state.filters.length)return state.msgs; const o={}; return state.msgs.filter(m=>{ const v=jsonOf(m); return state.filters.every(f=>evalFilter(f,v)); }); }
+function rowHtml(m){const val=fmtValue(m);const sel=state.diffSel.includes(m.offset);return `<td class="chkCell"><input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleDiffSel(${m.offset})"></td><td><div>${rel(m.timestamp)}</div><div class="rel">${new Date(m.timestamp).toISOString()}</div></td><td><span class="chip">P${m.partition}</span></td><td>${m.offset}</td><td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td><td><div class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</div></td>${state.projCols.map(c=>`<td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(getPath(jsonOf(m),c))}</td>`).join('')}<td style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td><td style="white-space:nowrap"><button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();replayOne(${m.offset})">&#8635;</button></td>`;}
+function renderMsgRows(){ const rows=$('#rows'); if(!rows)return; const all=filteredMsgs(); if(!all.length){rows.innerHTML='<tr><td colspan="'+(8+state.projCols.length)+'" class="muted" style="padding:20px">'+(state.filters.length?'No messages match filters.':'No messages.')+'</td></tr>';return;}
+rows.innerHTML=all.slice().reverse().map(m=>'<tr class="rowclick" onclick="insp('+JSON.stringify(m).replace(/"/g,'&quot;')+')">'+rowHtml(m)+'</tr>').join(''); }
 window.renderMsgRows=renderMsgRows;
 let tnId=0;
 function prim(v){if(v===null)return '<span class="jnull">null</span>';if(typeof v==='boolean')return '<span class="jbool">'+v+'</span>';if(typeof v==='number')return '<span class="jnum">'+v+'</span>';return '<span class="jstr">"'+esc(v)+'"</span>';}
@@ -420,6 +474,82 @@ function fmtValue(m){ if(state.decoder==='hex')return hex(m.valueB64); if(m.isJS
 function hex(b64){let s='',bin=atob(b64||'');for(let i=0;i<bin.length;i++)s+=bin.charCodeAt(i).toString(16).padStart(2,'0')+' ';return s.trim();}
 function copyInsp(){const p=$('#insp');navigator.clipboard.writeText(p.textContent).then(()=>{const b=document.querySelector('.inspector .btn');if(b){const old=b.textContent;b.textContent='✓ Copied!';b.style.color='var(--success)';setTimeout(()=>{b.textContent=old;b.style.color='';},1500);}else toast('Copied');});}
 window.copyInsp=copyInsp;
+
+/* ================= Fitur 3.2: Filter Builder ================= */
+function jsonOf(m){ if(m.isJSON){ try{return JSON.parse(m.value||'null');}catch(e){return null;} } return null; }
+function pathKeys(obj,prefix){ let out=[]; for(const k in obj){ const p=prefix?prefix+'.'+k:k; if(obj[k]&&typeof obj[k]==='object'){out=out.concat(pathKeys(obj[k],p));} out.push(p); } return out; }
+function refreshFieldHints(){ if(!state.topic)return; const s=state.msgs.slice(0,10); const seen={}; const keys=[]; s.forEach(m=>{ const v=jsonOf(m); if(v)pathKeys(v,'').forEach(p=>{if(!seen[p]){seen[p]=1;keys.push(p);}}); }); state.fieldHint=keys.slice(0,40); }
+function filterPanelHtml(){
+  const presets=JSON.parse(localStorage.getItem('pk_presets')||'[]');
+  const rows=state.filters.map((f,i)=>`<div class="filterRow">
+    <div class="autocomplete"><input id="fld-${i}" class="fField" placeholder="field (e.g. order.status)" value="${esc(f.field)}" oninput="acField(${i})" onfocus="acField(${i})"><div id="acl-${i}" class="acList" style="display:none"></div></div>
+    <select class="fOp" onchange="state.filters[${i}].op=this.value">
+      ${['==','!=','>','<','>=','<=','contains','regex','exists'].map(o=>`<option value="${o}" ${f.op===o?'selected':''}>${o}</option>`).join('')}
+    </select>
+    <input class="fVal" placeholder="value" value="${esc(f.value||'')}" oninput="state.filters[${i}].value=this.value">
+    <button class="frmBtn" title="Remove" onclick="delFilter(${i})">&times;</button>
+  </div>`).join('');
+  return `<div class="filterPanel">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <b style="font-size:13px">Filter Builder</b>
+      <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="addFilter()">+ Add rule</button>
+      <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="savePreset()">&#128190; Save preset</button>
+      <span class="sp" style="flex:1"></span>
+      <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="toggleFilterPanel()">Close</button>
+    </div>
+    ${rows||'<div class="muted" style="font-size:12px;margin-bottom:8px">No rules yet. Add a rule to filter messages by JSON field.</div>'}
+    <div style="margin-top:8px">${presets.map(p=>`<span class="presetChip" onclick="applyPreset('${esc(JSON.stringify(p.filters))}')">${esc(p.name)}<button title="delete" onclick="event.stopPropagation();delPreset('${esc(p.name)}')">&times;</button></span>`).join('')||''}</div>
+  </div>`; }
+window.toggleFilterPanel=function(){state.filterPanel=!state.filterPanel;if(state.filterPanel)refreshFieldHints();render();};
+window.addFilter=function(){state.filters.push({field:'',op:'==',value:''});render();};
+window.delFilter=function(i){state.filters.splice(i,1);render();};
+window.acField=function(i){ const inp=document.getElementById('fld-'+i); const box=document.getElementById('acl-'+i); if(!inp||!box)return; const q=inp.value.toLowerCase(); const items=state.fieldHint.filter(k=>k.toLowerCase().includes(q)); box.style.display=items.length?'block':'none'; box.innerHTML=items.map(k=>`<div onclick="pickField(${i},'${esc(k)}')">${esc(k)}</div>`).join(''); };
+window.pickField=function(i,k){state.filters[i].field=k;const inp=document.getElementById('fld-'+i);inp.value=k;const box=document.getElementById('acl-'+i);if(box)box.style.display='none';};
+window.savePreset=function(){const nm=prompt('Preset name:');if(!nm)return;const presets=JSON.parse(localStorage.getItem('pk_presets')||'[]');presets.push({name:nm,filters:JSON.parse(JSON.stringify(state.filters))});localStorage.setItem('pk_presets',JSON.stringify(presets));render();};
+window.applyPreset=function(s){state.filters=JSON.parse(s);render();};
+window.delPreset=function(nm){let p=JSON.parse(localStorage.getItem('pk_presets')||'[]');p=p.filter(x=>x.name!==nm);localStorage.setItem('pk_presets',JSON.stringify(p));render();};
+function getPath(o,path){ if(!o||!path)return''; return path.split('.').reduce((acc,k)=>(acc==null||typeof acc!=='object')?undefined:acc[k],o); }
+function evalFilter(f,v){
+  if(f.op==='exists') return f.value? getPath(v,f.field)!==undefined : getPath(v,f.field)===undefined;
+  if(f.op==='regex'){ try{return new RegExp(f.value).test(String(getPath(v,f.field)??''));}catch(e){return false;} }
+  const val=getPath(v,f.field);
+  const a=val===undefined?undefined:String(val);
+  const b=String(f.value);
+  if(f.op==='contains') return a!=null&&a.includes(b);
+  if(f.op==='==') return a!=null&&a===b;
+  if(f.op==='!=') return a!=null&&a!==b;
+  const na=Number(val), nb=Number(f.value);
+  if(isNaN(na)||isNaN(nb))return false;
+  if(f.op==='>') return na>nb;
+  if(f.op==='<') return na<nb;
+  if(f.op==='>=') return na>=nb;
+  if(f.op==='<=') return na<=nb;
+  return false;
+}
+
+/* ================= Fitur 3.3: Column Projection ================= */
+function projBarHtml(){ return `<div class="projBar"><span class="muted" style="font-size:11px">Projected columns:</span>${state.projCols.map(c=>`<span class="projTag">${esc(c)}<button title="remove" onclick="removeProj('${esc(c)}')">&times;</button></span>`).join('')}<button class="btn ghost" style="padding:2px 9px;font-size:11px" onclick="openProj()">+ Add</button></div>`; }
+window.openProj=function(){ const opts=state.fieldHint.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join(''); if(!opts){toast('Load messages first to see available fields');return;} const $sel=document.createElement('div'); $sel.innerHTML=`<div class="overlay"><div class="modal"><h3>Add Column (JSON field)</h3><select id="projPick">${opts}</select><div style="margin-top:14px;display:flex;gap:8px"><button class="btn" onclick="projPickAdd()">Add column</button><button class="btn ghost" onclick="closeOverlay()">Cancel</button></div></div></div>`; document.body.appendChild($sel); refreshFieldHints(); };
+window.projPickAdd=function(){ const v=document.getElementById('projPick').value; if(v&&!state.projCols.includes(v)){state.projCols.push(v);localStorage.setItem('pk_proj',JSON.stringify(state.projCols));} closeOverlay(); render(); };
+window.removeProj=function(c){state.projCols=state.projCols.filter(x=>x!==c);localStorage.setItem('pk_proj',JSON.stringify(state.projCols));render();};
+
+/* ================= Fitur 3.4: Message Diff ================= */
+window.toggleDiffSel=function(off){ if(state.diffSel.includes(off)){state.diffSel=state.diffSel.filter(x=>x!==off);} else { if(state.diffSel.length>=2)state.diffSel.shift(); state.diffSel.push(off);} renderMsgRows(); };
+function byOff(off){return state.msgs.find(m=>m.offset===off);}
+window.runDiff=function(){ const d=$('#diffPanel'); if(!d)return; if(state.diffSel.length<2){toast('Select 2 messages (checkboxes) to diff');return;} const a=byOff(state.diffSel[0]), b=byOff(state.diffSel[1]); if(!a||!b)return; const va=fmtValue(a).split('\n'), vb=fmtValue(b).split('\n'); const max=Math.max(va.length,vb.length); let ha='',hb=''; for(let i=0;i<max;i++){ const la=va[i]||'', lb=vb[i]||''; const same=la.trim()===lb.trim(); const da=la===lb?'' : (lb===''?'d-rem':(va.includes(lb)?'d-ctx':'d-rem')); ha+='<div class="'+(same?'d-ctx':'d-rem')+'">'+esc(la||' ')+'</div>'; hb+='<div class="'+(same?'d-ctx':'d-add')+'">'+esc(lb||' ')+'</div>'; } d.innerHTML=`<div class="diffPanel"><h3 style="font-size:15px;margin-bottom:4px">Message Diff <span class="muted" style="font-size:11px">offset ${a.offset} vs ${b.offset}</span></h3><div class="diffWrap"><div class="diffCol"><h4>Old / A (offset ${a.offset})</h4><pre>${ha}</pre></div><div class="diffCol"><h4>New / B (offset ${b.offset})</h4><pre>${hb}</pre></div></div></div>`; d.scrollIntoView({behavior:'smooth',block:'nearest'}); };
+
+/* ================= Fitur 3.5: Export & Replay / DLQ ================= */
+window.exportMsgs=function(fmt){ const all=filteredMsgs(); if(!all.length){toast('Nothing to export');return;} const name=`${state.topic||'msgs'}.${fmt==='csv'?'csv':'jsonl'}`; let content=''; if(fmt==='jsonl'){ content=all.map(m=>JSON.stringify({topic:m.topic,partition:m.partition,offset:m.offset,timestamp:m.timestamp,key:m.key,headers:m.headers,value:m.value})).join('\n'); } else { const cols=['topic','partition','offset','timestamp','key','value']; const escCsv=s=>{s=String(s??'');return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}; content=cols.join(',')+'\n'+all.map(m=>cols.map(c=>escCsv(c==='value'?m.value:m[c])).join(',')).join('\n'); } const blob=new Blob([content],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(url),100); };
+function replayModal(m){ return `<div class="overlay"><div class="modal"><h3>Replay Message <span class="muted" style="font-size:11px">offset ${m.offset}</span></h3>
+  <label>Target topic (DLQ)</label><input id="rpTopic" list="tl" value="${esc(state.topic+'-dlq')}"><datalist id="tl">${state.topics.map(t=>`<option>${esc(t.name)}</option>`).join('')}</datalist>
+  <label>Key</label><input id="rpKey" value="${esc(m.key||'')}">
+  <label>Value</label><textarea id="rpValue" rows="6">${esc(fmtValue(m))}</textarea>
+  <div style="margin-top:14px;display:flex;gap:8px"><button class="btn" onclick="doReplay(${m.offset})">Send</button><button class="btn ghost" onclick="closeOverlay()">Cancel</button></div></div></div>`; }
+window.replayOne=function(off){ const m=byOff(off); if(!m)return; document.body.insertAdjacentHTML('beforeend',replayModal(m)); };
+window.replaySelected=function(){ const a=state.diffSel; const m=byOff(a[0])||byOff(a[1]); if(!m){toast('Select a message first');return;} document.body.insertAdjacentHTML('beforeend',replayModal(m)); };
+window.closeOverlay=function(){ const o=document.querySelector('.overlay'); if(o)o.remove(); };
+window.doReplay=async function(off){ const m=byOff(off); if(!m)return; const topic=document.getElementById('rpTopic').value||m.topic; const body={key:document.getElementById('rpKey').value,value:document.getElementById('rpValue').value}; try{ const r=await api('/api/v1/topics/'+encodeURIComponent(topic)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('Replayed to '+topic+' @ offset '+r.offset); closeOverlay(); }catch(e){toast(e.message);} };
+
 async function seek(ts){ if(!state.topic)return; if(ts===-2){state.off=0;}else if(ts===-1){state.off=999999999;} await loadMsgs(); }
 window.seek=seek; function seekOffset(){const o=prompt('Offset:');if(o!==null){state.off=o;loadMsgs();}} window.seekOffset=seekOffset;
 function toggleTail(){ state.tail=!state.tail; const b=$('#liveBtn'); if(b)b.innerHTML=state.tail?'&#9208; Pause':'&#9654; Live Tail'; if(!state.topic){state.tail=false;return;}
