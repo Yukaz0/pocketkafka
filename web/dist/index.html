@@ -189,7 +189,7 @@ function buildRail(){
     +'<span class="spacer"></span>'
     +`<button id="theme" title="Theme">${state.theme==='dark'?I.moon:I.sun}</button>`
     +`<button title="Settings">${I.gear}</button>`;
-  navItems.forEach(([k])=>r.querySelector(`[data-nav="${k}"]`).onclick=()=>{state.view=k;render();});
+  navItems.forEach(([k])=>r.querySelector(`[data-nav="${k}"]`).onclick=()=>goView(k));
   r.querySelector('#theme').onclick=()=>{state.theme=state.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=state.theme;render();};
 }
 
@@ -210,6 +210,7 @@ function render(){
 }
 async function refreshAll(){await refresh();render();}
 window.refreshAll=refreshAll;
+window.goView=async function(v){state.view=v;await refresh();render();};
 
 /* ---- Connections ---- */
 function viewConnections(){
@@ -228,7 +229,7 @@ function viewConnections(){
       <div class="row"><span class="k">Topics / Partitions</span><span>${c.topics??0} / ${c.partitions??0}</span></div>
       <div class="actions">
         <button class="btn ghost" onclick="toast('Cluster details loaded')">View cluster details</button>
-        <button class="btn" onclick="state.view='databrowser';render()">&larr;&rarr; Connect</button>
+        <button class="btn" onclick="goView('databrowser')">&larr;&rarr; Connect</button>
       </div>
     </div>
   </div>`;
@@ -297,7 +298,7 @@ function viewTopics(){ return `<div class="card"><div style="display:flex;gap:8p
   <table><thead><tr><th>Topic</th><th>Partitions</th><th>Log End</th><th>Size</th><th></th></tr></thead><tbody>
   ${state.topics.map(t=>{const ps=t.partitions||[];const max=Math.max(1,...ps.map(p=>p.logEndOffset||0));const bars=ps.map(p=>`<div class="pbar" title="P${p.partition}: LEO ${p.logEndOffset||0}"><span style="width:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"></span></div>`).join('')||'<span class="muted">-</span>';const p=ps[0]||{};return `<tr><td class="mono"><a style="color:var(--primary-text);cursor:pointer" onclick="openTopic('${esc(t.name)}')">${esc(t.name)}</a></td><td style="min-width:90px">${bars}</td><td>${p.logEndOffset??0}</td><td>${fmtBytes(t.totalBytes||0)}</td><td><button class="btn danger" onclick="delTopic('${esc(t.name)}')">Delete</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="muted">No topics</td></tr>'}
   </tbody></table></div>`; }
-window.openTopic=n=>{state.topic=n;state.partition='all';state.view='databrowser';render();loadMsgs();};
+window.openTopic=async n=>{state.topic=n;state.partition='all';await goView('databrowser');loadMsgs();};
 async function createTopic(){const n=$('#newT').value;if(!n)return;try{await api('/api/v1/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,partitions:1})});toast('Created '+n);await refresh();render();}catch(e){toast(e.message);}}
 window.createTopic=createTopic;
 async function delTopic(n){if(!confirm('Delete topic '+n+'?'))return;try{await api('/api/v1/topics/'+encodeURIComponent(n),{method:'DELETE'});toast('Deleted '+n);await refresh();render();}catch(e){toast(e.message);}}
@@ -331,7 +332,7 @@ async function sendMsg(){ const body={value:$('#pValue').value,key:$('#pKey').va
 window.sendMsg=sendMsg;
 
 function bindView(){ if(state.view==='databrowser'&&state.topic)loadMsgs(); }
-render();
+(async function(){await refresh();render();})();
 </script>
 </body>
 </html>
