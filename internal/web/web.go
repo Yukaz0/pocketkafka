@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/neu/go-kafka-neu/internal/coordinator"
+	"github.com/neu/go-kafka-neu/internal/schemaregistry"
 	"github.com/neu/go-kafka-neu/internal/storage"
 	"github.com/neu/go-kafka-neu/pkg/protocol"
 	webui "github.com/neu/go-kafka-neu/web"
@@ -20,14 +21,15 @@ import (
 type Server struct {
 	store     *storage.Store
 	gm        *coordinator.GroupManager
+	sr        *schemaregistry.Registry
 	brokerID  int32
 	clusterID string
 	version   string
 }
 
 // New builds a web server bound to the given storage and coordinator.
-func New(store *storage.Store, gm *coordinator.GroupManager, brokerID int32, clusterID string, version string) *Server {
-	return &Server{store: store, gm: gm, brokerID: brokerID, clusterID: clusterID, version: version}
+func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.Registry, brokerID int32, clusterID string, version string) *Server {
+	return &Server{store: store, gm: gm, sr: sr, brokerID: brokerID, clusterID: clusterID, version: version}
 }
 
 // Handler returns the HTTP handler exposing the dashboard and API.
@@ -41,6 +43,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/topics/{topic}/messages", s.handleGetMessages)
 	mux.HandleFunc("POST /api/v1/topics/{topic}/messages", s.handlePostMessage)
 	mux.HandleFunc("GET /api/v1/groups", s.handleGroups)
+	mux.HandleFunc("GET /api/v1/schemas", s.handleSchemas)
 	mux.HandleFunc("GET /api/v1/topics/{topic}/tail", s.handleTailWS)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	return mux
@@ -361,6 +364,14 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 		out = append(out, item)
 	}
 	writeJSON(w, 200, out)
+}
+
+func (s *Server) handleSchemas(w http.ResponseWriter, r *http.Request) {
+	if s.sr == nil {
+		writeJSON(w, 200, []string{})
+		return
+	}
+	writeJSON(w, 200, s.sr.ListSubjects())
 }
 
 // ---------------------------------------------------------------------------

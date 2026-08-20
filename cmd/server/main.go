@@ -62,18 +62,6 @@ func main() {
 		log.Fatalf("start server: %v", err)
 	}
 
-	// Embedded Web UI dashboard (port 8080).
-	webSrv := &http.Server{
-		Addr:    cfg.Web.Listen,
-		Handler: web.New(store, gm, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).Handler(),
-	}
-	go func() {
-		log.Printf("go-kafka-neu web UI on http://%s", cfg.Web.Listen)
-		if err := webSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("web server error: %v", err)
-		}
-	}()
-
 	// Embedded Schema Registry (port 8081, Confluent-compatible).
 	sr := schemaregistry.New()
 	srSrv := &http.Server{Addr: cfg.SchemaRegistry.Listen, Handler: sr.Handler()}
@@ -81,6 +69,18 @@ func main() {
 		log.Printf("go-kafka-neu schema registry on http://%s", cfg.SchemaRegistry.Listen)
 		if err := srSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("schema registry error: %v", err)
+		}
+	}()
+
+	// Embedded Web UI dashboard (port 8080).
+	webSrv := &http.Server{
+		Addr:    cfg.Web.Listen,
+		Handler: web.New(store, gm, sr, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).Handler(),
+	}
+	go func() {
+		log.Printf("go-kafka-neu web UI on http://%s", cfg.Web.Listen)
+		if err := webSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("web server error: %v", err)
 		}
 	}()
 

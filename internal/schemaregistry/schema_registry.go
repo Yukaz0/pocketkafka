@@ -37,6 +37,18 @@ func New() *Registry {
 	}
 }
 
+// ListSubjects returns the sorted names of all registered subjects.
+func (r *Registry) ListSubjects() []string {
+	r.mu.RLock()
+	subjects := make([]string, 0, len(r.bySubject))
+	for s := range r.bySubject {
+		subjects = append(subjects, s)
+	}
+	r.mu.RUnlock()
+	sort.Strings(subjects)
+	return subjects
+}
+
 // Handler returns the HTTP handler exposing the Confluent-compatible API.
 func (r *Registry) Handler() http.Handler {
 	mux := http.NewServeMux()

@@ -5,283 +5,283 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>go-kafka-neu</title>
 <style>
-  :root{ --bg:#0f172a; --panel:#1e293b; --panel2:#172033; --line:#334155; --text:#e2e8f0; --muted:#94a3b8;
-         --accent:#06b6d4; --accent2:#3b82f6; --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  :root{
+    --bg:#0b0f19; --surface:#111827; --surface2:#161f32; --border:#1f2937;
+    --primary:#7c3aed; --primary-soft:rgba(124,58,237,.15); --primary-text:#a78bfa;
+    --success:#10b981; --warn:#f59e0b; --danger:#ef4444;
+    --text:#f9fafb; --muted:#9ca3af; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --rail-w:56px; --radius:12px;
+  }
+  html[data-theme="light"]{
+    --bg:#f8fafc; --surface:#ffffff; --surface2:#f1f5f9; --border:#e2e8f0;
+    --primary:#6366f1; --primary-text:#4f46e5; --text:#0f172a; --muted:#64748b;
+  }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;min-height:100vh}
-  /* Sidebar */
-  .sidebar{width:220px;background:#0b1220;border-right:1px solid var(--line);padding:20px 0;flex-shrink:0;position:sticky;top:0;height:100vh}
-  .brand{padding:0 20px 20px;font-size:18px;font-weight:700;letter-spacing:.3px}
-  .brand .dot{color:var(--green)}
-  .nav{padding:0 10px}
-  .nav a{display:block;padding:10px 14px;margin:2px 0;border-radius:8px;color:var(--muted);cursor:pointer;text-decoration:none;font-size:14px}
-  .nav a:hover{background:var(--panel);color:var(--text)}
-  .nav a.active{background:var(--panel);color:var(--accent)}
-  .main{flex:1;padding:24px 32px;overflow:auto}
-  h1{font-size:22px;margin-bottom:4px}
-  .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
-  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
-  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px}
-  .stat .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
-  .stat .v{font-size:22px;font-weight:700;margin-top:4px}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
-  th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.5px}
-  tr:hover td{background:var(--panel2)}
-  .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
-  .b-green{background:rgba(34,197,94,.15);color:var(--green)}
-  .b-amber{background:rgba(245,158,11,.15);color:var(--amber)}
-  .b-red{background:rgba(239,68,68,.15);color:var(--red)}
-  .b-blue{background:rgba(59,130,246,.15);color:var(--accent2)}
-  pre{font-family:var(--mono);font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+  body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:13px}
+  .app{display:flex;height:100vh}
+
+  /* ---- Slim 56px icon rail ---- */
+  .rail{width:var(--rail-w);background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:10px 0;flex-shrink:0;gap:6px}
+  .rail .logo{width:34px;height:34px;border-radius:9px;background:var(--primary);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px;margin-bottom:10px}
+  .rail button{width:40px;height:40px;border:none;background:transparent;color:var(--muted);border-radius:9px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .rail button:hover{background:var(--surface2);color:var(--text)}
+  .rail button.active{background:var(--primary-soft);color:var(--primary-text)}
+  .rail .spacer{flex:1}
+
+  /* ---- Main column ---- */
+  .col{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:52px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;padding:0 20px;gap:12px}
+  .topbar h1{font-size:15px;font-weight:600}
+  .topbar .crumb{color:var(--muted)}
+  .topbar .sp{flex:1}
+  .btn{background:var(--primary);color:#fff;border:none;padding:7px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px}
+  .btn:hover{filter:brightness(1.1)}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--border)}
+  .btn.danger{background:transparent;color:var(--danger);border:1px solid var(--danger)}
+
+  main{flex:1;overflow:auto;padding:20px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+
+  /* connection card */
+  .conn{border-left:3px solid var(--success)}
+  .conn .dot{width:8px;height:8px;border-radius:50%;background:var(--success);display:inline-block;margin-right:6px}
+  .conn .tag{background:var(--primary-soft);color:var(--primary-text);border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;letter-spacing:.5px;margin-left:8px}
+  .conn .row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
+  .conn .row:last-child{border-bottom:none}
+  .conn .k{color:var(--muted)}
+  .conn .actions{display:flex;gap:8px;margin-top:12px}
+
+  /* toolbar */
+  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+  .toolbar .group{display:flex;gap:4px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:4px}
+  .toolbar .pill{background:transparent;border:none;color:var(--muted);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px}
+  .toolbar .pill.active{background:var(--primary-soft);color:var(--primary-text)}
+  .pill.part{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:3px 10px;cursor:pointer;font-size:11px;color:var(--muted)}
+  .pill.part.active{background:var(--primary-soft);color:var(--primary-text);border-color:var(--primary)}
+  select,input{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 9px;font-size:12px}
+  input{width:100%}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{color:var(--muted);text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;padding:8px 10px;border-bottom:1px solid var(--border)}
+  td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+  tr:hover td{background:var(--surface2)}
   .mono{font-family:var(--mono)}
-  button{background:var(--accent);border:none;color:#062a2e;font-weight:600;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px}
-  button:hover{filter:brightness(1.1)}
-  button.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
-  input,select,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;width:100%}
-  label{display:block;color:var(--muted);font-size:12px;margin:10px 0 4px}
-  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  .viewtabs span{cursor:pointer;padding:4px 10px;border-radius:6px;color:var(--muted);font-size:12px;border:1px solid transparent}
-  .viewtabs span.active{background:var(--panel2);color:var(--accent);border-color:var(--line)}
-  .hidden{display:none}
-  .pill{font-family:var(--mono);font-size:11px;background:var(--panel2);border:1px solid var(--line);padding:2px 6px;border-radius:5px}
-  .kvs{display:flex;gap:10px}
-  .kvs input{flex:1}
-  .msgrow{display:grid;grid-template-columns:140px 70px 70px 1fr auto;gap:8px;align-items:start;padding:8px;border-bottom:1px solid var(--line)}
-  .msgrow .val{font-family:var(--mono);font-size:12px;cursor:pointer;word-break:break-word}
-  .msgrow .val:hover{color:var(--accent)}
-  .live{display:inline-flex;align-items:center;gap:6px}
-  .live .livedot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
-  .live.on .livedot{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .muted{color:var(--muted)}
+  .rel{color:var(--muted);font-size:11px}
+  .badge{display:inline-block;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:600}
+  .b-green{background:rgba(16,185,129,.15);color:var(--success)}
+  .b-amber{background:rgba(245,158,11,.15);color:var(--warn)}
+  .b-purple{background:var(--primary-soft);color:var(--primary-text)}
+  .chip{font-family:var(--mono);font-size:10px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:1px 5px;margin:0 2px}
+  .rowclick{cursor:pointer}
+
+  /* inspector */
+  .inspector{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-top:12px;padding:14px}
+  .inspector h3{font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:.4px;margin-bottom:8px}
+  pre{font-family:var(--mono);font-size:12px;white-space:pre-wrap;word-break:break-word;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;overflow:auto}
+  .jkey{color:#a78bfa}.jstr{color:#10b981}.jnum{color:#60a5fa}.jbool{color:#fbbf24}.jnull{color:#9ca3af}
+  html[data-theme="light"] .jkey{color:#6d28d9}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:14px}
+  .tabs span{padding:8px 14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;font-weight:600}
+  .tabs span.active{color:var(--primary-text);border-bottom-color:var(--primary)}
+  .kv{display:flex;gap:10px;margin-bottom:10px}
+  .kv>div{flex:1}
+  label{display:block;color:var(--muted);font-size:11px;margin-bottom:4px}
+  textarea{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px;font-family:var(--mono);font-size:12px;resize:vertical}
+  .msg{position:fixed;right:16px;bottom:16px;background:var(--surface);border:1px solid var(--primary);color:var(--text);padding:10px 16px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.4);opacity:0;transition:opacity .2s;font-size:12px}
+  .msg.show{opacity:1}
+  .hdr{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 </style>
 </head>
 <body>
-<aside class="sidebar">
-  <div class="brand">go-kafka<span class="dot">-neu</span></div>
-  <nav class="nav">
-    <a data-view="overview" class="active">Overview</a>
-    <a data-view="topics">Topics</a>
-    <a data-view="consumers">Consumers</a>
-    <a data-view="producer">Producer Simulator</a>
-  </nav>
-</aside>
-<main class="main" id="main"></main>
+<div class="app">
+  <nav class="rail" id="rail"></nav>
+  <div class="col">
+    <header class="topbar">
+      <h1 id="title">Connections</h1>
+      <span class="crumb" id="crumb"></span>
+      <span class="sp"></span>
+      <span id="topActions"></span>
+    </header>
+    <main id="view"></main>
+  </div>
+</div>
+<div class="msg" id="msg"></div>
 
 <script>
-const $ = (s, el=document)=>el.querySelector(s);
-const state = { view:'overview', topics:[], groups:[], cluster:null, selectedTopic:null, tailSocket:null, tailOn:false, viewMode:'json' };
+const $=s=>document.querySelector(s);
+const I={server:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/></svg>',
+  layers:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+  table:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg>',
+  code:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  send:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+  sun:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="18.4" y1="18.4" x2="19.8" y2="19.8"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.2" y1="19.8" x2="5.6" y2="18.4"/><line x1="18.4" y1="5.6" x2="19.8" y2="4.2"/></svg>',
+  moon:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>',
+  gear:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'};
 
-async function api(path, opts){
-  const r = await fetch(path, opts);
-  const j = await r.json();
-  if(!r.ok) throw new Error(j.error || r.status);
-  return j;
+const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null};
+const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.code],['schemas','Schemas',I.code],['producer','Producer Studio',I.send]];
+
+async function api(p,o){const r=await fetch(p,o);const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j;}
+function toast(t){const m=$('#msg');m.textContent=t;m.classList.add('show');setTimeout(()=>m.classList.remove('show'),2500);}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fmtBytes(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(1)+' MB';}
+function rel(t){const d=Math.max(0,Date.now()-t);if(d<1000)return 'now';if(d<60000)return Math.floor(d/1000)+'s ago';if(d<3600000)return Math.floor(d/60000)+'m ago';return Math.floor(d/3600000)+'h ago';}
+function online(s){s=(s||'').toLowerCase();return s==='stable'||s==='green';}
+
+async function refresh(){
+  await Promise.allSettled([api('/api/v1/cluster').then(d=>state.cluster=d).catch(()=>{}),
+    api('/api/v1/topics').then(d=>state.topics=d).catch(()=>{}),
+    api('/api/v1/groups').then(d=>state.groups=d).catch(()=>{}),
+    api('/api/v1/schemas').then(d=>state.schemas=d).catch(()=>{})]);
 }
 
-async function refreshCluster(){
-  state.cluster = await api('/api/v1/cluster');
-}
-async function refreshTopics(){
-  state.topics = await api('/api/v1/topics');
-}
-async function refreshGroups(){
-  state.groups = await api('/api/v1/groups');
-}
-
-function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fmtBytes(n){ if(n<1024) return n+' B'; if(n<1048576) return (n/1024).toFixed(1)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
-function statusBadge(s){ s=s.toLowerCase();
-  if(s==='stable'||s==='green') return '<span class="badge b-green">Healthy</span>';
-  if(s.includes('rebalanc')||s==='amber') return '<span class="badge b-amber">Rebalancing</span>';
-  return '<span class="badge b-red">'+esc(s)+'</span>';
+function buildRail(){
+  const r=$('#rail');
+  r.innerHTML='<div class="logo">G</div>'+navItems.map(([k,_,ic])=>`<button data-nav="${k}" class="${state.view===k?'active':''}" title="${_}">${ic}</button>`).join('')
+    +'<span class="spacer"></span>'
+    +`<button id="theme" title="Theme">${state.theme==='dark'?I.moon:I.sun}</button>`
+    +`<button title="Settings">${I.gear}</button>`;
+  navItems.forEach(([k])=>r.querySelector(`[data-nav="${k}"]`).onclick=()=>{state.view=k;render();});
+  r.querySelector('#theme').onclick=()=>{state.theme=state.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=state.theme;render();};
 }
 
-async function render(){
-  try { await Promise.all([refreshCluster(), refreshTopics(), refreshGroups()]); } catch(e){ console.error(e); }
-  const main = $('#main');
-  const html = {
-    overview: overviewHTML(),
-    topics: topicsHTML(),
-    consumers: consumersHTML(),
-    producer: producerHTML(),
-  }[state.view];
-  main.innerHTML = html;
+function render(){
+  buildRail();
+  const title=navItems.find(([k])=>k===state.view)[1];
+  $('#title').textContent=title;$('#crumb').textContent=state.view==='databrowser'&&state.topic?('/ '+state.topic):'';
+  $('#topActions').innerHTML=state.view==='connections'?`<button class="btn ghost" onclick="refreshAll()">Refresh</button>`:
+    state.view==='databrowser'?`<button class="btn" onclick="state.topic='';render()">Connections</button>`:'';
+  const v=$('#view');
+  if(state.view==='connections')v.innerHTML=viewConnections();
+  else if(state.view==='databrowser')v.innerHTML=viewDataBrowser();
+  else if(state.view==='topics')v.innerHTML=viewTopics();
+  else if(state.view==='groups')v.innerHTML=viewGroups();
+  else if(state.view==='schemas')v.innerHTML=viewSchemas();
+  else if(state.view==='producer')v.innerHTML=viewProducer();
   bindView();
-  if(state.view==='topics') bindTopics();
-  if(state.view==='producer') bindProducer();
 }
+async function refreshAll(){await refresh();render();}
+window.refreshAll=refreshAll;
 
-function overviewHTML(){
-  const c = state.cluster||{};
-  const rows = state.topics.map(t=>`<tr><td class="mono">${esc(t.name)}</td><td>${t.partitions.length}</td><td class="mono">${fmtBytes(t.totalBytes)}</td></tr>`).join('');
-  return `
-    <h1>Cluster Overview</h1>
-    <div class="sub">${esc(c.clusterId||'')} &middot; broker ${c.brokerId} &middot; ${statusBadge(c.status||'green')}</div>
-    <div class="grid">
-      <div class="stat"><div class="k">Topics</div><div class="v">${c.topics??0}</div></div>
-      <div class="stat"><div class="k">Partitions</div><div class="v">${c.partitions??0}</div></div>
-      <div class="stat"><div class="k">Total Data</div><div class="v">${fmtBytes(c.totalBytes||0)}</div></div>
-      <div class="stat"><div class="k">Consumer Groups</div><div class="v">${c.groups??0}</div></div>
-    </div>
-    <div class="card"><h3 style="margin-bottom:10px">Topics</h3><table>
-      <thead><tr><th>Name</th><th>Partitions</th><th>Size</th></tr></thead>
-      <tbody>${rows||'<tr><td colspan="3" style="color:var(--muted)">No topics yet. Use the Producer Simulator to create one.</td></tr>'}</tbody>
-    </table></div>`;
-}
-
-function topicsHTML(){
-  const opts = state.topics.map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
-  return `
-    <div class="row" style="justify-content:space-between">
-      <h1>Topics & Data Explorer</h1>
-      <div class="row">
-        <select id="topicSel" style="width:220px"><option value="">Select topic</option>${opts}</select>
-        <button id="loadMsgs" class="ghost">Load Messages</button>
-        <button id="newTopic" class="ghost">+ New Topic</button>
-        <button id="delTopic" class="ghost" style="color:var(--red);border-color:var(--red)">Delete Topic</button>
+/* ---- Connections ---- */
+function viewConnections(){
+  const c=state.cluster||{};
+  return `<div class="grid">
+    <div class="card conn">
+      <div style="display:flex;align-items:center;margin-bottom:8px">
+        <span class="dot"></span><b>go-kafka-local</b><span class="tag">KAFKA</span>
+        <span style="margin-left:auto;color:var(--muted)">...</span>
+      </div>
+      <div class="row"><span class="k">Status</span><span class="badge b-green">Online</span></div>
+      <div class="row"><span class="k">Host</span><span class="mono">${esc(c.clusterId||'localhost')}</span></div>
+      <div class="row"><span class="k">Cluster ID</span><span class="mono">${esc(c.clusterId||'-')}</span></div>
+      <div class="row"><span class="k">Broker</span><span class="mono">localhost:9092</span></div>
+      <div class="row"><span class="k">Security</span><span class="mono">PLAINTEXT</span></div>
+      <div class="row"><span class="k">Topics / Partitions</span><span>${c.topics??0} / ${c.partitions??0}</span></div>
+      <div class="actions">
+        <button class="btn ghost" onclick="toast('Cluster details loaded')">View cluster details</button>
+        <button class="btn" onclick="state.view='databrowser';render()">&larr;&rarr; Connect</button>
       </div>
     </div>
-    <div class="card">
-      <div class="row" style="justify-content:space-between;margin-bottom:10px">
-        <div class="viewtabs">
-          <span data-viewmode="json" class="active">JSON</span>
-          <span data-viewmode="plain">Plaintext</span>
-          <span data-viewmode="hex">Hex</span>
-        </div>
-        <span id="liveToggle" class="live"><span class="livedot"></span> Live Tail</span>
-      </div>
-      <div id="msgList" style="max-height:60vh;overflow:auto"><p style="color:var(--muted)">Select a topic and load messages.</p></div>
-      <div id="msgDetail" class="hidden"><h3 style="margin:12px 0 6px">Payload Inspector</h3><pre id="detailPre"></pre></div>
-    </div>`;
+  </div>`;
 }
 
-function consumersHTML(){
-  if(!state.groups.length) return `<h1>Consumers</h1><div class="card"><p style="color:var(--muted)">No consumer groups yet.</p></div>`;
-  const cards = state.groups.map(g=>`
-    <div class="card"><h3 style="margin-bottom:6px">${esc(g.name)} ${statusBadge(g.state)} <span class="pill">gen ${g.generation}</span></h3>
-      <div class="sub">Leader: <span class="mono">${esc(g.leader)}</span> &middot; Members: ${g.members.map(esc).join(', ')||'none'}</div>
-      <table><thead><tr><th>Topic-Partition</th><th>Lag</th></tr></thead><tbody>
-        ${Object.entries(g.lag).map(([k,l])=>`<tr><td class="mono">${esc(k)}</td><td><span class="badge ${l>0?'b-amber':'b-green'}">${l}</span></td></tr>`).join('')||'<tr><td colspan="2" style="color:var(--muted)">No committed offsets</td></tr>'}
-      </tbody></table></div>`).join('');
-  return `<h1>Consumer Groups</h1>${cards}`;
-}
-
-function producerHTML(){
+/* ---- Data Browser ---- */
+function viewDataBrowser(){
+  const opts=state.topics.map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
+  const parts=state.topic?state.topics.find(t=>t.name===state.topic)?.partitions||[]:[];
+  const act=(on)=>on?'background:var(--primary-soft);color:var(--primary-text);border-color:var(--primary)':'';
+  const pills='<button class="pill'+(state.partition==='all'?' active':'')+'" onclick="setPart(\'all\')">All</button>'
+    +parts.map(p=>`<button class="pill part" style="${act(state.partition===p.partition)}" onclick="setPart('${p.partition}')">P-${p.partition}</button>`).join('');
   return `
-    <h1>Producer Simulator</h1>
-    <div class="card" style="max-width:640px">
-      <label>Topic</label>
-      <input id="pTopic" list="topicList" placeholder="my-topic (auto-created if missing)">
-      <datalist id="topicList">${state.topics.map(t=>`<option value="${esc(t.name)}">`).join('')}</datalist>
-      <label>Key</label><input id="pKey" placeholder="optional key">
-      <label>Payload (JSON or text)</label><textarea id="pValue" rows="5">{"event":"hello","ts":1700000000}</textarea>
-      <label>Custom Headers (key=value, one per line)</label><textarea id="pHeaders" rows="2" placeholder="source=web"></textarea>
-      <div style="margin-top:14px"><button id="pSend">Send Message</button> <span id="pResult"></span></div>
-    </div>`;
+    <div class="toolbar">
+      <div class="group"><button class="pill ${state.tail?'active':''}" id="liveBtn" onclick="toggleTail()">${state.tail?'&#9208; Pause':'&#9654; Live Tail'}</button></div>
+      <div class="group"><button class="pill" onclick="seek(-2)">&#9198; Beginning</button><button class="pill" onclick="seek(-1)">&#9197; Latest</button><button class="pill" onclick="seekOffset()">&#8505; Offset</button></div>
+      <select id="topicSel" onchange="state.topic=this.value;state.partition='all';loadMsgs()" style="width:180px"><option value="">Select topic</option>${opts}</select>
+      <div class="group">${pills}</div>
+      <select id="decoder" onchange="state.decoder=this.value;renderMsgRows()">
+        <option value="auto" ${state.decoder==='auto'?'selected':''}>Auto-Detect (JSON/Text)</option>
+        <option value="json" ${state.decoder==='json'?'selected':''}>JSON Pretty</option>
+        <option value="text" ${state.decoder==='text'?'selected':''}>Plaintext (UTF-8)</option>
+        <option value="hex" ${state.decoder==='hex'?'selected':''}>Hex Dump</option>
+      </select>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table><thead><tr><th>Timestamp</th><th>Partition</th><th>Offset</th><th>Key</th><th>Headers</th><th>Value</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="6" class="muted" style="padding:20px">${state.topic?'Load...':'Select a topic'}</td></tr></tbody></table>
+    </div>
+    <div class="inspector hidden" id="inspector"><h3>Message Inspector</h3><pre id="insp"></pre><div style="margin-top:8px"><button class="btn ghost" onclick="copyInsp()">Copy JSON</button></div></div>`;
 }
-
-function bindView(){
-  document.querySelectorAll('.nav a').forEach(a=>a.addEventListener('click', ()=>{ state.view=a.dataset.view; document.querySelectorAll('.nav a').forEach(x=>x.classList.remove('active')); a.classList.add('active'); render(); }));
+window.setPart=p=>{state.partition=p;loadMsgs();};
+async function loadMsgs(){ if(!state.topic)return; try{ const q=state.partition==='all'?'':'&partition='+state.partition; state.msgs=await api(`/api/v1/topics/${encodeURIComponent(state.topic)}/messages?limit=100${q}`); renderMsgRows(); }catch(e){toast(e.message);} }
+window.loadMsgs=loadMsgs;
+function renderMsgRows(){ const rows=$('#rows'); if(!rows)return; if(!state.msgs.length){rows.innerHTML='<tr><td colspan="6" class="muted" style="padding:20px">No messages.</td></tr>';return;} rows.innerHTML=state.msgs.slice().reverse().map(m=>{
+    const val=fmtValue(m);
+    return `<tr class="rowclick" onclick="insp(${JSON.stringify(m).replace(/"/g,'&quot;')})">
+      <td><div>${rel(m.timestamp)}</div><div class="rel mono">${new Date(m.timestamp).toISOString()}</div></td>
+      <td><span class="chip">P${m.partition}</span></td><td class="mono">${m.offset}</td>
+      <td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td>
+      <td class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</td>
+      <td class="mono" style="max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td></tr>`;
+  }).join(''); }
+window.renderMsgRows=renderMsgRows;
+window.insp=m=>{$('#inspector').classList.remove('hidden');const obj={topic:m.topic,partition:m.partition,offset:m.offset,timestamp:new Date(m.timestamp).toISOString(),key:m.key,headers:m.headers,valueSize:m.valueSize,value:fmtValue(m)};$('#insp').innerHTML=jsonTree(obj);};
+function fmtValue(m){ if(state.decoder==='hex')return hex(m.valueB64); if(m.isJSON)return JSON.stringify(JSON.parse(m.value||'null'),null,2); return m.value; }
+function hex(b64){let s='',bin=atob(b64||'');for(let i=0;i<bin.length;i++)s+=bin.charCodeAt(i).toString(16).padStart(2,'0')+' ';return s.trim();}
+function jsonTree(o){ let s=''; for(const k in o){const v=o[k]; if(typeof v==='string')s+=`<div><span class="jkey">"${esc(k)}"</span>: <span class="jstr">"${esc(v)}"</span></div>`; else if(typeof v==='number')s+=`<div><span class="jkey">"${esc(k)}"</span>: <span class="jnum">${v}</span></div>`; else if(typeof v==='boolean')s+=`<div><span class="jkey">"${esc(k)}"</span>: <span class="jbool">${v}</span></div>`; else s+=`<div><span class="jkey">"${esc(k)}"</span>: ${jsonTree(v)}</div>`; } return '<div style="padding-left:12px">'+s+'</div>'; }
+function copyInsp(){const p=$('#insp');navigator.clipboard.writeText(p.textContent).then(()=>toast('Copied'));}
+window.copyInsp=copyInsp;
+async function seek(ts){ if(!state.topic)return; const off=await api(`/api/v1/topics/${encodeURIComponent(state.topic)}/messages?limit=1${ts<0?'&offset='+(ts===-1?'999999999':0):''}`); /* simple: reload */ await loadMsgs(); }
+window.seek=seek; function seekOffset(){const o=prompt('Offset:');if(o!==null){state.off=o;loadMsgs();}} window.seekOffset=seekOffset;
+function toggleTail(){ state.tail=!state.tail; const b=$('#liveBtn'); if(b)b.innerHTML=state.tail?'&#9208; Pause':'&#9654; Live Tail'; if(!state.topic){state.tail=false;return;}
+  if(state.ws)state.ws.close();
+  if(!state.tail)return;
+  const proto=location.protocol==='https:'?'wss':'ws';
+  const ws=new WebSocket(`${proto}://${location.host}/api/v1/topics/${encodeURIComponent(state.topic)}/tail`); state.ws=ws;
+  ws.onmessage=e=>{ const recs=JSON.parse(e.data); if(!recs.length)return; state.msgs=[...recs.slice().reverse(),...state.msgs]; if(state.msgs.length>200)state.msgs=state.msgs.slice(0,200); renderMsgRows(); };
 }
+window.toggleTail=toggleTail;
 
-function bindTopics(){
-  const sel=$('#topicSel'), load=$('#loadMsgs'), nl=$('#newTopic');
-  const viewtabs=document.querySelectorAll('[data-viewmode]');
-  viewtabs.forEach(t=>t.addEventListener('click',()=>{ viewtabs.forEach(x=>x.classList.remove('active')); t.classList.add('active'); state.viewMode=t.dataset.viewmode; renderSelected(); }));
-  load.addEventListener('click', ()=>{ if(sel.value) loadMessages(sel.value, 0, 100); });
-  nl.addEventListener('click', async ()=>{ const name=prompt('New topic name:'); if(!name) return; try{ await api('/api/v1/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,partitions:1})}); await refreshTopics(); render(); }catch(e){ alert(e.message);} });
-  $('#delTopic').addEventListener('click', async ()=>{ const name=$('#topicSel').value; if(!name) return; if(!confirm('Delete topic "'+name+'" and all its data?')) return; try{ await api('/api/v1/topics/'+encodeURIComponent(name),{method:'DELETE'}); await refreshTopics(); render(); }catch(e){ alert(e.message);} });
-  $('#liveToggle').addEventListener('click', ()=>{ toggleTail(sel.value); });
-  if(sel.value) loadMessages(sel.value, 0, 100);
-}
+/* ---- Topics ---- */
+function viewTopics(){ return `<div class="card"><div style="display:flex;gap:8px;margin-bottom:12px"><input id="newT" placeholder="new topic name" style="max-width:240px"><button class="btn" onclick="createTopic()">Create</button></div>
+  <table><thead><tr><th>Topic</th><th>Partitions</th><th>Log End</th><th>Size</th><th></th></tr></thead><tbody>
+  ${state.topics.map(t=>{const p=t.partitions[0]||{};return `<tr><td class="mono"><a style="color:var(--primary-text);cursor:pointer" onclick="openTopic('${esc(t.name)}')">${esc(t.name)}</a></td><td>${t.partitions.length}</td><td class="mono">${p.logEndOffset??0}</td><td class="mono">${fmtBytes(t.totalBytes||0)}</td><td><button class="btn danger" onclick="delTopic('${esc(t.name)}')">Delete</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="muted">No topics</td></tr>'}
+  </tbody></table></div>`; }
+window.openTopic=n=>{state.topic=n;state.partition='all';state.view='databrowser';render();loadMsgs();};
+async function createTopic(){const n=$('#newT').value;if(!n)return;try{await api('/api/v1/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,partitions:1})});toast('Created '+n);await refresh();render();}catch(e){toast(e.message);}}
+window.createTopic=createTopic;
+async function delTopic(n){if(!confirm('Delete topic '+n+'?'))return;try{await api('/api/v1/topics/'+encodeURIComponent(n),{method:'DELETE'});toast('Deleted '+n);await refresh();render();}catch(e){toast(e.message);}}
+window.delTopic=delTopic;
 
-async function loadMessages(topic, offset, limit){
-  state.selectedTopic=topic;
-  const recs = await api(`/api/v1/topics/${encodeURIComponent(topic)}/messages?offset=${offset}&limit=${limit}`);
-  renderRecords(recs);
-}
+/* ---- Groups ---- */
+function viewGroups(){ if(!state.groups.length)return '<div class="card muted">No consumer groups.</div>';
+  return `<div class="card"><table><thead><tr><th>Group</th><th>State</th><th>Members</th><th>Lag</th></tr></thead><tbody>
+  ${state.groups.map(g=>{const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0);return `<tr><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span></td><td class="mono">${g.members.join(', ')||'-'}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td></tr>`;}).join('')}
+  </tbody></table></div>`; }
 
-function renderSelected(){
-  const rows=[...document.querySelectorAll('.msgrow')];
-  rows.forEach(r=>{
-    const rec = JSON.parse(r.dataset.rec);
-    const valEl=$('.val', r);
-    valEl.textContent = formatValue(rec);
-    if(rec.isJSON && state.viewMode==='json') valEl.textContent = JSON.stringify(JSON.parse(rec.value||'null'),null,2);
-  });
-}
+/* ---- Schemas ---- */
+function viewSchemas(){ return `<div class="card"><h3 style="margin-bottom:10px">Schema Registry</h3><table><thead><tr><th>Subject</th></tr></thead><tbody>
+  ${state.schemas.map(s=>`<tr><td class="mono"><span class="badge b-purple">AVRO</span> ${esc(s)}</td></tr>`).join('')||'<tr><td class="muted">No schemas registered.</td></tr>'}
+  </tbody></table></div>`; }
 
-function formatValue(rec){
-  if(state.viewMode==='json' && rec.isJSON){ try{ return JSON.stringify(JSON.parse(rec.value),null,2); }catch(e){} }
-  if(state.viewMode==='hex') return hex(rec.valueB64);
-  return rec.value;
-}
+/* ---- Producer Studio ---- */
+function viewProducer(){ const opts=state.topics.map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
+  return `<div class="grid"><div class="card" style="max-width:640px">
+    <label>Topic</label><input list="tl" id="pTopic" placeholder="my-topic (auto-created)" value="${esc(state.topic||'')}"><datalist id="tl">${opts}</datalist>
+    <label>Partition</label><select id="pPart"><option value="-1">Auto</option><option value="0">0</option></select>
+    <label>Key</label><input id="pKey" placeholder="optional key">
+    <label>Headers (key=value, one per line)</label><textarea id="pHeaders" rows="2" placeholder="traceId=abc"></textarea>
+    <label>Payload (JSON / text)</label><textarea id="pValue" rows="8">{"event":"hello","ts":1700000000}</textarea>
+    <div style="margin-top:12px"><button class="btn" onclick="sendMsg()">Send Message</button></div>
+  </div></div>`; }
+async function sendMsg(){ const body={value:$('#pValue').value,key:$('#pKey').value}; const h={}; $('#pHeaders').value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0)h[l.slice(0,i).trim()]=l.slice(i+1).trim();}); if(Object.keys(h).length)body.headers=h;
+  const topic=$('#pTopic').value||'demo'; try{const r=await api('/api/v1/topics/'+encodeURIComponent(topic)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast(`Published to offset ${r.offset}`);await refresh();}catch(e){toast(e.message);} }
+window.sendMsg=sendMsg;
 
-function hex(b64){
-  const bin=atob(b64||''); let s='';
-  for(let i=0;i<bin.length;i++) s+=bin.charCodeAt(i).toString(16).padStart(2,'0')+' ';
-  return s.trim();
-}
-
-function renderRecords(recs){
-  const el=$('#msgList'); el.innerHTML='';
-  if(!recs.length){ el.innerHTML='<p style="color:var(--muted)">No messages.</p>'; return; }
-  recs.slice().reverse().forEach(r=>{
-    const row=document.createElement('div'); row.className='msgrow';
-    row.dataset.rec=JSON.stringify(r);
-    row.innerHTML=`<span class="pill">${new Date(r.timestamp).toISOString()}</span>
-      <span class="mono">p${r.partition}</span><span class="mono">${r.offset}</span>
-      <div class="val">${esc(formatValue(r))}</div>
-      <span class="badge ${r.isJSON?'b-green':'b-blue'}">${r.valueSize} B</span>`;
-    row.querySelector('.val').addEventListener('click',()=>{ showDetail(r); });
-    el.prepend(row);
-  });
-}
-
-function showDetail(r){
-  $('#msgDetail').classList.remove('hidden');
-  const d={
-    topic:r.topic, partition:r.partition, offset:r.offset, timestamp:new Date(r.timestamp).toISOString(),
-    key:r.key||'', headers:r.headers, valueSize:r.valueSize,
-  };
-  $('#detailPre').textContent = 'METADATA\n'+JSON.stringify(d,null,2)+'\n\nPAYLOAD\n'+formatValue(r);
-}
-
-function toggleTail(topic){
-  const t=$('#liveToggle'); state.tailOn=!state.tailOn; t.classList.toggle('on',state.tailOn);
-  if(state.tailSocket){ state.tailSocket.close(); state.tailSocket=null; }
-  if(!state.tailOn) return;
-  const proto = location.protocol==='https:'?'wss':'ws';
-  const ws = new WebSocket(`${proto}://${location.host}/api/v1/topics/${encodeURIComponent(topic)}/tail`);
-  state.tailSocket=ws;
-  ws.onmessage=(ev)=>{
-    const recs=JSON.parse(ev.data);
-    if(!recs.length) return;
-    const el=$('#msgList');
-    recs.slice().reverse().forEach(r=>{
-      const row=document.createElement('div'); row.className='msgrow'; row.dataset.rec=JSON.stringify(r);
-      row.innerHTML=`<span class="pill">${new Date(r.timestamp).toISOString()}</span><span class="mono">p${r.partition}</span><span class="mono">${r.offset}</span><div class="val">${esc(formatValue(r))}</div><span class="badge ${r.isJSON?'b-green':'b-blue'}">${r.valueSize} B</span>`;
-      row.querySelector('.val').addEventListener('click',()=>showDetail(r));
-      el.prepend(row);
-    });
-  };
-}
-
-function bindProducer(){
-  $('#pSend').addEventListener('click', async ()=>{
-    const body={ key:$('#pKey').value, value:$('#pValue').value };
-    const headers={};
-    $('#pHeaders').value.split('\n').forEach(l=>{ const i=l.indexOf('='); if(i>0) headers[l.slice(0,i).trim()]=l.slice(i+1).trim(); });
-    if(Object.keys(headers).length) body.headers=headers;
-    try{
-      const r=await api('/api/v1/topics/'+encodeURIComponent($('#pTopic').value||'demo')+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      $('#pResult').textContent=`Published to offset ${r.offset} ✓`;
-      await refreshTopics();
-    }catch(e){ $('#pResult').textContent='Error: '+e.message; }
-  });
-}
-
+function bindView(){ if(state.view==='databrowser'&&state.topic)loadMsgs(); }
 render();
 </script>
 </body>
