@@ -6,7 +6,7 @@ Thank you for your interest in contributing to **PocketKafka**! We welcome bug r
 
 ## 🛠️ Development Setup
 
-PocketKafka requires **Go 1.22+** and has **zero third-party dependencies**.
+PocketKafka requires **Go 1.26+** and has **zero third-party dependencies**.
 
 ```bash
 # 1. Clone repository

@@ -6,7 +6,7 @@
 
 **An ultra-lightweight, all-in-one, 100% pure-Go Kafka streaming platform with zero external dependencies.**
 
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-success.svg?style=flat-square)](go.mod)
 [![Docker Image Size](https://img.shields.io/badge/Docker%20Size-%3C%2029MB-brightgreen.svg?style=flat-square)](#-run-with-docker)
@@ -81,7 +81,7 @@ docker compose -f docker-compose.minimal.yml down
 
 ---
 
-### Option 2: Build and Run from Source (Go 1.22+)
+### Option 2: Build and Run from Source (Go 1.26+)
 
 ```sh
 # 1. Build binary
