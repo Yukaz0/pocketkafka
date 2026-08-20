@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Yukaz0/pocketkafka/internal/tier"
@@ -259,4 +260,19 @@ func (s *Store) Close() error {
 		}
 	}
 	return firstErr
+}
+
+// DiskUsagePct reports the percentage of the data directory's filesystem that
+// is used, for the web UI health alarm (0-100). It returns 0 if the stat call
+// fails (e.g. unsupported platform), so the UI stays quiet.
+func (s *Store) DiskUsagePct() float64 {
+	var fs syscall.Statfs_t
+	if err := syscall.Statfs(s.dir, &fs); err != nil {
+		return 0
+	}
+	if fs.Blocks == 0 {
+		return 0
+	}
+	used := float64(fs.Blocks - fs.Bfree)
+	return used / float64(fs.Blocks) * 100
 }

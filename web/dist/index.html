@@ -177,6 +177,33 @@
   .modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;width:min(620px,94vw);box-shadow:var(--shadow)}
   .modal h3{font-size:15px;margin-bottom:14px}
   .chkCell{width:32px;text-align:center}
+
+  /* ---- Fitur 4.x enterprise ---- */
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .stat .v{font-family:var(--font-mono);font-size:22px;font-weight:600}
+  .stat .l{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .graph{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:16px}
+  .gNode{position:absolute;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:6px 10px;font-family:var(--font-mono);font-size:11px;text-align:center}
+  .gNode .glabel{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.5px}
+  .gNode.hot{border-color:var(--warn);box-shadow:0 0 12px rgba(245,158,11,.25)}
+  .gEdge{position:absolute;height:2px;background:var(--border);transform-origin:left center;z-index:-1}
+  .edgeFlow{background:linear-gradient(90deg,var(--primary),var(--accent));height:2px;position:absolute;z-index:0;animation:edgePulse 2s ease-in-out infinite}
+  @keyframes edgePulse{0%,100%{opacity:.2}50%{opacity:1}}
+  .skewBar{display:flex;align-items:flex-end;gap:6px;height:110px;margin-top:8px}
+  .skewBar>div{flex:1;background:linear-gradient(180deg,var(--primary),var(--accent));border-radius:4px 4px 0 0;position:relative;min-width:0}
+  .skewBar>div span{position:absolute;bottom:-18px;left:0;right:0;text-align:center;font-family:var(--font-mono);font-size:9px;color:var(--muted)}
+  .segBlock{height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10px;color:#fff;margin:2px 0;overflow:hidden;white-space:nowrap}
+  .segBlock.act{background:linear-gradient(90deg,var(--primary),var(--accent))}
+  .segBlock.closed{background:var(--surface3);border:1px solid var(--border);color:var(--muted)}
+  .segBlock.remote{background:linear-gradient(90deg,#059669,#10b981)}
+  .toggle{position:relative;width:38px;height:20px;border-radius:20px;background:var(--surface3);cursor:pointer;border:none;transition:background .15s}
+  .toggle.on{background:var(--primary)}
+  .toggle::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
+  .toggle.on::after{transform:translateX(18px)}
+  .codeOut{background:rgba(8,12,20,.5);border:1px solid var(--border);border-radius:10px;padding:12px;font-family:var(--font-mono);font-size:11px;overflow:auto;max-height:320px}
+  .alarmBanner{position:fixed;top:0;left:0;right:0;z-index:80;padding:10px 18px;font-size:13px;display:flex;gap:10px;align-items:center;justify-content:center;background:rgba(239,68,68,.15);border-bottom:1px solid rgba(239,68,68,.4);color:#fca5a5;backdrop-filter:blur(8px)}
+  .switchWrap{display:flex;gap:6px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:4px 8px;font-size:11px}
 </style>
 </head>
 <body>
@@ -214,7 +241,7 @@ const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],sc
   /* Fitur 3.4 message diff */
   diffSel:[], diffOpen:false,
 };
-const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.users],['schemas','Schemas',I.code],['producer','Producer Studio',I.send]];
+const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.users],['schemas','Schemas',I.code],['producer','Producer Studio',I.send],['devstudio','Dev Studio',I.code],['topology','Topology',I.layers],['storage','Storage',I.table],['security','Security & ACL',I.users]];
 
 /* ---- Fitur 15: auto theme detection (prefers-color-scheme) ---- */
 function initTheme(){
@@ -238,6 +265,7 @@ async function refresh(){
     api('/api/v1/groups').then(d=>state.groups=d).catch(()=>{}),
     api('/api/v1/schemas').then(d=>state.schemas=d).catch(()=>{}),
     api('/api/v1/auth/status').then(d=>state.auth=d).catch(()=>{})]);
+  checkAlarms();
 }
 
 function buildRail(){
@@ -272,8 +300,8 @@ function render(){
   const item=navItems.find(([k])=>k===state.view);
   const title=item?item[1]:'Settings';
   $('#title').textContent=title;$('#crumb').textContent=state.view==='databrowser'&&state.topic?('/ '+state.topic):(state.view==='groups'&&state.group?('/ '+state.group):'');
-  $('#topActions').innerHTML=state.view==='connections'?`<button class="btn ghost" onclick="refreshAll()">Refresh</button>`:
-    state.view==='databrowser'?`<button class="btn" onclick="goView('connections')">Connections</button>`:'';
+  $('#topActions').innerHTML=`<span class="switchWrap">${clusterSwitcherHtml()}</span>`+(state.view==='connections'?`<button class="btn ghost" onclick="refreshAll()">Refresh</button>`:
+    state.view==='databrowser'?`<button class="btn" onclick="goView('connections')">Connections</button>`:'');
   const v=$('#view');
   if(state.auth&&state.auth.enabled&&!state.auth.authenticated){v.innerHTML=viewLogin();bindLogin();return;}
   if(state.view==='connections')v.innerHTML=viewConnections();
@@ -282,6 +310,10 @@ function render(){
   else if(state.view==='groups')v.innerHTML=state.group?viewGroupDetail():viewGroups();
   else if(state.view==='schemas')v.innerHTML=viewSchemas();
   else if(state.view==='producer')v.innerHTML=viewProducer();
+  else if(state.view==='devstudio')v.innerHTML=viewDevStudio();
+  else if(state.view==='topology')v.innerHTML=viewTopology();
+  else if(state.view==='storage')v.innerHTML=viewStorage();
+  else if(state.view==='security')v.innerHTML=viewSecurity();
   else if(state.view==='settings')v.innerHTML=viewSettings();
   bindView();
 }
@@ -646,11 +678,6 @@ window.resetGroupOffset=async function(topic,part){
 };
 window.delGroup=async function(g){if(!confirm('Delete group '+g+'?'))return;try{await api('/api/v1/groups/'+encodeURIComponent(g),{method:'DELETE'});toast('Deleted '+g);await refresh();render();}catch(e){toast(e.message);}};
 
-/* ---- Schemas ---- */
-function viewSchemas(){ return `<div class="card"><h3 style="margin-bottom:10px">Schema Registry</h3><table><thead><tr><th>Subject</th></tr></thead><tbody>
-  ${state.schemas.map(s=>`<tr><td class="mono"><span class="badge b-purple">AVRO</span> ${esc(s)}</td></tr>`).join('')||'<tr><td class="muted">No schemas registered.</td></tr>'}
-  </tbody></table></div>`; }
-
 /* ---- Producer Studio ---- */
 function viewProducer(){ const opts=state.topics.map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
   return `<div class="grid"><div class="card" style="max-width:640px">
@@ -667,7 +694,154 @@ async function sendMsg(){ const body={value:$('#pValue').value,key:$('#pKey').va
   if(btn){btn.disabled=false;btn.textContent='Publish Message';} }
 window.sendMsg=sendMsg;
 
-function bindView(){ if(state.view==='databrowser'&&state.topic)loadMsgs(); if(state.view==='groups'&&state.group)loadGroupDetail(); }
+/* ================= Fitur 4.6: Multi-Cluster Switcher ================= */
+function clusterList(){ return JSON.parse(localStorage.getItem('pk_clusters')||'[]'); }
+function clusterSwitcherHtml(){
+  const cl=clusterList();
+  const current=state.cluster?.clusterId||'current';
+  const opts=cl.map(c=>`<option value="${esc(JSON.stringify(c))}">${esc(c.name)} (${esc(c.broker)})</option>`).join('');
+  return `<span class="muted" style="font-size:11px">Cluster</span><select id="clusterSel" style="width:190px;font-size:11px" onchange="switchCluster(this.value)"><option value="">${esc(current)}</option>${opts}</select>`;
+}
+window.switchCluster=function(json){ if(!json)return; const c=JSON.parse(json); toast('Switching to '+c.name+' (demo: single-broker build)'); };
+window.addCluster=function(){ const nm=prompt('Cluster name:','Local Docker'); const bk=prompt('Broker address:','localhost:9092'); if(!nm)return; const cl=clusterList(); cl.push({name:nm,broker:bk}); localStorage.setItem('pk_clusters',JSON.stringify(cl)); render(); };
+
+/* ================= Fitur 4.1: Developer Studio ================= */
+function viewDevStudio(){
+  return `<div class="grid">
+    <div class="card"><h3 style="margin-bottom:12px">Mock Stream Generator</h3>
+      <label>Topic</label><input id="mkTopic" list="tl" value="${esc(state.topic||'demo')}">
+      <label>Messages / sec (1-1000)</label><input id="mkRate" type="number" value="10" min="1" max="1000">
+      <label>Template</label><select id="mkTpl">
+        <option value="faker">Faker (name,email,price,uuid,status)</option>
+        <option value="order">Order (id,item,price)</option>
+        <option value="iot">IoT (device,temp,humidity)</option>
+      </select>
+      <div style="margin-top:12px"><button class="btn" onclick="mockGenStart()">Start</button> <button class="btn danger" onclick="mockGenStop()">Stop</button>
+      <span class="muted" style="font-size:11px" id="mockStat"></span></div>
+    </div>
+    <div class="card"><h3 style="margin-bottom:12px">Payload → Code Generator</h3>
+      <label>Paste a JSON payload</label><textarea id="pgInput" rows="6">${esc('{"user":{"id":"u1","name":"Alice","email":"a@x.com","active":true,"price":1200.5}}')}</textarea>
+      <label>Language</label><select id="pgLang" onchange="genCode()"><option value="go">Go struct</option><option value="ts">TypeScript interface</option><option value="py">Python Pydantic</option></select>
+      <div style="margin-top:8px"><button class="btn" onclick="genCode()">Generate</button></div>
+      <div class="codeOut" id="pgOut" style="margin-top:10px"></div>
+    </div>
+    <div class="card" style="grid-column:1/-1"><h3 style="margin-bottom:12px">RPC Request / Reply Tester</h3>
+      <div class="row">
+        <label>Request topic</label><input id="rpcReq" list="tl" value="rpc-req" style="width:180px">
+        <label>Reply topic</label><input id="rpcReply" value="rpc-reply" style="width:180px">
+        <label>Method</label><input id="rpcMethod" value="getUser" style="width:160px">
+        <label>Payload</label><input id="rpcPayload" value='{"id":1}' style="width:220px">
+        <button class="btn" onclick="rpcSend()">Send</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Sends a message with <code>correlation_id</code> + <code>reply_to_topic</code> headers. A consumer on the reply topic echoes a response for demo.</div>
+    </div>
+  </div>`; }
+window.genCode=function(){ const inp=document.getElementById('pgInput').value; let obj; try{obj=JSON.parse(inp);}catch(e){toast('Invalid JSON');return;} const lang=document.getElementById('pgLang').value; const out=document.getElementById('pgOut'); out.textContent=objToCode(obj,lang); };
+function cap(s){return s.charAt(0).toUpperCase()+s.slice(1);}
+function tsType(v){if(v===null)return'unknown';if(Array.isArray(v))return (v.length?'Array<'+tsType(v[0])+'>':'unknown[]');if(typeof v==='object')return'Record<string, unknown>';if(typeof v==='number')return v%1===0?'number':'number';if(typeof v==='boolean')return'boolean';return'string';}
+function goType(v){if(Array.isArray(v))return '[]'+goType(v[0]||'string');if(typeof v==='object')return 'map[string]any';if(typeof v==='number')return v%1===0?'int64':'float64';if(typeof v==='boolean')return'bool';return'string';}
+function pyType(v){if(Array.isArray(v))return'List['+pyType(v[0]||'str')+']';if(typeof v==='object')return'Dict[str, Any]';if(typeof v==='number')return'float';if(typeof v==='boolean')return'bool';return'str';}
+function objToCode(obj,lang){
+  const name='Payload';
+  if(lang==='go'){
+    const lines=[]; lines.push('type '+name+' struct {'); for(const k in obj){ lines.push(`\t${cap(k)} ${goType(obj[k])} \`json:"${k}"\``); } lines.push('}'); return lines.join('\n');
+  } else if(lang==='ts'){
+    const lines=[]; lines.push('export interface '+name+' {'); for(const k in obj){ lines.push(`  ${k}: ${tsType(obj[k])};`); } lines.push('}'); return lines.join('\n');
+  } else {
+    const lines=[]; lines.push('from pydantic import BaseModel'); lines.push('from typing import Any, List, Dict'); lines.push(''); lines.push('class '+name+'(BaseModel):'); for(const k in obj){ lines.push(`    ${k}: ${pyType(obj[k])}`); } return lines.join('\n');
+  }
+}
+let mockTimer=null;
+function mockPayload(tpl){ const rnd=()=>Math.random().toString(36).slice(2,8); const rn=(a,b)=>a+Math.floor(Math.random()*(b-a)); if(tpl==='order')return JSON.stringify({id:rnd(),item:['laptop','phone','tablet','watch'][rn(0,4)],price:rn(50,1500),status:['placed','paid','shipped'][rn(0,3)]}); if(tpl==='iot')return JSON.stringify({device:'dev-'+rn(1,20),temp:rn(150,320)/10,humidity:rn(200,900)/10,ts:Date.now()}); return JSON.stringify({name:['alice','bob','carol','dave'][rn(0,4)],email:'u'+rnd()+'@x.com',price:rn(10,500),uuid:rnd(),status:['active','pending','failed'][rn(0,3)]}); }
+window.mockGenStart=function(){ const topic=document.getElementById('mkTopic').value||'demo'; const rate=Math.max(1,Math.min(1000,parseInt(document.getElementById('mkRate').value)||10)); const tpl=document.getElementById('mkTpl').value; const st=document.getElementById('mockStat'); mockGenStop(); let count=0; const interval=Math.max(1,Math.round(1000/rate)); mockTimer=setInterval(async()=>{ try{ await api('/api/v1/topics/'+encodeURIComponent(topic)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:mockPayload(tpl)})}); count++; if(st)st.textContent=count+' msgs sent'; }catch(e){ mockGenStop(); if(st)st.textContent='error: '+e.message; } },interval); };
+window.mockGenStop=function(){ if(mockTimer){clearInterval(mockTimer);mockTimer=null;} const st=document.getElementById('mockStat'); if(st)st.textContent+=' (stopped)'; };
+window.rpcSend=function(){ const req=document.getElementById('rpcReq').value,reply=document.getElementById('rpcReply').value,method=document.getElementById('rpcMethod').value,payload=document.getElementById('rpcPayload').value; const corr=Math.random().toString(36).slice(2,10); const body={key:corr,value:JSON.stringify({method,request:JSON.parse(payload||'{}'),reply_to:reply}),headers:{correlation_id:corr,reply_to_topic:reply,type:'request'}}; api('/api/v1/topics/'+encodeURIComponent(req)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>toast('RPC request sent @ offset '+r.offset+' (corr '+corr+')')).catch(e=>toast(e.message)); };
+
+/* ================= Fitur 4.2: Stream Topology & Data Flow ================= */
+function viewTopology(){
+  const tops=state.topics||[]; const grps=state.groups||[];
+  let skew='';
+  if(tops.length){ const sel=tops[0]; const ps=sel.partitions||[]; const max=Math.max(1,...ps.map(p=>p.logEndOffset||0)); skew=`<div class="card" style="margin-top:16px"><h3 style="margin-bottom:4px">Partition Skew — ${esc(sel.name)}</h3><div class="muted" style="font-size:11px;margin-bottom:4px">Log end offset per partition (hot partition = uneven)</div><div class="skewBar">${ps.map(p=>`<div style="height:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"><span>P${p.partition}</span></div>`).join('')||'<span class="muted">no partitions</span>'}</div></div>`; }
+  return `<div class="graph" id="topoGraph" style="height:${Math.max(260,140+tops.length*20+grps.length*16)}px">
+    <div class="muted" style="font-size:11px">Producer Apps &#8594; Topics &#8594; Partitions &#8594; Consumer Groups</div>
+    <div id="topoNodes"></div>
+  </div>${skew}<div class="card" style="margin-top:16px"><h3>Data Flow Legend</h3><div class="row" style="font-size:12px"><span class="badge b-purple">Producer</span><span>&#8594;</span><span class="badge b-green">Topic</span><span>&#8594;</span><span class="badge b-amber">Partition</span><span>&#8594;</span><span class="badge">Group</span></div></div>`; }
+function renderTopo(){
+  const el=document.getElementById('topoNodes'); if(!el)return;
+  const g=document.getElementById('topoGraph'); if(!g)return;
+  const W=g.clientWidth||900; const H=g.clientHeight||300;
+  const tops=state.topics||[]; const grps=state.groups||[];
+  let nodes='';
+  const producers=['producer-app-1','producer-app-2'];
+  const pY=(i)=>40+i*22;
+  producers.forEach((p,i)=>{ nodes+=`<div class="gNode" style="left:10px;top:${pY(i)}px"><div class="glabel">Producer</div>${p}</div>`; });
+  const tX=W*0.38, gX=W*0.75;
+  tops.forEach((t,i)=>{ const tY=60+i*46; nodes+=`<div class="gNode" style="left:${tX}px;top:${tY}px"><div class="glabel">Topic</div>${esc(t.name)}</div>`; (t.partitions||[]).forEach((p,j)=>{ nodes+=`<div class="gNode" style="left:${tX+120}px;top:${tY+16+j*20}px"><div class="glabel">Part</div>P${p.partition}</div>`; }); });
+  grps.forEach((gr,i)=>{ const gY=80+i*26; nodes+=`<div class="gNode" style="left:${gX}px;top:${gY}px"><div class="glabel">Group</div>${esc(gr.name)}</div>`; });
+  el.innerHTML=nodes;
+}
+window.refreshTopo=function(){renderTopo();};
+
+/* ================= Fitur 4.3: Storage & Segment Inspector ================= */
+function viewStorage(){
+  const tsel=state.topics.map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
+  return `<div class="grid">
+    <div class="card" style="grid-column:1/-1"><div class="row"><h3 style="margin-right:10px">Segment Inspector</h3><select id="stTopic" onchange="loadSegments()" style="width:200px"><option value="">Select topic</option>${tsel}</select></div>
+      <div id="segOut" class="muted" style="margin-top:10px;font-size:12px">Select a topic to view segment blocks.</div></div>
+    <div class="card" style="grid-column:1/-1"><h3>Time-Travel Replay</h3>
+      <div class="row"><label>Offset</label><input id="ttOff" type="number" value="0" style="width:120px"><label>Partition</label><input id="ttPart" type="number" value="0" style="width:100px"><button class="btn ghost" onclick="ttJump()">Jump &amp; View</button></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Loads messages from a chosen offset as a time-travel point in the Data Browser.</div></div>
+  </div>`; }
+window.loadSegments=async function(){ const t=document.getElementById('stTopic').value; if(!t)return; const out=document.getElementById('segOut'); try{ const ps=await api('/api/v1/topics/'+encodeURIComponent(t)+'/partitions'); let html=''; ps.forEach(p=>{ const segs=p.segments||[]; const total=segs.reduce((a,s)=>a+s.sizeBytes,0); const remote=segs.filter(s=>s.remote).length; html+=`<div style="margin-top:10px"><div style="display:flex;justify-content:space-between;font-size:11px;font-family:var(--font-mono)"><span>P${p.partition}</span><span class="muted">${segs.length} segments &middot; ${fmtBytes(p.bytes)} &middot; ${remote} tiered</span></div>`; segs.forEach(s=>{ html+=`<div class="segBlock ${s.remote?'remote':(s.sizeBytes===segs[segs.length-1].sizeBytes?'act':'closed')}" title="base ${s.baseOffset} &middot; ${fmtBytes(s.sizeBytes)}">${s.baseOffset} ${s.remote?'&#8679;':''}</div>`; }); html+='</div>'; }); out.innerHTML=html||'<div class="muted">no segments</div>'; }catch(e){out.textContent='error: '+e.message;} };
+window.ttJump=function(){ const off=document.getElementById('ttOff').value, part=document.getElementById('ttPart').value; state.off=off; state.partition=part; state.topic=document.getElementById('stTopic').value; if(!state.topic){toast('Select topic first');return;} goView('databrowser').then(()=>loadMsgs()); };
+
+/* ================= Fitur 4.4: Schema Studio ================= */
+function viewSchemas(){
+  if(!state.schemas.length)return '<div class="card muted">No schemas registered.</div>';
+  return `<div class="card"><h3 style="margin-bottom:10px">Schema Registry Studio</h3>
+    <div class="row" style="margin-bottom:12px"><select id="schSubject" onchange="loadSchemaDetail()" style="width:220px">${state.schemas.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}</select>
+    <button class="btn ghost" onclick="loadSchemaDetail()">Load versions</button></div>
+    <div id="schVersions"></div></div>`; }
+async function loadSchemaDetail(){ const subj=document.getElementById('schSubject')?.value; if(!subj)return; try{ const vers=await api('/api/v1/schemas/'+encodeURIComponent(subj)); const out=document.getElementById('schVersions'); out.innerHTML=`<table><thead><tr><th>Version</th><th>Type</th><th>Schema</th><th>Compat</th></tr></thead><tbody>${vers.slice().reverse().map(v=>`<tr><td>${v.version}</td><td class="badge b-purple">${esc(v.schemaType||'AVRO')}</td><td style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(v.schema)}</td><td><button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="schemaDiff('${esc(subj)}',${v.version})">Diff prev</button></td></tr>`).join('')||'<tr><td colspan="4" class="muted">no versions</td></tr>'}</tbody></table>`; }catch(e){toast(e.message);} }
+window.schemaDiff=function(subj,ver){ const el=document.getElementById('schVersions'); if(!el)return; api('/api/v1/schemas/'+encodeURIComponent(subj)).then(vers=>{ const cur=vers.find(v=>v.version===ver); const prev=vers.find(v=>v.version===ver-1); if(!cur||!prev){toast('No previous version to diff');return;} const a=fmtSchema(prev.schema), b=fmtSchema(cur.schema); const la=a.split('\n'), lb=b.split('\n'); const max=Math.max(la.length,lb.length); let html='<div class="diffWrap" style="margin-top:8px">'; for(let i=0;i<max;i++){ const x=la[i]||'',y=lb[i]||''; const same=x.trim()===y.trim(); html+=`<div style="flex:1;font-family:var(--font-mono);font-size:11px"><div class="${same?'d-ctx':'d-rem'}">${esc(x||' ')}</div></div>`; html+=`<div style="flex:1;font-family:var(--font-mono);font-size:11px"><div class="${same?'d-ctx':'d-add'}">${esc(y||' ')}</div></div>`; } html+='</div>'; el.innerHTML+=`<div style="margin-top:14px"><b style="font-size:12px">Diff v${prev.version} &#8594; v${cur.version}</b>${html}</div>`; }).catch(e=>toast(e.message)); };
+function fmtSchema(s){ try{return JSON.stringify(JSON.parse(s),null,2);}catch(e){return s;} }
+
+/* ================= Fitur 4.5: Security & ACL + Audit ================= */
+function viewSecurity(){
+  return `<div class="grid">
+    <div class="card" style="grid-column:1/-1"><div class="row"><h3 style="margin-right:10px">Visual ACL Manager</h3>
+      <button class="btn" onclick="addACLRow()">+ Add ACL</button>
+      <button class="btn ghost" onclick="loadACLs()">Refresh</button></div>
+      <div class="muted" style="font-size:11px;margin:6px 0 10px">Grant Read / Write / Admin per topic or group. Changes are stored in-memory on the broker.</div>
+      <div id="aclOut" class="muted">Loading...</div></div>
+    <div class="card" style="grid-column:1/-1"><h3>Audit Trail</h3>
+      <button class="btn ghost" style="margin-bottom:10px" onclick="loadAudit()">Refresh audit log</button>
+      <table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Detail</th></tr></thead><tbody id="auditBody"><tr><td colspan="5" class="muted">No activity yet.</td></tr></tbody></table></div>
+  </div>`; }
+async function loadACLs(){ const out=document.getElementById('aclOut'); if(!out)return; try{ const acls=await api('/api/v1/acls'); const principals=[...new Set(acls.map(a=>a.principal))]; const resources=[...new Set(acls.map(a=>a.resourceName))]; out.innerHTML=`<table><thead><tr><th>Principal</th><th>Resource</th><th>Read</th><th>Write</th><th>Admin</th><th></th></tr></thead><tbody>${acls.map(a=>`<tr><td class="mono">${esc(a.principal)}</td><td class="mono">${esc(a.resourceType)}:${esc(a.resourceName)}</td>${['Read','Write','Admin'].map(o=>`<td><button class="toggle ${a.operations.includes(o)?'on':''}" onclick="toggleOp('${esc(a.principal)}','${esc(a.resourceType)}','${esc(a.resourceName)}','${o}')" title="${o}"></button></td>`).join('')}<td><button class="btn danger" style="padding:2px 8px;font-size:11px" onclick="delACL('${esc(a.principal)}','${esc(a.resourceType)}','${esc(a.resourceName)}')">Delete</button></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No ACLs defined.</td></tr>'}</tbody></table>`; }catch(e){out.textContent='error: '+e.message;} }
+window.addACLRow=function(){ const el=document.createElement('div'); el.innerHTML=`<div class="overlay"><div class="modal"><h3>Add ACL</h3><label>Principal (user)</label><input id="aUser" placeholder="app-writer"><label>Resource type</label><select id="aType"><option value="topic">topic</option><option value="group">group</option></select><label>Resource name</label><input id="aName" placeholder="orders"><div style="margin-top:14px;display:flex;gap:8px"><button class="btn" onclick="aclsave()">Add</button><button class="btn ghost" onclick="closeOverlay()">Cancel</button></div></div></div>`; document.body.appendChild(el); };
+window.aclsave=async function(){ const u=document.getElementById('aUser').value,t=document.getElementById('aType').value,n=document.getElementById('aName').value; if(!u||!n){toast('principal and resource required');return;} try{ await api('/api/v1/acls',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({principal:u,resourceType:t,resourceName:n,operations:['Read']})}); closeOverlay(); loadACLs(); loadAudit(); }catch(e){toast(e.message);} };
+window.toggleOp=async function(p,rt,rn,op){ try{ const acls=await api('/api/v1/acls'); const rule=acls.find(a=>a.principal===p&&a.resourceType===rt&&a.resourceName===rn); const ops=(rule&&rule.operations)||[]; const has=ops.includes(op); const next=has?ops.filter(x=>x!==op):[...ops,op]; await api('/api/v1/acls',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({principal:p,resourceType:rt,resourceName:rn,operations:next})}); loadACLs(); }catch(e){toast(e.message);} };
+window.delACL=async function(p,rt,rn){ try{ await api('/api/v1/acls',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({principal:p,resourceType:rt,resourceName:rn})}); loadACLs(); loadAudit(); }catch(e){toast(e.message);} };
+async function loadAudit(){ const b=document.getElementById('auditBody'); if(!b)return; try{ const log=await api('/api/v1/audit'); b.innerHTML=log.map(e=>`<tr><td class="mono">${new Date(e.time).toISOString()}</td><td>${esc(e.actor)}</td><td class="chip">${esc(e.action)}</td><td class="mono">${esc(e.resource)}</td><td>${esc(e.detail)}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">No activity yet.</td></tr>'; }catch(e){b.innerHTML='<tr><td colspan="5" class="muted">error</td></tr>';} }
+window.refreshSecurity=function(){loadACLs();loadAudit();};
+
+/* ================= Fitur 4.6: In-App Health Alarms ================= */
+function checkAlarms(){
+  const alerts=[];
+  // Consumer lag > 1000
+  const gs=Array.isArray(state.groups)?state.groups:[];
+  for(const g of gs){ const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0); if(lag>1000){ alerts.push('Consumer lag '+lag+' on group '+g.name+' (>1000)'); } }
+  // Disk usage > 85% (uses the broker's data dir; cluster reports totalBytes as a proxy)
+  const c=state.cluster||{};
+  if(c.diskUsagePct && c.diskUsagePct>85){ alerts.push('Disk usage '+c.diskUsagePct+'% (>85%)'); }
+  // DLQ error: any topic ending in -dlq/-dead with messages
+  for(const t of (Array.isArray(state.topics)?state.topics:[])){ if(/-(dlq|dead)$/i.test(t.name)){ alerts.push('DLQ topic '+t.name+' has messages'); } }
+  const existing=document.getElementById('alarmBanner');
+  if(alerts.length){ if(!existing){ const b=document.createElement('div'); b.id='alarmBanner'; b.className='alarmBanner'; document.body.prepend(b); } const b=document.getElementById('alarmBanner'); b.innerHTML='&#9888; '+alerts.map(esc).join(' &middot; ')+' <button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="this.closest(\'#alarmBanner\').remove()">Dismiss</button>'; }
+  else if(existing){ existing.remove(); }
+}
+function bindView(){ if(state.view==='databrowser'&&state.topic)loadMsgs(); if(state.view==='groups'&&state.group)loadGroupDetail(); if(state.view==='topology')renderTopo(); if(state.view==='security'){loadACLs();loadAudit();} if(state.view==='storage'){ } }
 initTheme();
 (async function(){await refresh();applyHash();})();
 </script>

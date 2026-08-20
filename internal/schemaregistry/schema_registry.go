@@ -49,6 +49,27 @@ func (r *Registry) ListSubjects() []string {
 	return subjects
 }
 
+// SchemaVersion is a single registered schema version for the web UI.
+type SchemaVersion struct {
+	Subject    string `json:"subject"`
+	Version    int    `json:"version"`
+	ID         int    `json:"id"`
+	Schema     string `json:"schema"`
+	SchemaType string `json:"schemaType"`
+}
+
+// SubjectVersions returns every registered version for a subject, newest last.
+func (r *Registry) SubjectVersions(subject string) []SchemaVersion {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entries := r.bySubject[subject]
+	out := make([]SchemaVersion, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, SchemaVersion{Subject: e.Subject, Version: e.Version, ID: e.ID, Schema: e.Schema, SchemaType: e.SchemaType})
+	}
+	return out
+}
+
 // Handler returns the HTTP handler exposing the Confluent-compatible API.
 func (r *Registry) Handler() http.Handler {
 	mux := http.NewServeMux()

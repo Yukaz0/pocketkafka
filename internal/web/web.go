@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Yukaz0/pocketkafka/internal/config"
@@ -32,6 +33,12 @@ type Server struct {
 	users       []config.SecurityUser
 	authSecret  string
 	authEnabled bool
+
+	// Enterprise (Fitur 4.5): in-memory visual ACL + audit trail.
+	aclMu    sync.RWMutex
+	acls     map[string]ACLRule // key "principal|resourceType|resourceName"
+	auditMu  sync.Mutex
+	auditLog []AuditEntry
 }
 
 // New builds a web server bound to the given storage and coordinator.
@@ -45,6 +52,7 @@ func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.
 		version:   version,
 		startTime: time.Now(),
 		metrics:   metrics.NewRegistry(),
+		acls:      make(map[string]ACLRule),
 	}
 }
 
@@ -76,6 +84,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/groups/{group}", s.handleDeleteGroup)
 	mux.HandleFunc("POST /api/v1/groups/{group}/offsets/reset", s.handleResetGroupOffset)
 	mux.HandleFunc("GET /api/v1/schemas", s.handleSchemas)
+	mux.HandleFunc("GET /api/v1/schemas/{subject}", s.handleSchemaDetail)
+	mux.HandleFunc("GET /api/v1/acls", s.handleListACLs)
+	mux.HandleFunc("PUT /api/v1/acls", s.handleUpsertACL)
+	mux.HandleFunc("DELETE /api/v1/acls", s.handleDeleteACL)
+	mux.HandleFunc("GET /api/v1/audit", s.handleAudit)
 	mux.HandleFunc("GET /api/v1/topics/{topic}/tail", s.handleTailWS)
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
@@ -128,14 +141,15 @@ func (s *Server) handleCluster(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]interface{}{
-		"clusterId":  s.clusterID,
-		"brokerId":   s.brokerID,
-		"version":    s.version,
-		"status":     "green",
-		"topics":     len(topics),
-		"partitions": partitions,
-		"totalBytes": totalBytes,
-		"groups":     len(s.gm.ListGroups()),
+		"clusterId":    s.clusterID,
+		"brokerId":     s.brokerID,
+		"version":      s.version,
+		"status":       "green",
+		"topics":       len(topics),
+		"partitions":   partitions,
+		"totalBytes":   totalBytes,
+		"diskUsagePct": s.store.DiskUsagePct(),
+		"groups":       len(s.gm.ListGroups()),
 	})
 }
 
