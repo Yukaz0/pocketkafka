@@ -1,4 +1,4 @@
-// Command kctl (built as pkctl) is the admin CLI for pocketkafka built on the bundled
+// Command pkctl is the admin CLI for pocketkafka built on the bundled
 // zero-dependency client SDK (pkg/client).
 package main
 
@@ -23,7 +23,7 @@ import (
 var outputFormat string
 
 func main() {
-	fs := flag.NewFlagSet("kctl", flag.ExitOnError)
+	fs := flag.NewFlagSet("pkctl", flag.ExitOnError)
 	brokers := fs.String("b", "localhost:9092", "comma-separated broker addresses")
 	output := fs.String("o", "", "output format: table (default) or json")
 	partitions := fs.Int("p", 1, "number of partitions (create)")
@@ -115,7 +115,7 @@ func main() {
 		}
 	}
 
-	kc, err := client.NewClient(splitBrokers(*brokers), "kctl")
+	kc, err := client.NewClient(splitBrokers(*brokers), "pkctl")
 	if err != nil {
 		fatal("connect", err)
 	}
@@ -129,7 +129,7 @@ func main() {
 		cmdTopics(kc)
 	case "create":
 		if len(args) < 2 {
-			fatal("usage", fmt.Errorf("kctl create <topic> [-p partitions]"))
+			fatal("usage", fmt.Errorf("pkctl create <topic> [-p partitions]"))
 		}
 		if err := kc.CreateTopic(rest[1], *partitions); err != nil {
 			fatal("create", err)
@@ -137,7 +137,7 @@ func main() {
 		fmt.Printf("created topic %q (%d partition(s))\n", rest[1], *partitions)
 	case "delete":
 		if len(args) < 2 {
-			fatal("usage", fmt.Errorf("kctl delete <topic>"))
+			fatal("usage", fmt.Errorf("pkctl delete <topic>"))
 		}
 		if err := kc.DeleteTopic(rest[1]); err != nil {
 			fatal("delete", err)
@@ -145,7 +145,7 @@ func main() {
 		fmt.Printf("deleted topic %q\n", rest[1])
 	case "produce":
 		if len(args) < 3 {
-			fatal("usage", fmt.Errorf("kctl produce <topic> <value> [-k key]"))
+			fatal("usage", fmt.Errorf("pkctl produce <topic> <value> [-k key]"))
 		}
 		p := client.NewProducer(kc, client.DefaultProducerConfig())
 		off, err := p.SendSync(context.Background(), &client.Message{Topic: rest[1], Key: []byte(*key), Value: []byte(rest[2])})
@@ -155,7 +155,7 @@ func main() {
 		fmt.Printf("produced -> %s offset=%d\n", rest[1], off)
 	case "consume":
 		if len(args) < 2 {
-			fatal("usage", fmt.Errorf("kctl consume <topic> [-g group] [-n count]"))
+			fatal("usage", fmt.Errorf("pkctl consume <topic> [-g group] [-n count]"))
 		}
 		cmdConsume(kc, rest[1], *group, *count, *timeout)
 	case "groups":
@@ -164,21 +164,21 @@ func main() {
 		cmdSchema(*schemaURL, rest[1:], *schemaFile, *subject)
 	case "offset":
 		if len(rest) < 2 {
-			fatal("usage", fmt.Errorf("kctl offset reset --group G --topic T [--to-earliest|--to-latest|--to-offset N]"))
+			fatal("usage", fmt.Errorf("pkctl offset reset --group G --topic T [--to-earliest|--to-latest|--to-offset N]"))
 		}
 		switch rest[1] {
 		case "reset":
 			if *group == "" || *topic == "" {
-				fatal("usage", fmt.Errorf("kctl offset reset requires --group and --topic"))
+				fatal("usage", fmt.Errorf("pkctl offset reset requires --group and --topic"))
 			}
 			cmdOffsetReset(kc, *group, *topic, *toEarliest, *toLatest, *toOffset)
 		case "get":
 			if *group == "" || *topic == "" {
-				fatal("usage", fmt.Errorf("kctl offset get requires --group and --topic"))
+				fatal("usage", fmt.Errorf("pkctl offset get requires --group and --topic"))
 			}
 			cmdOffsetGet(kc, *group, *topic)
 		default:
-			fatal("usage", fmt.Errorf("kctl offset: unknown subcommand %q", rest[1]))
+			fatal("usage", fmt.Errorf("pkctl offset: unknown subcommand %q", rest[1]))
 		}
 	default:
 		usage()
@@ -258,7 +258,7 @@ func cmdTopics(kc *client.KafkaClient) {
 
 func cmdConsume(kc *client.KafkaClient, topic, group string, n int, timeout time.Duration) {
 	if group == "" {
-		group = "kctl-" + strconv.FormatInt(time.Now().Unix(), 10)
+		group = "pkctl-" + strconv.FormatInt(time.Now().Unix(), 10)
 	}
 	received := 0
 	cfg := client.DefaultConsumerGroupConfig()
@@ -373,7 +373,7 @@ func cmdGroups(kc *client.KafkaClient) {
 
 func cmdSchema(baseURL string, args []string, schemaFile, subject string) {
 	if len(args) == 0 {
-		fatal("usage", fmt.Errorf("kctl schema list | register --subject S --file F"))
+		fatal("usage", fmt.Errorf("pkctl schema list | register --subject S --file F"))
 		return
 	}
 	switch args[0] {
@@ -400,7 +400,7 @@ func cmdSchema(baseURL string, args []string, schemaFile, subject string) {
 		}
 	case "register":
 		if schemaFile == "" || subject == "" {
-			fatal("usage", fmt.Errorf("kctl schema register --subject S --file F"))
+			fatal("usage", fmt.Errorf("pkctl schema register --subject S --file F"))
 		}
 		schemaData, err := os.ReadFile(schemaFile)
 		if err != nil {
@@ -421,7 +421,7 @@ func cmdSchema(baseURL string, args []string, schemaFile, subject string) {
 		}
 		fmt.Println(string(body))
 	default:
-		fatal("usage", fmt.Errorf("kctl schema: unknown subcommand %q", args[0]))
+		fatal("usage", fmt.Errorf("pkctl schema: unknown subcommand %q", args[0]))
 	}
 }
 
@@ -474,24 +474,24 @@ func urlEncode(s string) string {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `kctl - admin CLI for pocketkafka
+	fmt.Fprintln(os.Stderr, `pkctl - admin CLI for pocketkafka
 
 Usage:
-  kctl [-b localhost:9092] [-o table|json] cluster
-  kctl [-b ...] topics
-  kctl [-b ...] create <topic> [-p partitions]
-  kctl [-b ...] delete <topic>
-  kctl [-b ...] produce <topic> <value> [-k key]
-  kctl [-b ...] consume <topic> [-g group] [-n count]
-  kctl [-b ...] groups
-  kctl [-b ...] offset get --group G --topic T
-  kctl [-b ...] offset reset --group G --topic T [--to-earliest|--to-latest|--to-offset N]
-  kctl schema list [-url http://localhost:8081]
-  kctl schema register --subject S --file ./schema.avsc [-url http://localhost:8081]`)
+  pkctl [-b localhost:9092] [-o table|json] cluster
+  pkctl [-b ...] topics
+  pkctl [-b ...] create <topic> [-p partitions]
+  pkctl [-b ...] delete <topic>
+  pkctl [-b ...] produce <topic> <value> [-k key]
+  pkctl [-b ...] consume <topic> [-g group] [-n count]
+  pkctl [-b ...] groups
+  pkctl [-b ...] offset get --group G --topic T
+  pkctl [-b ...] offset reset --group G --topic T [--to-earliest|--to-latest|--to-offset N]
+  pkctl schema list [-url http://localhost:8081]
+  pkctl schema register --subject S --file ./schema.avsc [-url http://localhost:8081]`)
 }
 
 func fatal(what string, err error) {
-	fmt.Fprintf(os.Stderr, "kctl: %s: %v\n", what, err)
+	fmt.Fprintf(os.Stderr, "pkctl: %s: %v\n", what, err)
 	os.Exit(1)
 }
 

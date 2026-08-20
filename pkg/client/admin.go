@@ -198,7 +198,7 @@ func (c *KafkaClient) DeleteGroup(group string) error {
 }
 
 // ResetOffset commits a new offset for a group/topic/partition (Key 8). It is
-// the CLI/admin backend for `kctl offset reset`.
+// the CLI/admin backend for `pkctl offset reset`.
 func (c *KafkaClient) ResetOffset(group, topic string, partition int32, offset int64) error {
 	req := &protocol.OffsetCommitRequest{
 		Version: c.version(protocol.APKOffsetCommit),
