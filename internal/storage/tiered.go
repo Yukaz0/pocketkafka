@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/tier"
+	"github.com/Yukaz0/pocketkafka/internal/tier"
 )
 
 // EnableTiering activates S3/MinIO tiered storage: closed segments older than

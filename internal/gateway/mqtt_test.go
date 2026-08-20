@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/storage"
-	"github.com/neu/go-kafka-neu/pkg/protocol"
+	"github.com/Yukaz0/pocketkafka/internal/storage"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
 func mqttPacket(ptype byte, payload []byte) []byte {

@@ -1,5 +1,5 @@
 // Command client-example demonstrates the zero-dependency client SDK
-// (pkg/client) talking to the go-kafka-neu broker.
+// (pkg/client) talking to the pocketkafka broker.
 package main
 
 import (
@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/neu/go-kafka-neu/pkg/client"
+	"github.com/Yukaz0/pocketkafka/pkg/client"
 )
 
 func main() {
@@ -42,7 +42,7 @@ func main() {
 func produce(kc *client.KafkaClient, topic string, count int) {
 	p := client.NewProducer(kc, client.DefaultProducerConfig())
 	for i := 0; i < count; i++ {
-		value := fmt.Sprintf("hello from go-kafka-neu #%d", i)
+		value := fmt.Sprintf("hello from pocketkafka #%d", i)
 		off, err := p.SendSync(context.Background(), &client.Message{Topic: topic, Value: []byte(value)})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "produce: %v\n", err)

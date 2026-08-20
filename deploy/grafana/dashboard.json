@@ -1,7 +1,7 @@
 {
   "dashboard": {
-    "uid": "go-kafka-neu",
-    "title": "go-kafka-neu",
+    "uid": "pocketkafka",
+    "title": "pocketkafka",
     "tags": ["kafka"],
     "timezone": "browser",
     "schemaVersion": 39,
@@ -92,7 +92,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
         "targets": [
           {
-            "expr": "go_kafka_topic_bytes",
+            "expr": "pocketkafka_topic_bytes",
             "legendFormat": "{{topic}}/{{partition}}"
           }
         ],

@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/neu/go-kafka-neu/internal/config"
+	"github.com/Yukaz0/pocketkafka/internal/config"
 )
 
 func TestAuthenticatePlain(t *testing.T) {

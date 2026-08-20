@@ -1,4 +1,4 @@
-// Package web embeds the go-kafka-neu frontend (single-page dashboard) so it
+// Package web embeds the pocketkafka frontend (single-page dashboard) so it
 // can be served directly from the broker binary via //go:embed. The embedded
 // assets live in web/dist.
 package web

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/tier"
+	"github.com/Yukaz0/pocketkafka/internal/tier"
 )
 
 // Topic groups the partitions that make up one logical topic.

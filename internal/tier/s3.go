@@ -1,4 +1,4 @@
-// Package tier implements tiered (cold) storage for go-kafka-neu: old segments
+// Package tier implements tiered (cold) storage for pocketkafka: old segments
 // are offloaded to an S3/MinIO-compatible object store and fetched back on
 // demand. It uses a zero-dependency HTTP client with AWS Signature V4 signing.
 package tier

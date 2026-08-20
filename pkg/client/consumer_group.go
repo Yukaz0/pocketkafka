@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/neu/go-kafka-neu/pkg/protocol"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
 // ConsumedMessage is a single record received by a consumer.

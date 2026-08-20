@@ -3,7 +3,7 @@ package client
 import (
 	"sort"
 
-	"github.com/neu/go-kafka-neu/pkg/protocol"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
 // CreateTopic creates a topic with the given partition count.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/neu/go-kafka-neu/internal/storage"
+	"github.com/Yukaz0/pocketkafka/internal/storage"
 )
 
 func TestRESTProxyPublishRoute(t *testing.T) {

@@ -1,4 +1,4 @@
-// Package gateway implements multi-protocol HTTP ingress for go-kafka-neu: a
+// Package gateway implements multi-protocol HTTP ingress for pocketkafka: a
 // lightweight REST proxy (port 8082) that lets non-Kafka services publish and
 // consume messages over plain HTTP.
 package gateway
@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/storage"
-	"github.com/neu/go-kafka-neu/pkg/protocol"
+	"github.com/Yukaz0/pocketkafka/internal/storage"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
 // RESTProxy is the HTTP REST proxy gateway.

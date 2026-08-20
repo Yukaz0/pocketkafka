@@ -1,9 +1,9 @@
-# go-kafka-neu broker configuration.
+# pocketkafka broker configuration.
 # See docs/CONFIG_SPEC.md for the full parameter reference and env overrides.
 
 broker:
   id: 0
-  cluster_id: "go-kafka-neu-local"
+  cluster_id: "pocketkafka-local"
   rack: ""
 
 listeners:
@@ -25,7 +25,7 @@ storage:
   tiered:
     enabled: false             # S3/MinIO cold offload (set true to enable)
     endpoint: "http://localhost:9000"
-    bucket: "go-kafka-neu"
+    bucket: "pocketkafka"
     access_key: "minioadmin"
     secret_key: "minioadmin"
     region: "us-east-1"

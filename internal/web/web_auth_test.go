@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/neu/go-kafka-neu/internal/config"
-	"github.com/neu/go-kafka-neu/internal/coordinator"
-	"github.com/neu/go-kafka-neu/internal/storage"
+	"github.com/Yukaz0/pocketkafka/internal/config"
+	"github.com/Yukaz0/pocketkafka/internal/coordinator"
+	"github.com/Yukaz0/pocketkafka/internal/storage"
 )
 
 // TestAuthIntegration verifies the web UI login flow (Fitur 12): unauthenticated

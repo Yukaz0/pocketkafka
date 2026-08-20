@@ -1,4 +1,4 @@
-// Command kctl is a small admin CLI for go-kafka-neu built on the bundled
+// Command kctl (built as pkctl) is the admin CLI for pocketkafka built on the bundled
 // zero-dependency client SDK (pkg/client).
 package main
 
@@ -16,7 +16,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/neu/go-kafka-neu/pkg/client"
+	"github.com/Yukaz0/pocketkafka/pkg/client"
 )
 
 // outputFormat is bound to the global -o/--output flag.
@@ -225,10 +225,10 @@ func cmdCluster(kc *client.KafkaClient) {
 		parts += len(kc.Partitions(t))
 	}
 	if outputFormat == "json" {
-		renderTable([]string{"broker", "topics", "partitions"}, [][]any{{"go-kafka-neu", len(topics), parts}})
+		renderTable([]string{"broker", "topics", "partitions"}, [][]any{{"pocketkafka", len(topics), parts}})
 		return
 	}
-	fmt.Printf("broker:      %s\n", "go-kafka-neu")
+	fmt.Printf("broker:      %s\n", "pocketkafka")
 	fmt.Printf("topics:      %d\n", len(topics))
 	fmt.Printf("partitions:  %d\n", parts)
 	for _, t := range topics {
@@ -474,7 +474,7 @@ func urlEncode(s string) string {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `kctl - admin CLI for go-kafka-neu
+	fmt.Fprintln(os.Stderr, `kctl - admin CLI for pocketkafka
 
 Usage:
   kctl [-b localhost:9092] [-o table|json] cluster

@@ -31,7 +31,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  # 3. All-in-One Custom Go Kafka Engine (go-kafka-neu)
+  # 3. All-in-One Custom Go Kafka Engine (pocketkafka)
   #    Single Binary Container:
   #    - Port 9092 & 29092: Kafka Wire Protocol (Menggantikan Redpanda/Kafka)
   #    - Port 8080: Embedded Web UI Dashboard (Menggantikan Kadeck Web)
@@ -42,7 +42,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: go-kafka-neu:latest
+    image: pocketkafka:latest
     container_name: local-kafka
     deploy:
       resources:
@@ -63,10 +63,10 @@ services:
       - KAFKA_ENABLE_WEB_UI=true
       - KAFKA_ENABLE_SCHEMA_REGISTRY=true
       - KAFKA_ENABLE_REST_PROXY=true
-      - KAFKA_DATA_DIR=/var/lib/go-kafka/data
+      - KAFKA_DATA_DIR=/var/lib/pocketkafka/data
       - KAFKA_LOG_LEVEL=info
     volumes:
-      - kafka_data:/var/lib/go-kafka/data
+      - kafka_data:/var/lib/pocketkafka/data
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "9092"]
       interval: 10s

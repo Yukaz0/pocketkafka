@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/neu/go-kafka-neu/pkg/protocol"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
 // BrokerNode describes one broker and its cached connection.

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/config"
+	"github.com/Yukaz0/pocketkafka/internal/config"
 )
 
 // authCookieName is the name of the signed login cookie.

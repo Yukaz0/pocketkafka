@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/config"
-	"github.com/neu/go-kafka-neu/internal/handler"
-	"github.com/neu/go-kafka-neu/pkg/protocol"
+	"github.com/Yukaz0/pocketkafka/internal/config"
+	"github.com/Yukaz0/pocketkafka/internal/handler"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
 // Server accepts TCP connections and dispatches Kafka requests.
@@ -61,7 +61,7 @@ func (s *Server) Start() error {
 			return fmt.Errorf("listen on %s: %w", addr, err)
 		}
 		s.listeners = append(s.listeners, ln)
-		log.Printf("go-kafka-neu listening on %s", addr)
+		log.Printf("pocketkafka listening on %s", addr)
 	}
 
 	// Optional TLS (SSL) listener.
@@ -78,7 +78,7 @@ func (s *Server) Start() error {
 			return fmt.Errorf("listen TLS on %s: %w", s.cfg.Security.TLS.Listen, err)
 		}
 		s.listeners = append(s.listeners, ln)
-		log.Printf("go-kafka-neu TLS listening on %s", s.cfg.Security.TLS.Listen)
+		log.Printf("pocketkafka TLS listening on %s", s.cfg.Security.TLS.Listen)
 	}
 
 	for _, ln := range s.listeners {
@@ -306,7 +306,7 @@ func scramUsername(clientFirst string) string {
 func randomSalt(n int) []byte {
 	salt := make([]byte, n)
 	if _, err := rand.Read(salt); err != nil {
-		return []byte("go-kafka-neu-salt")
+		return []byte("pocketkafka-salt")
 	}
 	return salt
 }

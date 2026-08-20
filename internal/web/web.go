@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/config"
-	"github.com/neu/go-kafka-neu/internal/coordinator"
-	"github.com/neu/go-kafka-neu/internal/metrics"
-	"github.com/neu/go-kafka-neu/internal/schemaregistry"
-	"github.com/neu/go-kafka-neu/internal/storage"
-	"github.com/neu/go-kafka-neu/pkg/protocol"
-	webui "github.com/neu/go-kafka-neu/web"
+	"github.com/Yukaz0/pocketkafka/internal/config"
+	"github.com/Yukaz0/pocketkafka/internal/coordinator"
+	"github.com/Yukaz0/pocketkafka/internal/metrics"
+	"github.com/Yukaz0/pocketkafka/internal/schemaregistry"
+	"github.com/Yukaz0/pocketkafka/internal/storage"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
+	webui "github.com/Yukaz0/pocketkafka/web"
 )
 
 // Server is the embedded monitoring dashboard. It exposes a REST API and a
@@ -86,7 +86,7 @@ func (s *Server) Handler() http.Handler {
 	return newAuthMiddleware(s.users, s.authSecret, s.authEnabled)(mux)
 }
 
-// handleMetrics exposes go-kafka-neu metrics in Prometheus text format.
+// handleMetrics exposes pocketkafka metrics in Prometheus text format.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.Write([]byte(s.metrics.Render(s.store, s.gm, s.clusterID)))

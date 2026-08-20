@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/storage"
-	"github.com/neu/go-kafka-neu/pkg/protocol"
+	"github.com/Yukaz0/pocketkafka/internal/storage"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
 // MQTT packet types (MQTT 3.1.1).
@@ -51,7 +51,7 @@ func (b *MQTTBridge) Start(addr string) error {
 		return err
 	}
 	b.listener = ln
-	log.Printf("go-kafka-neu MQTT bridge on %s", addr)
+	log.Printf("pocketkafka MQTT bridge on %s", addr)
 	b.wg.Add(1)
 	go b.acceptLoop()
 	return nil

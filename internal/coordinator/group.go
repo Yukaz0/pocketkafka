@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/neu/go-kafka-neu/pkg/protocol"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
 // GroupState models the consumer group rebalance state machine.
@@ -117,7 +117,7 @@ func (gm *GroupManager) nextMemberID() string {
 	gm.nextMemberSeq++
 	seq := gm.nextMemberSeq
 	gm.mu.Unlock()
-	return fmt.Sprintf("go-kafka-neu-%d", seq)
+	return fmt.Sprintf("pocketkafka-%d", seq)
 }
 
 // GroupInfo is a read-only snapshot of a consumer group for the web UI.

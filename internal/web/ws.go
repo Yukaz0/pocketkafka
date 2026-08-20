@@ -1,5 +1,5 @@
 // Package web implements the embedded monitoring dashboard (REST + WebSocket
-// live tail) that ships inside the go-kafka-neu binary on port 8080.
+// live tail) that ships inside the pocketkafka binary on port 8080.
 package web
 
 import (

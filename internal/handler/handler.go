@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/config"
-	"github.com/neu/go-kafka-neu/internal/coordinator"
-	"github.com/neu/go-kafka-neu/internal/storage"
-	"github.com/neu/go-kafka-neu/pkg/protocol"
+	"github.com/Yukaz0/pocketkafka/internal/config"
+	"github.com/Yukaz0/pocketkafka/internal/coordinator"
+	"github.com/Yukaz0/pocketkafka/internal/storage"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
 // Handler routes API requests to the correct logic and encodes responses.

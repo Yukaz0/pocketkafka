@@ -1,3 +1,3 @@
-module github.com/neu/go-kafka-neu
+module github.com/Yukaz0/pocketkafka
 
 go 1.26

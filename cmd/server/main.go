@@ -1,4 +1,4 @@
-// Command server runs the go-kafka-neu broker engine.
+// Command server runs the pocketkafka broker engine.
 package main
 
 import (
@@ -13,16 +13,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/config"
-	"github.com/neu/go-kafka-neu/internal/coordinator"
-	"github.com/neu/go-kafka-neu/internal/gateway"
-	"github.com/neu/go-kafka-neu/internal/handler"
-	"github.com/neu/go-kafka-neu/internal/logger"
-	"github.com/neu/go-kafka-neu/internal/schemaregistry"
-	"github.com/neu/go-kafka-neu/internal/server"
-	"github.com/neu/go-kafka-neu/internal/storage"
-	"github.com/neu/go-kafka-neu/internal/tier"
-	"github.com/neu/go-kafka-neu/internal/web"
+	"github.com/Yukaz0/pocketkafka/internal/config"
+	"github.com/Yukaz0/pocketkafka/internal/coordinator"
+	"github.com/Yukaz0/pocketkafka/internal/gateway"
+	"github.com/Yukaz0/pocketkafka/internal/handler"
+	"github.com/Yukaz0/pocketkafka/internal/logger"
+	"github.com/Yukaz0/pocketkafka/internal/schemaregistry"
+	"github.com/Yukaz0/pocketkafka/internal/server"
+	"github.com/Yukaz0/pocketkafka/internal/storage"
+	"github.com/Yukaz0/pocketkafka/internal/tier"
+	"github.com/Yukaz0/pocketkafka/internal/web"
 )
 
 var version = "dev"
@@ -37,7 +37,7 @@ func main() {
 	}
 	logger.Init(cfg.Logging.Level, cfg.Logging.Format)
 
-	log.Printf("go-kafka-neu v%s starting (cluster=%s data_dir=%s)",
+	log.Printf("pocketkafka v%s starting (cluster=%s data_dir=%s)",
 		version, cfg.Broker.ClusterID, cfg.Storage.DataDir)
 
 	// Storage engine.
@@ -68,7 +68,7 @@ func main() {
 	sr := schemaregistry.New()
 	srSrv := &http.Server{Addr: cfg.SchemaRegistry.Listen, Handler: sr.Handler()}
 	go func() {
-		log.Printf("go-kafka-neu schema registry on http://%s", cfg.SchemaRegistry.Listen)
+		log.Printf("pocketkafka schema registry on http://%s", cfg.SchemaRegistry.Listen)
 		if err := srSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("schema registry error: %v", err)
 		}
@@ -80,7 +80,7 @@ func main() {
 		Handler: web.New(store, gm, sr, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).WithAuth(cfg).Handler(),
 	}
 	go func() {
-		log.Printf("go-kafka-neu web UI on http://%s", cfg.Web.Listen)
+		log.Printf("pocketkafka web UI on http://%s", cfg.Web.Listen)
 		if err := webSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("web server error: %v", err)
 		}
@@ -89,7 +89,7 @@ func main() {
 	// HTTP REST Proxy gateway (port 8082).
 	gwSrv := &http.Server{Addr: cfg.Gateway.Listen, Handler: gateway.NewRESTProxy(store).Handler()}
 	go func() {
-		log.Printf("go-kafka-neu REST proxy on http://%s", cfg.Gateway.Listen)
+		log.Printf("pocketkafka REST proxy on http://%s", cfg.Gateway.Listen)
 		if err := gwSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("rest proxy error: %v", err)
 		}
@@ -127,7 +127,7 @@ func main() {
 		threshold := time.Duration(cfg.Storage.Tiered.OffloadAfterHours) * time.Hour
 		stopTiering := store.EnableTiering(client, threshold, interval)
 		defer stopTiering()
-		log.Printf("go-kafka-neu tiered storage enabled -> %s/%s", cfg.Storage.Tiered.Endpoint, cfg.Storage.Tiered.Bucket)
+		log.Printf("pocketkafka tiered storage enabled -> %s/%s", cfg.Storage.Tiered.Endpoint, cfg.Storage.Tiered.Bucket)
 	}
 
 	sig := make(chan os.Signal, 1)

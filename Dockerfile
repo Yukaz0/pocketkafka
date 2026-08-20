@@ -1,4 +1,4 @@
-# go-kafka-neu: multi-stage scratch build (< 25MB, zero external deps).
+# pocketkafka: multi-stage scratch build (< 25MB, zero external deps).
 # See docs/DEPLOYMENT_AND_OPS.md.
 
 # Stage 1: build the broker binary
@@ -14,7 +14,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-s -w -X main.version=1.0.0" \
-    -o /app/bin/go-kafka-neu ./cmd/server
+    -o /app/bin/pocketkafka ./cmd/server
 
 # Stage 2: minimal runtime image
 FROM alpine:3.20
@@ -22,19 +22,19 @@ FROM alpine:3.20
 WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata netcat-openbsd
 
-COPY --from=builder /app/bin/go-kafka-neu /usr/local/bin/go-kafka-neu
-COPY config/config.yaml /etc/go-kafka/config.yaml
+COPY --from=builder /app/bin/pocketkafka /usr/local/bin/pocketkafka
+COPY config/config.yaml /etc/pocketkafka/config.yaml
 
 # Kafka TCP listeners + Embedded Web UI (8080) + Schema Registry (8081) +
 # REST Proxy (8082) + MQTT Bridge (1883)
 EXPOSE 9092 29092 8080 8081 8082 1883
 
-VOLUME ["/var/lib/go-kafka/data"]
+VOLUME ["/var/lib/pocketkafka/data"]
 
-ENV KAFKA_DATA_DIR=/var/lib/go-kafka/data
+ENV KAFKA_DATA_DIR=/var/lib/pocketkafka/data
 
-ENTRYPOINT ["go-kafka-neu"]
-CMD ["--config", "/etc/go-kafka/config.yaml"]
+ENTRYPOINT ["pocketkafka"]
+CMD ["--config", "/etc/pocketkafka/config.yaml"]
 
 # Built-in healthcheck (Fitur 19): the TCP listener must accept connections and
 # the embedded web UI must answer /healthz.

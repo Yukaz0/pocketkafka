@@ -148,7 +148,7 @@ type Config struct {
 // Default returns a Config populated with the documented default values.
 func Default() Config {
 	return Config{
-		Broker: Broker{ID: 0, ClusterID: "go-kafka-neu-local", Rack: ""},
+		Broker: Broker{ID: 0, ClusterID: "pocketkafka-local", Rack: ""},
 		Listeners: map[string]string{
 			"plain":    "0.0.0.0:9092",
 			"internal": "0.0.0.0:29092",
@@ -182,7 +182,7 @@ func Default() Config {
 			MaxRequestSizeBytes: 104857600,
 		},
 		Logging:        Logging{Level: "info", Format: "json"},
-		Web:            Web{Listen: "0.0.0.0:8080", Enabled: true, Auth: false, AuthSecret: "go-kafka-neu-web-secret"},
+		Web:            Web{Listen: "0.0.0.0:8080", Enabled: true, Auth: false, AuthSecret: "pocketkafka-web-secret"},
 		SchemaRegistry: SchemaRegistry{Listen: "0.0.0.0:8081"},
 		Gateway:        Gateway{Listen: "0.0.0.0:8082"},
 		MQTT:           MQTT{Listen: "0.0.0.0:1883"},

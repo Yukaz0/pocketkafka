@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/tier"
+	"github.com/Yukaz0/pocketkafka/internal/tier"
 )
 
 // newMockS3 returns an in-memory S3-compatible server storing PUT/GET objects.

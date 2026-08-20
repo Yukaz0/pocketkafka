@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/neu/go-kafka-neu/internal/coordinator"
-	"github.com/neu/go-kafka-neu/internal/storage"
+	"github.com/Yukaz0/pocketkafka/internal/coordinator"
+	"github.com/Yukaz0/pocketkafka/internal/storage"
 )
 
 // Registry accumulates counters and renders Prometheus text format.
@@ -159,14 +159,14 @@ func (r *Registry) Render(store *storage.Store, gm *coordinator.GroupManager, cl
 			bytes := p.SizeBytes()
 			totalBytes += bytes
 			totalMsgs += leo - earliest
-			fmt.Fprintf(&b, "go_kafka_topic_log_end_offset{topic=%q,partition=%q} %d\n", t.Name, fmt.Sprintf("%d", pid), leo)
-			fmt.Fprintf(&b, "go_kafka_topic_bytes{topic=%q,partition=%q} %d\n", t.Name, fmt.Sprintf("%d", pid), bytes)
+			fmt.Fprintf(&b, "pocketkafka_topic_log_end_offset{topic=%q,partition=%q} %d\n", t.Name, fmt.Sprintf("%d", pid), leo)
+			fmt.Fprintf(&b, "pocketkafka_topic_bytes{topic=%q,partition=%q} %d\n", t.Name, fmt.Sprintf("%d", pid), bytes)
 		}
 	}
-	fmt.Fprintf(&b, "go_kafka_topics %d\n", len(topics))
-	fmt.Fprintf(&b, "go_kafka_partitions %d\n", partitions)
-	fmt.Fprintf(&b, "go_kafka_total_bytes %d\n", totalBytes)
-	fmt.Fprintf(&b, "go_kafka_total_messages %d\n", totalMsgs)
+	fmt.Fprintf(&b, "pocketkafka_topics %d\n", len(topics))
+	fmt.Fprintf(&b, "pocketkafka_partitions %d\n", partitions)
+	fmt.Fprintf(&b, "pocketkafka_total_bytes %d\n", totalBytes)
+	fmt.Fprintf(&b, "pocketkafka_total_messages %d\n", totalMsgs)
 
 	return b.String()
 }
