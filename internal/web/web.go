@@ -35,7 +35,9 @@ func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.
 // Handler returns the HTTP handler exposing the dashboard and API.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.FS(webui.FS())))
+	// Serve the embedded SPA without caching so a rebuilt container always shows
+	// the latest frontend (no stale HTML/CSS/JS after docker compose up).
+	mux.Handle("/", noCache(http.FileServer(http.FS(webui.FS()))))
 	mux.HandleFunc("GET /api/v1/cluster", s.handleCluster)
 	mux.HandleFunc("GET /api/v1/topics", s.handleTopics)
 	mux.HandleFunc("POST /api/v1/topics", s.handleCreateTopic)
@@ -76,6 +78,17 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(b.String()))
 }
 
+// noCache disables HTTP caching for embedded frontend assets.
+func noCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// writeJSON writes a JSON response with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
