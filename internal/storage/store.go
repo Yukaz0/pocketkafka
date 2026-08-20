@@ -231,6 +231,21 @@ func (s *Store) PartitionCount(topic string) int {
 	return len(t.Partitions)
 }
 
+// CompactNow runs log compaction immediately for a topic marked
+// cleanup.policy=compact. It is the backend for the web UI compact action.
+func (s *Store) CompactNow(topic string) error {
+	t := s.GetTopic(topic)
+	if t == nil {
+		return fmt.Errorf("unknown topic: %s", topic)
+	}
+	for _, p := range t.Partitions {
+		if err := p.Compact(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Close closes all open partition segment files.
 func (s *Store) Close() error {
 	s.mu.RLock()

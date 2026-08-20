@@ -67,6 +67,7 @@ type GroupManager struct {
 	brokerPort     int32
 	defaultSession int32
 	nextMemberSeq  int64
+	producers      *ProducerIDManager
 }
 
 // NewGroupManager builds a coordinator for the given broker identity.
@@ -78,7 +79,19 @@ func NewGroupManager(offsets *OffsetStore, nodeID int32, host string, port int32
 		brokerHost:     host,
 		brokerPort:     port,
 		defaultSession: defaultSession,
+		producers:      NewProducerIDManager(),
 	}
+}
+
+// NextProducerID allocates a producer ID/epoch for idempotent or transactional
+// producers (InitProducerId, Key 22).
+func (gm *GroupManager) NextProducerID(transactionalID *string) (int64, int16) {
+	return gm.producers.Next(transactionalID)
+}
+
+// ValidateProducer checks a producer's (transactional ID, PID, epoch) triple.
+func (gm *GroupManager) ValidateProducer(transactionalID string, pid int64, epoch int16) bool {
+	return gm.producers.Validate(transactionalID, pid, epoch)
 }
 
 func (gm *GroupManager) getOrCreate(name string) *Group {
@@ -115,6 +128,18 @@ type GroupInfo struct {
 	LeaderID   string
 	Members    []string
 	Offsets    map[string]map[int32]int64 // topic -> partition -> committed offset
+}
+
+// MemberInfo is a read-only member snapshot used by DescribeGroups and the web
+// UI group detail page.
+type MemberInfo struct {
+	MemberID     string
+	ClientID     string
+	ClientHost   string
+	ProtocolType string
+	Metadata     []byte
+	Assignment   []byte
+	Assigned     map[string][]int32 // topic -> partitions (decoded from assignment)
 }
 
 // ListGroups returns a snapshot of all consumer groups.
@@ -401,6 +426,169 @@ func filterOrder(order []string, remove []string) []string {
 		if !rm[id] {
 			out = append(out, id)
 		}
+	}
+	return out
+}
+
+// ListGroupIDs returns the names of all known consumer groups.
+func (gm *GroupManager) ListGroupIDs() []string {
+	gm.mu.RLock()
+	defer gm.mu.RUnlock()
+	names := make([]string, 0, len(gm.groups))
+	for n := range gm.groups {
+		names = append(names, n)
+	}
+	return names
+}
+
+// GroupExists reports whether a group is registered with the coordinator.
+func (gm *GroupManager) GroupExists(name string) bool {
+	gm.mu.RLock()
+	defer gm.mu.RUnlock()
+	_, ok := gm.groups[name]
+	return ok
+}
+
+// DescribeGroup returns a detailed snapshot of one group for DescribeGroups and
+// the web UI. It returns nil when the group does not exist.
+func (gm *GroupManager) DescribeGroup(name string) *GroupInfo {
+	gm.mu.RLock()
+	g, ok := gm.groups[name]
+	gm.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	info := &GroupInfo{
+		Name:       name,
+		State:      g.State.String(),
+		Generation: g.Generation,
+		LeaderID:   g.LeaderID,
+		Offsets:    gm.offsets.GroupOffsets(name),
+	}
+	for _, id := range g.JoinOrder {
+		if m, ok := g.Members[id]; ok {
+			_ = m
+			info.Members = append(info.Members, id)
+		}
+	}
+	return info
+}
+
+// MembersDetail returns per-member metadata/assignment for a group.
+func (gm *GroupManager) MembersDetail(name string) []MemberInfo {
+	gm.mu.RLock()
+	g, ok := gm.groups[name]
+	gm.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make([]MemberInfo, 0, len(g.Members))
+	for _, id := range g.JoinOrder {
+		m, ok := g.Members[id]
+		if !ok {
+			continue
+		}
+		mi := MemberInfo{
+			MemberID:     m.ID,
+			ClientID:     m.ID,
+			ClientHost:   "/" + m.ID,
+			ProtocolType: m.ProtocolType,
+			Metadata:     protocolMetadata(m.Protocols, g.Protocol),
+		}
+		if a, ok := g.assignments[id]; ok {
+			mi.Assignment = a
+			mi.Assigned = decodeAssignmentFrom(a)
+		}
+		out = append(out, mi)
+	}
+	return out
+}
+
+// DeleteGroup removes a group if it is Empty or Dead. It returns an error when
+// the group is actively consuming (Stable/PreparingRebalance).
+func (gm *GroupManager) DeleteGroup(name string) error {
+	gm.mu.RLock()
+	g, ok := gm.groups[name]
+	gm.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.Members) > 0 {
+		return errNonEmptyGroup
+	}
+	g.State = StateEmpty
+	g.Generation = 0
+	g.LeaderID = ""
+	g.Members = make(map[string]*Member)
+	g.JoinOrder = nil
+	g.assignments = make(map[string][]byte)
+
+	gm.mu.Lock()
+	delete(gm.groups, name)
+	gm.mu.Unlock()
+	return nil
+}
+
+// ResetOffsets sets the committed offset for a group/topic/partition to the
+// given value. It is the backend for the admin reset-offset API.
+func (gm *GroupManager) ResetOffsets(group, topic string, partition int32, offset int64) error {
+	return gm.offsets.Commit(group, topic, partition, &CommittedOffset{Offset: offset})
+}
+
+var errNonEmptyGroup = fmt.Errorf("group is not empty")
+
+// protocolMetadata picks the metadata bytes for the group's chosen protocol.
+func protocolMetadata(protocols []protocol.JoinGroupRequestProtocol, chosen string) []byte {
+	for _, p := range protocols {
+		if p.Name == chosen {
+			return p.Metadata
+		}
+	}
+	if len(protocols) > 0 {
+		return protocols[0].Metadata
+	}
+	return nil
+}
+
+// decodeAssignmentFrom parses a consumer protocol assignment payload
+// (topic array -> partition array) into a map.
+func decodeAssignmentFrom(b []byte) map[string][]int32 {
+	out := make(map[string][]int32)
+	if len(b) == 0 {
+		return out
+	}
+	r := protocol.NewReader(b)
+	n, err := r.ReadArrayLen()
+	if err != nil || n < 0 {
+		return out
+	}
+	for i := 0; i < n; i++ {
+		topic, err := r.ReadString()
+		if err != nil {
+			break
+		}
+		pn, err := r.ReadArrayLen()
+		if err != nil || pn < 0 {
+			break
+		}
+		var parts []int32
+		for j := 0; j < pn; j++ {
+			p, err := r.ReadInt32()
+			if err != nil {
+				break
+			}
+			parts = append(parts, p)
+		}
+		out[topic] = parts
 	}
 	return out
 }

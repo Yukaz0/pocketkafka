@@ -34,9 +34,15 @@ go build -o bin/kctl ./cmd/kctl   # admin CLI
 
 # admin CLI examples
 ./bin/kctl -b localhost:9092 topics
+./bin/kctl -b localhost:9092 topics -o json          # JSON output
 ./bin/kctl -b localhost:9092 create demo -p 1
 ./bin/kctl -b localhost:9092 produce demo "hello"
 ./bin/kctl -b localhost:9092 consume demo -g g1 -n 5
+./bin/kctl -b localhost:9092 groups                  # per-partition lag
+./bin/kctl -b localhost:9092 offset get --group g1 --topic demo
+./bin/kctl -b localhost:9092 offset reset --group g1 --topic demo --to-earliest
+./bin/kctl schema list                               # Schema Registry (8081)
+./bin/kctl schema register --subject demo-value --file ./schema.avsc
 ./bin/kctl -b localhost:9092 delete demo
 
 # in another terminal: publish and consume via the bundled SDK
@@ -76,20 +82,38 @@ extra container names/ports are free.
 - **Kafka wire protocol** (`pkg/protocol`): hand-written BigEndian reader/writer,
   frame slicing, RecordBatch v2 codec with Castagnoli CRC-32C, and codecs for the
   core API keys. Advertises conservative non-flexible max versions so standard
-  clients (rpk, kcat, franz-go, sarama) interoperate.
+  clients (rpk, kcat, franz-go, sarama) interoperate. Includes **RecordBatch
+  compression** (gzip via stdlib, plus pure-Go snappy & LZ4 block codecs) and
+  codecs for group admin (`DescribeGroups`/`ListGroups`/`DeleteGroups`),
+  `InitProducerId`, and the transaction APIs (`AddPartitionsToTxn`,
+  `AddOffsetsToTxn`, `EndTxn`).
 - **Storage engine** (`internal/storage`): append-only commit log with sparse
   binary index, segment rolling, retention, crash recovery, **log compaction**
-  (`cleanup.policy=compact`), and **S3/MinIO tiered storage** with on-demand fetch.
-- **Client SDK** (`pkg/client`): zero-dependency producer (batch/async) and a
-  rebalancing consumer group.
-- **Group coordinator** (`internal/coordinator`): consumer group state machine and
-  offset store.
+  (`cleanup.policy=compact`), **S3/MinIO tiered storage** with on-demand fetch,
+  and an **idempotent-producer sequence tracker** for exactly-once-in-order
+  appends.
+- **Client SDK** (`pkg/client`): zero-dependency producer with sync/async modes,
+  a **record accumulator (batch-size + linger flush)**, **idempotent** and
+  **transactional** producers, group admin methods, and a rebalancing consumer
+  group.
+- **Group coordinator** (`internal/coordinator`): consumer group state machine,
+  offset store, group admin operations, and a producer-ID manager.
 - **Gateways** (`internal/gateway`): HTTP REST proxy and MQTT bridge.
-- **Embedded UI** (`internal/web` + `web/`): REST API, minimal WebSocket live tail,
-  and an embedded dark-theme SPA served via `//go:embed`.
+- **Embedded UI** (`internal/web` + `web/`): REST API with **group detail &
+  offset reset**, **topic detail (LEO vs HWM chart, truncate, compact)**,
+  message **search/filter/pagination**, WebSocket live tail with
+  **auto-reconnect**, **hash routing**, **auto theme detection**, optional
+  **login (web auth)** via `security.users`, plus `/healthz` & `/livez` health
+  endpoints.
 - **Schema Registry** (`internal/schemaregistry`): Confluent-compatible endpoints.
-- **Security** (`internal/server`): SASL/PLAIN authentication and an optional TLS
-  listener.
+- **Security** (`internal/server`): SASL/PLAIN and **SASL/SCRAM-SHA-256/512**
+  (RFC 5802) authentication and an optional TLS listener.
+- **Observability**: structured `log/slog` JSON logging (`internal/logger`) and a
+  Prometheus exporter at `/metrics` with message/byte counters, consumer-lag
+  gauges and request-latency histograms (`internal/metrics`), plus a ready-to-use
+  Grafana dashboard in `deploy/grafana/`.
+- **Ops**: the Docker image ships a built-in `HEALTHCHECK` that probes the Kafka
+  listener and `/healthz`.
 
 ## Configuration
 

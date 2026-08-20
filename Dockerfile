@@ -35,3 +35,8 @@ ENV KAFKA_DATA_DIR=/var/lib/go-kafka/data
 
 ENTRYPOINT ["go-kafka-neu"]
 CMD ["--config", "/etc/go-kafka/config.yaml"]
+
+# Built-in healthcheck (Fitur 19): the TCP listener must accept connections and
+# the embedded web UI must answer /healthz.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD nc -z localhost 9092 && wget -qO- http://localhost:8080/healthz || exit 1

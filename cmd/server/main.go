@@ -17,6 +17,7 @@ import (
 	"github.com/neu/go-kafka-neu/internal/coordinator"
 	"github.com/neu/go-kafka-neu/internal/gateway"
 	"github.com/neu/go-kafka-neu/internal/handler"
+	"github.com/neu/go-kafka-neu/internal/logger"
 	"github.com/neu/go-kafka-neu/internal/schemaregistry"
 	"github.com/neu/go-kafka-neu/internal/server"
 	"github.com/neu/go-kafka-neu/internal/storage"
@@ -34,6 +35,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
+	logger.Init(cfg.Logging.Level, cfg.Logging.Format)
 
 	log.Printf("go-kafka-neu v%s starting (cluster=%s data_dir=%s)",
 		version, cfg.Broker.ClusterID, cfg.Storage.DataDir)
@@ -75,7 +77,7 @@ func main() {
 	// Embedded Web UI dashboard (port 8080).
 	webSrv := &http.Server{
 		Addr:    cfg.Web.Listen,
-		Handler: web.New(store, gm, sr, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).Handler(),
+		Handler: web.New(store, gm, sr, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).WithAuth(cfg).Handler(),
 	}
 	go func() {
 		log.Printf("go-kafka-neu web UI on http://%s", cfg.Web.Listen)

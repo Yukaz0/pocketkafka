@@ -169,10 +169,19 @@ const I={server:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" str
   moon:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>',
   gear:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'};
 
-const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null};
+const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null};
 const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.users],['schemas','Schemas',I.code],['producer','Producer Studio',I.send]];
 
-async function api(p,o){const r=await fetch(p,o);const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j;}
+/* ---- Fitur 15: auto theme detection (prefers-color-scheme) ---- */
+function initTheme(){
+  const saved=localStorage.getItem('kadeck_theme');
+  if(saved){state.theme=saved;document.documentElement.dataset.theme=saved;return;}
+  const prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;
+  state.theme=prefersDark?'dark':'light';
+  document.documentElement.dataset.theme=state.theme;
+}
+
+async function api(p,o){const r=await fetch(p,o);let j;try{j=await r.json();}catch(e){j={};}if(r.status===401&&state.auth&&state.auth.enabled){showLogin();throw new Error('Authentication required');}if(!r.ok)throw new Error(j.error||r.status);return j;}
 function toast(t){const m=$('#msg');m.textContent=t;m.classList.add('show');setTimeout(()=>m.classList.remove('show'),2500);}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmtBytes(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(1)+' MB';}
@@ -183,7 +192,8 @@ async function refresh(){
   await Promise.allSettled([api('/api/v1/cluster').then(d=>state.cluster=d).catch(()=>{}),
     api('/api/v1/topics').then(d=>state.topics=d).catch(()=>{}),
     api('/api/v1/groups').then(d=>state.groups=d).catch(()=>{}),
-    api('/api/v1/schemas').then(d=>state.schemas=d).catch(()=>{})]);
+    api('/api/v1/schemas').then(d=>state.schemas=d).catch(()=>{}),
+    api('/api/v1/auth/status').then(d=>state.auth=d).catch(()=>{})]);
 }
 
 function buildRail(){
@@ -191,29 +201,131 @@ function buildRail(){
   r.innerHTML='<div class="logo">G</div>'+navItems.map(([k,_,ic])=>`<button data-nav="${k}" class="${state.view===k?'active':''}" title="${_}">${ic}</button>`).join('')
     +'<span class="spacer"></span>'
     +`<button id="theme" title="Theme">${state.theme==='dark'?I.moon:I.sun}</button>`
-    +`<button title="Settings">${I.gear}</button>`;
+    +`<button id="settingsBtn" title="Settings">${I.gear}</button>`;
   navItems.forEach(([k])=>r.querySelector(`[data-nav="${k}"]`).onclick=()=>goView(k));
-  r.querySelector('#theme').onclick=()=>{state.theme=state.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=state.theme;render();};
+  r.querySelector('#theme').onclick=()=>{state.theme=state.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=state.theme;localStorage.setItem('kadeck_theme',state.theme);render();};
+  r.querySelector('#settingsBtn').onclick=()=>goView('settings');
 }
+
+/* ---- Fitur 13: hash router ---- */
+function currentHash(){
+  const h=location.hash.replace(/^#\/?/,'');
+  if(!h)return ['connections',[]];
+  const parts=h.split('/');
+  return [parts[0],parts.slice(1)];
+}
+function applyHash(){
+  const [view,parts]=currentHash();
+  state.view=view;
+  if(view==='databrowser'&&parts[0]){state.topic=decodeURIComponent(parts[0]);}
+  if(view==='groups'&&parts[0]){state.group=decodeURIComponent(parts[0]);}
+  render();
+}
+window.addEventListener('hashchange',applyHash);
 
 function render(){
   buildRail();
-  const title=navItems.find(([k])=>k===state.view)[1];
-  $('#title').textContent=title;$('#crumb').textContent=state.view==='databrowser'&&state.topic?('/ '+state.topic):'';
+  const item=navItems.find(([k])=>k===state.view);
+  const title=item?item[1]:'Settings';
+  $('#title').textContent=title;$('#crumb').textContent=state.view==='databrowser'&&state.topic?('/ '+state.topic):(state.view==='groups'&&state.group?('/ '+state.group):'');
   $('#topActions').innerHTML=state.view==='connections'?`<button class="btn ghost" onclick="refreshAll()">Refresh</button>`:
-    state.view==='databrowser'?`<button class="btn" onclick="state.topic='';render()">Connections</button>`:'';
+    state.view==='databrowser'?`<button class="btn" onclick="goView('connections')">Connections</button>`:'';
   const v=$('#view');
+  if(state.auth&&state.auth.enabled&&!state.auth.authenticated){v.innerHTML=viewLogin();bindLogin();return;}
   if(state.view==='connections')v.innerHTML=viewConnections();
   else if(state.view==='databrowser')v.innerHTML=viewDataBrowser();
-  else if(state.view==='topics')v.innerHTML=viewTopics();
-  else if(state.view==='groups')v.innerHTML=viewGroups();
+  else if(state.view==='topics')v.innerHTML=state.topicDetail?viewTopicDetail():viewTopics();
+  else if(state.view==='groups')v.innerHTML=state.group?viewGroupDetail():viewGroups();
   else if(state.view==='schemas')v.innerHTML=viewSchemas();
   else if(state.view==='producer')v.innerHTML=viewProducer();
+  else if(state.view==='settings')v.innerHTML=viewSettings();
   bindView();
 }
 async function refreshAll(){await refresh();render();}
 window.refreshAll=refreshAll;
-window.goView=async function(v){state.view=v;await refresh();render();};
+window.goView=async function(v){state.view=v;location.hash=v==='connections'?'#/connections':'#/'+v;await refresh();render();};
+
+/* ---- Fitur 12: login ---- */
+function viewLogin(){
+  return `<div style="max-width:360px;margin:80px auto">
+    <div class="card">
+      <h3 style="margin-bottom:14px">Sign in</h3>
+      <label>Username</label><input id="loginUser" autocomplete="username">
+      <div style="height:10px"></div>
+      <label>Password</label><input id="loginPass" type="password" autocomplete="current-password">
+      <div style="height:16px"></div>
+      <button class="btn" style="width:100%" onclick="doLogin()">Login</button>
+    </div>
+  </div>`;
+}
+function bindLogin(){
+  const p=$('#loginPass'); if(p)p.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+}
+window.showLogin=function(){state.auth={enabled:true,authenticated:false};render();};
+window.doLogin=async function(){
+  const u=$('#loginUser').value,p=$('#loginPass').value;
+  if(!u||!p){toast('Enter username and password');return;}
+  try{
+    const r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});
+    if(!r.ok){toast('Invalid credentials');return;}
+    state.auth={enabled:true,authenticated:true};
+    toast('Welcome, '+u);
+    await refresh();render();
+  }catch(e){toast(e.message);}
+};
+window.logout=async function(){
+  await fetch('/api/v1/auth/logout',{method:'POST'});
+  state.auth={enabled:true,authenticated:false};
+  render();
+};
+
+/* ---- Settings ---- */
+function viewSettings(){
+  const c=state.cluster||{};
+  const auth=state.auth||{};
+  return `<div class="grid">
+    <div class="card">
+      <h3 style="margin-bottom:14px">Appearance</h3>
+      <div class="row" style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-soft)">
+        <span>Theme</span>
+        <span><button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="setTheme('dark')">Dark</button>
+        <button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="setTheme('light')">Light</button>
+        <button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="setTheme('auto')">Auto</button></span>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:8px">Auto follows your OS <code>prefers-color-scheme</code>.</div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:14px">Cluster</h3>
+      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Cluster ID</span><span class="mono">${esc(c.clusterId||'-')}</span></div>
+      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Broker</span><span class="mono">${esc(c.brokerId??'-')}</span></div>
+      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Version</span><span class="mono">${esc(c.version||'-')}</span></div>
+      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Topics / Partitions</span><span class="mono">${c.topics??0} / ${c.partitions??0}</span></div>
+      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0"><span class="k muted">Disk usage</span><span class="mono">${fmtBytes(c.totalBytes||0)}</span></div>
+      <div style="margin-top:12px"><button class="btn ghost" onclick="refreshAll()">Refresh</button></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:14px">Session</h3>
+      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)">
+        <span>Authentication</span>
+        <span class="badge ${auth.enabled?'b-amber':'b-green'}">${auth.enabled?'Enabled':'Disabled'}</span>
+      </div>
+      ${auth.enabled?`<div style="margin-top:12px"><button class="btn danger" onclick="logout()">Sign out</button></div>`:''}
+      <div class="muted" style="font-size:11px;margin-top:8px">Web UI auth uses the broker's <code>security.users</code>.</div>
+    </div>
+  </div>`;
+}
+window.setTheme=function(mode){
+  if(mode==='auto'){
+    localStorage.removeItem('kadeck_theme');
+    const prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;
+    state.theme=prefersDark?'dark':'light';
+  }else{
+    state.theme=mode;
+    localStorage.setItem('kadeck_theme',mode);
+  }
+  document.documentElement.dataset.theme=state.theme;
+  render();
+};
 
 /* ---- Connections ---- */
 function viewConnections(){
@@ -258,6 +370,15 @@ function viewDataBrowser(){
         <option value="hex" ${state.decoder==='hex'?'selected':''}>Hex Dump</option>
       </select>
     </div>
+    <div class="toolbar">
+      <input id="searchBox" placeholder="Filter key/value..." value="${esc(state.search)}" style="max-width:220px" onkeydown="if(event.key==='Enter')loadMsgs()">
+      <input id="fromTs" placeholder="From (ms epoch)" value="${esc(state.fromTs)}" style="max-width:140px">
+      <input id="toTs" placeholder="To (ms epoch)" value="${esc(state.toTs)}" style="max-width:140px">
+      <button class="btn ghost" onclick="loadMsgs()">Apply</button>
+      <button class="btn ghost" onclick="prevPage()">&#9664; Prev</button>
+      <button class="btn ghost" onclick="nextPage()">Next &#9654;</button>
+      <span class="muted" id="pageInfo"></span>
+    </div>
     <div class="card" style="padding:0;overflow:hidden">
       <table><thead><tr><th>Timestamp</th><th>Partition</th><th>Offset</th><th>Key</th><th>Headers</th><th>Value</th></tr></thead>
       <tbody id="rows"><tr><td colspan="6" class="muted" style="padding:20px">${state.topic?'Load...':'Select a topic'}</td></tr></tbody></table>
@@ -265,9 +386,24 @@ function viewDataBrowser(){
     <div class="inspector hidden" id="inspector"><h3>Message Inspector</h3><pre id="insp"></pre><div style="margin-top:8px"><button class="btn ghost" onclick="copyInsp()">Copy JSON</button></div></div>`;
 }
 window.setPart=p=>{state.partition=p;loadMsgs();};
-async function loadMsgs(){ if(!state.topic)return; try{ const q=state.partition==='all'?'':'&partition='+state.partition; state.msgs=await api(`/api/v1/topics/${encodeURIComponent(state.topic)}/messages?limit=100${q}`); renderMsgRows(); }catch(e){toast(e.message);} }
+async function loadMsgs(){ if(!state.topic)return; try{
+  const qs=new URLSearchParams(); qs.set('limit','100');
+  if(state.partition!=='all')qs.set('partition',state.partition);
+  if(state.search)qs.set('search',state.search);
+  if(state.fromTs)qs.set('from_ts',state.fromTs);
+  if(state.toTs)qs.set('to_ts',state.toTs);
+  if(state.off)qs.set('offset',state.off);
+  const res=await api(`/api/v1/topics/${encodeURIComponent(state.topic)}/messages?${qs.toString()}`);
+  state.msgs=res.records||res;
+  const pi=$('#pageInfo'); if(pi)pi.textContent=res.count!=null?`${res.count} shown`:'';
+  renderMsgRows();
+}catch(e){toast(e.message);} }
 window.loadMsgs=loadMsgs;
-function renderMsgRows(){ const rows=$('#rows'); if(!rows)return; if(!state.msgs.length){rows.innerHTML='<tr><td colspan="6" class="muted" style="padding:20px">No messages.</td></tr>';return;} function rowHtml(m){const val=fmtValue(m);return `<td><div>${rel(m.timestamp)}</div><div class="rel">${new Date(m.timestamp).toISOString()}</div></td><td><span class="chip">P${m.partition}</span></td><td>${m.offset}</td><td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td><td class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</td><td style="max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td>`;}
+function prevPage(){ if(!state.msgs.length)return; const first=Math.min(...state.msgs.map(m=>m.offset)); state.off=Math.max(0,first-100); loadMsgs(); }
+window.prevPage=prevPage;
+function nextPage(){ if(!state.msgs.length)return; const last=Math.max(...state.msgs.map(m=>m.offset)); state.off=last+1; loadMsgs(); }
+window.nextPage=nextPage;
+function renderMsgRows(){ const rows=$('#rows'); if(!rows)return; if(!state.msgs.length){rows.innerHTML='<tr><td colspan="6" class="muted" style="padding:20px">No messages.</td></tr>';return;} function rowHtml(m){const val=fmtValue(m);return `<td><div>${rel(m.timestamp)}</div><div class="rel">${new Date(m.timestamp).toISOString()}</div></td><td><span class="chip">P${m.partition}</span></td><td>${m.offset}</td><td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td><td><div class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</div></td><td style="max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td>`;}
 rows.innerHTML=state.msgs.slice().reverse().map(m=>'<tr class="rowclick" onclick="insp('+JSON.stringify(m).replace(/"/g,'&quot;')+')">'+rowHtml(m)+'</tr>').join(''); }
 window.renderMsgRows=renderMsgRows;
 let tnId=0;
@@ -284,24 +420,63 @@ function fmtValue(m){ if(state.decoder==='hex')return hex(m.valueB64); if(m.isJS
 function hex(b64){let s='',bin=atob(b64||'');for(let i=0;i<bin.length;i++)s+=bin.charCodeAt(i).toString(16).padStart(2,'0')+' ';return s.trim();}
 function copyInsp(){const p=$('#insp');navigator.clipboard.writeText(p.textContent).then(()=>{const b=document.querySelector('.inspector .btn');if(b){const old=b.textContent;b.textContent='✓ Copied!';b.style.color='var(--success)';setTimeout(()=>{b.textContent=old;b.style.color='';},1500);}else toast('Copied');});}
 window.copyInsp=copyInsp;
-async function seek(ts){ if(!state.topic)return; const off=await api(`/api/v1/topics/${encodeURIComponent(state.topic)}/messages?limit=1${ts<0?'&offset='+(ts===-1?'999999999':0):''}`); /* simple: reload */ await loadMsgs(); }
+async function seek(ts){ if(!state.topic)return; if(ts===-2){state.off=0;}else if(ts===-1){state.off=999999999;} await loadMsgs(); }
 window.seek=seek; function seekOffset(){const o=prompt('Offset:');if(o!==null){state.off=o;loadMsgs();}} window.seekOffset=seekOffset;
 function toggleTail(){ state.tail=!state.tail; const b=$('#liveBtn'); if(b)b.innerHTML=state.tail?'&#9208; Pause':'&#9654; Live Tail'; if(!state.topic){state.tail=false;return;}
   if(state.ws)state.ws.close();
   if(!state.tail)return;
-  const proto=location.protocol==='https:'?'wss':'ws';
-  const ws=new WebSocket(`${proto}://${location.host}/api/v1/topics/${encodeURIComponent(state.topic)}/tail`); state.ws=ws;
-  ws.onmessage=e=>{ const recs=JSON.parse(e.data); if(!recs.length)return; state.msgs=[...recs.slice().reverse(),...state.msgs]; if(state.msgs.length>200)state.msgs=state.msgs.slice(0,200); recs.slice().reverse().forEach(prependMsgRow); };
-function prependMsgRow(m){const rows=$('#rows');if(!rows)return;const tr=document.createElement('tr');tr.className='rowclick animate-row-entry';tr.innerHTML=rowHtml(m);tr.onclick=()=>insp(m);rows.prepend(tr);}
-}
+  connectTail(); }
 window.toggleTail=toggleTail;
+
+/* ---- Fitur 13: WebSocket auto-reconnect with exponential backoff ---- */
+function connectTail(){
+  if(!state.tail)return;
+  const proto=location.protocol==='https:'?'wss':'ws';
+  const ws=new WebSocket(`${proto}://${location.host}/api/v1/topics/${encodeURIComponent(state.topic)}/tail`);
+  state.ws=ws; state.retryCount=state.retryCount||0;
+  ws.onopen=()=>{state.retryCount=0;};
+  ws.onmessage=e=>{ const recs=JSON.parse(e.data); if(!recs.length)return; state.msgs=[...recs.slice().reverse(),...state.msgs]; if(state.msgs.length>200)state.msgs=state.msgs.slice(0,200); recs.slice().reverse().forEach(prependMsgRow); };
+  ws.onclose=()=>{ if(!state.tail)return; const delay=Math.min(1000*Math.pow(1.5,state.retryCount++),10000); state.wsRetry=setTimeout(connectTail,delay); };
+  ws.onerror=()=>{ ws.close(); };
+}
+function prependMsgRow(m){const rows=$('#rows');if(!rows)return;const tr=document.createElement('tr');tr.className='rowclick animate-row-entry';tr.innerHTML=rowHtml(m);tr.onclick=()=>insp(m);rows.prepend(tr);}
 
 /* ---- Topics ---- */
 function viewTopics(){ return `<div class="card"><div style="display:flex;gap:8px;margin-bottom:14px"><input id="newT" placeholder="new topic name" style="max-width:240px"><button class="btn" onclick="createTopic()">Create</button></div>
   <table><thead><tr><th>Topic</th><th>Partitions</th><th>Log End</th><th>Size</th><th></th></tr></thead><tbody>
-  ${state.topics.map(t=>{const ps=t.partitions||[];const max=Math.max(1,...ps.map(p=>p.logEndOffset||0));const bars=ps.map(p=>`<div class="pbar" title="P${p.partition}: LEO ${p.logEndOffset||0}"><span style="width:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"></span></div>`).join('')||'<span class="muted">-</span>';const p=ps[0]||{};return `<tr><td class="mono"><a style="color:var(--primary-text);cursor:pointer" onclick="openTopic('${esc(t.name)}')">${esc(t.name)}</a></td><td style="min-width:90px">${bars}</td><td>${p.logEndOffset??0}</td><td>${fmtBytes(t.totalBytes||0)}</td><td><button class="btn danger" onclick="delTopic('${esc(t.name)}')">Delete</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="muted">No topics</td></tr>'}
+  ${state.topics.map(t=>{const ps=t.partitions||[];const max=Math.max(1,...ps.map(p=>p.logEndOffset||0));const bars=ps.map(p=>`<div class="pbar" title="P${p.partition}: LEO ${p.logEndOffset||0}"><span style="width:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"></span></div>`).join('')||'<span class="muted">-</span>';const p=ps[0]||{};return `<tr><td class="mono"><a style="color:var(--primary-text);cursor:pointer" onclick="openTopicDetail('${esc(t.name)}')">${esc(t.name)}</a></td><td style="min-width:90px">${bars}</td><td>${p.logEndOffset??0}</td><td>${fmtBytes(t.totalBytes||0)}</td><td style="white-space:nowrap"><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="openTopicDetail('${esc(t.name)}')">Detail</button> <button class="btn danger" style="padding:4px 10px;font-size:11px" onclick="delTopic('${esc(t.name)}')">Delete</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="muted">No topics</td></tr>'}
   </tbody></table></div>`; }
 window.openTopic=async n=>{state.topic=n;state.partition='all';await goView('databrowser');loadMsgs();};
+window.openTopicDetail=async n=>{state.view='topics';state.topicDetail=n;render();loadTopicDetail();};
+async function loadTopicDetail(){ if(!state.topicDetail)return; try{
+  state.topicParts=await api(`/api/v1/topics/${encodeURIComponent(state.topicDetail)}/partitions`);
+  render();
+}catch(e){toast(e.message);} }
+window.loadTopicDetail=loadTopicDetail;
+function viewTopicDetail(){ const t=state.topicDetail; if(!t)return '';
+  const ps=state.topicParts||[];
+  const max=Math.max(1,...ps.map(p=>Math.max(p.logEndOffset,p.highWatermark)));
+  const bars=ps.map(p=>{const leo=((p.logEndOffset||0)/max)*100;const hwm=((p.highWatermark||0)/max)*100;
+    return `<div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;margin-bottom:4px"><span>P${p.partition}</span><span class="muted">LEO ${p.logEndOffset} / HWM ${p.highWatermark} / earliest ${p.earliestOffset}</span></div>
+      <div class="pbar" style="height:14px"><span style="width:${leo}%;background:linear-gradient(90deg,var(--primary),var(--accent))"></span></div>
+      <div class="pbar" style="height:6px;margin-top:2px"><span style="width:${hwm}%;background:var(--live)"></span></div>
+      <div class="muted" style="font-size:10px;margin-top:4px">${fmtBytes(p.bytes)} &middot; ${(p.segments||[]).length} segment(s)</div>
+      <div style="margin-top:6px;display:flex;gap:6px">
+        <button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="truncateTopic(${p.partition})">Truncate</button>
+      </div>
+    </div>`;}).join('');
+  return `<div class="grid"><div class="card">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <h3 style="font-size:15px">${esc(t)}</h3>
+      <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="compactTopic()">Compact now</button>
+      <button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.topicDetail=null;render()">Back</button>
+    </div>
+    <div style="margin-bottom:6px" class="muted">LEO (log end) vs HWM (high watermark) per partition</div>
+    ${bars||'<div class="muted">No partitions</div>'}
+  </div></div>`; }
+window.truncateTopic=async function(p){const o=prompt('Truncate partition '+p+' to offset:');if(o===null)return;try{await api(`/api/v1/topics/${encodeURIComponent(state.topicDetail)}/truncate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({partition:p,offset:parseInt(o,10)})});toast('Truncated');loadTopicDetail();}catch(e){toast(e.message);}};
+window.compactTopic=async function(){try{await api(`/api/v1/topics/${encodeURIComponent(state.topicDetail)}/compact`,{method:'POST'});toast('Compaction triggered');}catch(e){toast(e.message);}};
 async function createTopic(){const n=$('#newT').value;if(!n)return;try{await api('/api/v1/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,partitions:1})});toast('Created '+n);await refresh();render();}catch(e){toast(e.message);}}
 window.createTopic=createTopic;
 async function delTopic(n){if(!confirm('Delete topic '+n+'?'))return;try{await api('/api/v1/topics/'+encodeURIComponent(n),{method:'DELETE'});toast('Deleted '+n);await refresh();render();}catch(e){toast(e.message);}}
@@ -309,9 +484,37 @@ window.delTopic=delTopic;
 
 /* ---- Groups ---- */
 function viewGroups(){ if(!state.groups.length)return '<div class="card muted">No consumer groups.</div>';
-  return `<div class="card"><table><thead><tr><th>Group</th><th>State</th><th>Members</th><th>Lag</th></tr></thead><tbody>
-  ${state.groups.map(g=>{const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0);return `<tr><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span></td><td class="mono">${g.members.join(', ')||'-'}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td></tr>`;}).join('')}
+  return `<div class="card"><table><thead><tr><th>Group</th><th>State</th><th>Members</th><th>Lag</th><th></th></tr></thead><tbody>
+  ${state.groups.map(g=>{const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0);return `<tr class="rowclick" onclick="openGroup('${esc(g.name)}')"><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span></td><td class="mono">${g.members.join(', ')||'-'}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td><td><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();delGroup('${esc(g.name)}')">Delete</button></td></tr>`;}).join('')}
   </tbody></table></div>`; }
+window.openGroup=async g=>{state.group=g;location.hash='#/groups/'+encodeURIComponent(g);render();loadGroupDetail();};
+async function loadGroupDetail(){ if(!state.group)return; try{
+  state.groupDetail=await api(`/api/v1/groups/${encodeURIComponent(state.group)}`);
+  render();
+}catch(e){toast(e.message);} }
+window.loadGroupDetail=loadGroupDetail;
+function viewGroupDetail(){ const g=state.groupDetail; if(!g)return '<div class="card muted">Loading...</div>';
+  const lagRows=g.offsets.map(o=>`<tr><td class="mono">${esc(o.topic)}</td><td>${o.partition}</td><td>${o.current_offset}</td><td>${o.log_end_offset}</td><td><span class="badge ${o.lag>0?'b-amber':'b-green'}">${o.lag}</span></td>
+    <td><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="resetGroupOffset('${esc(o.topic)}',${o.partition})">Reset</button></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No committed offsets</td></tr>';
+  const members=g.members.map(m=>`<div class="chip" style="padding:3px 10px;margin:2px">${esc(m.member_id)}${m.client_host?' @ '+esc(m.client_host):''}</div>`).join('')||'<span class="muted">-</span>';
+  return `<div class="grid"><div class="card">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <h3 style="font-size:15px">${esc(g.group_id)}</h3>
+      <span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span>
+      <button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.group=null;location.hash='#/groups';">Back</button>
+    </div>
+    <div class="muted" style="margin-bottom:14px">Protocol: ${esc(g.protocol||'range')} &middot; ${g.members.length} member(s)</div>
+    <div style="margin-bottom:16px">${members}</div>
+    <table><thead><tr><th>Topic</th><th>Partition</th><th>Current</th><th>Log End</th><th>Lag</th><th></th></tr></thead><tbody>${lagRows}</tbody></table>
+  </div></div>`; }
+window.resetGroupOffset=async function(topic,part){
+  const strategy=prompt('Reset strategy (to_earliest | to_latest | to_offset):','to_latest');
+  if(!strategy)return;
+  const body={topic,partition:part,strategy};
+  if(strategy==='to_offset'){const o=prompt('Target offset:');if(o===null)return;body.target_offset=parseInt(o,10);}
+  try{await api(`/api/v1/groups/${encodeURIComponent(state.group)}/offsets/reset`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast('Offset reset');loadGroupDetail();}catch(e){toast(e.message);}
+};
+window.delGroup=async function(g){if(!confirm('Delete group '+g+'?'))return;try{await api('/api/v1/groups/'+encodeURIComponent(g),{method:'DELETE'});toast('Deleted '+g);await refresh();render();}catch(e){toast(e.message);}};
 
 /* ---- Schemas ---- */
 function viewSchemas(){ return `<div class="card"><h3 style="margin-bottom:10px">Schema Registry</h3><table><thead><tr><th>Subject</th></tr></thead><tbody>
@@ -334,8 +537,9 @@ async function sendMsg(){ const body={value:$('#pValue').value,key:$('#pKey').va
   if(btn){btn.disabled=false;btn.textContent='Publish Message';} }
 window.sendMsg=sendMsg;
 
-function bindView(){ if(state.view==='databrowser'&&state.topic)loadMsgs(); }
-(async function(){await refresh();render();})();
+function bindView(){ if(state.view==='databrowser'&&state.topic)loadMsgs(); if(state.view==='groups'&&state.group)loadGroupDetail(); }
+initTheme();
+(async function(){await refresh();applyHash();})();
 </script>
 </body>
 </html>

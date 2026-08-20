@@ -4,6 +4,7 @@
 package handler
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"time"
@@ -50,11 +51,18 @@ func (h *Handler) supportedKeys() []protocol.ApiKeySupport {
 		{ApiKey: protocol.APKHeartbeat, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKHeartbeat)},
 		{ApiKey: protocol.APKLeaveGroup, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKLeaveGroup)},
 		{ApiKey: protocol.APKSyncGroup, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKSyncGroup)},
+		{ApiKey: protocol.APKDescribeGroups, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKDescribeGroups)},
+		{ApiKey: protocol.APKListGroups, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKListGroups)},
 		{ApiKey: protocol.APKSaslHandshake, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKSaslHandshake)},
 		{ApiKey: protocol.APKApiVersions, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKApiVersions)},
 		{ApiKey: protocol.APKCreateTopics, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKCreateTopics)},
 		{ApiKey: protocol.APKDeleteTopics, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKDeleteTopics)},
+		{ApiKey: protocol.APKInitProducerID, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKInitProducerID)},
+		{ApiKey: protocol.APKAddPartitionsToTxn, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKAddPartitionsToTxn)},
+		{ApiKey: protocol.APKAddOffsetsToTxn, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKAddOffsetsToTxn)},
+		{ApiKey: protocol.APKEndTxn, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKEndTxn)},
 		{ApiKey: protocol.APKSaslAuthenticate, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKSaslAuthenticate)},
+		{ApiKey: protocol.APKDeleteGroups, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKDeleteGroups)},
 	}
 }
 
@@ -95,6 +103,20 @@ func (h *Handler) Handle(apiKey, version int16, body []byte) ([]byte, error) {
 		return h.handleOffsetCommit(version, body)
 	case protocol.APKOffsetFetch:
 		return h.handleOffsetFetch(version, body)
+	case protocol.APKListGroups:
+		return h.handleListGroups(version, body)
+	case protocol.APKDescribeGroups:
+		return h.handleDescribeGroups(version, body)
+	case protocol.APKDeleteGroups:
+		return h.handleDeleteGroups(version, body)
+	case protocol.APKInitProducerID:
+		return h.handleInitProducerID(version, body)
+	case protocol.APKAddPartitionsToTxn:
+		return h.handleAddPartitionsToTxn(version, body)
+	case protocol.APKAddOffsetsToTxn:
+		return h.handleAddOffsetsToTxn(version, body)
+	case protocol.APKEndTxn:
+		return h.handleEndTxn(version, body)
 	default:
 		return nil, fmt.Errorf("unsupported api key %d", apiKey)
 	}
@@ -209,20 +231,97 @@ func (h *Handler) handleProduce(version int16, body []byte) ([]byte, error) {
 			if part == nil {
 				rp.ErrorCode = protocol.ErrUnknownTopicOrPartition
 				rp.BaseOffset = -1
+				rt.Partitions = append(rt.Partitions, rp)
+				continue
+			}
+
+			base, aerr := h.appendToPartition(part, p.Records)
+			if aerr != nil {
+				rp.ErrorCode = protocol.ErrCorruptMessage
+				rp.BaseOffset = -1
 			} else {
-				base, aerr := part.Append(p.Records)
-				if aerr != nil {
-					rp.ErrorCode = protocol.ErrCorruptMessage
-					rp.BaseOffset = -1
-				} else {
-					rp.BaseOffset = base
-				}
+				rp.BaseOffset = base
 			}
 			rt.Partitions = append(rt.Partitions, rp)
 		}
 		resp.Topics = append(resp.Topics, rt)
 	}
 	return protocol.EncodeProduceResponse(resp)
+}
+
+// appendToPartition validates and persists one RecordBatch for a produce
+// request. It handles compression (decompressing the batch before storing it so
+// the log always stores uncompressed payloads) and idempotent producer
+// sequence validation.
+func (h *Handler) appendToPartition(part *storage.Partition, raw []byte) (int64, error) {
+	if len(raw) < 61 {
+		return -1, fmt.Errorf("record batch too short")
+	}
+	// Read the compression codec from the attributes field (bytes 21-23)
+	// without decoding the (possibly compressed) records first.
+	attr := int16(binary.BigEndian.Uint16(raw[21:23]))
+	if codec := protocol.CompressionCodec(attr); codec != protocol.CompressionNone {
+		records, derr := protocol.DecompressRecordBatch(raw[61:], attr)
+		if derr != nil {
+			return -1, fmt.Errorf("decompress: %w", derr)
+		}
+		raw = rebuildBatch(raw, records)
+	}
+
+	batch, err := protocol.DecodeRecordBatch(raw)
+	if err != nil {
+		return -1, err
+	}
+	if batch.ProducerID >= 0 {
+		// Idempotent producer path: sequence validation + dedup.
+		return part.AppendIdempotent(batch.ProducerID, batch.ProducerEpoch, batch.BaseSequence, raw)
+	}
+	return part.Append(raw)
+}
+
+// rebuildBatch re-encodes a RecordBatch with decompressed records and a zeroed
+// compression codec, preserving timestamps and producer metadata.
+func rebuildBatch(raw []byte, records []byte) []byte {
+	// Decode the decompressed records so we can re-encode them with codec 0.
+	if len(records) < 4 {
+		return raw
+	}
+	// The records payload is a sequence of varint-length-prefixed records; the
+	// count lives in the header (bytes 57-61). Rebuild the header by hand.
+	count := int32(binary.BigEndian.Uint32(raw[57:61]))
+	rest := records
+	decoded := make([]protocol.Record, 0, count)
+	for i := int32(0); i < count && len(rest) > 0; i++ {
+		length, n := binary.Varint(rest)
+		if n <= 0 || int(length) < 0 || n+int(length) > len(rest) {
+			break
+		}
+		rec, _, err := protocol.DecodeRecordBytes(rest[:n+int(length)])
+		if err != nil {
+			break
+		}
+		decoded = append(decoded, rec)
+		rest = rest[n+int(length):]
+	}
+	if len(decoded) == 0 {
+		return raw
+	}
+	b := &protocol.RecordBatch{
+		PartitionLeaderEpoch: int32(binary.BigEndian.Uint32(raw[12:16])),
+		Attributes:           int16(binary.BigEndian.Uint16(raw[21:23])) &^ 0x07,
+		LastOffsetDelta:      int32(binary.BigEndian.Uint32(raw[23:27])),
+		BaseTimestamp:        int64(binary.BigEndian.Uint64(raw[27:35])),
+		MaxTimestamp:         int64(binary.BigEndian.Uint64(raw[35:43])),
+		ProducerID:           int64(binary.BigEndian.Uint64(raw[43:51])),
+		ProducerEpoch:        int16(binary.BigEndian.Uint16(raw[51:53])),
+		BaseSequence:         int32(binary.BigEndian.Uint32(raw[53:57])),
+		Records:              decoded,
+	}
+	out, err := protocol.EncodeRecordBatch(b)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 func (h *Handler) handleFetch(version int16, body []byte) ([]byte, error) {
@@ -408,6 +507,142 @@ func (h *Handler) handleOffsetFetch(version int16, body []byte) ([]byte, error) 
 	}
 	resp := h.coord.OffsetFetch(req)
 	return protocol.EncodeOffsetFetchResponse(resp)
+}
+
+// handleListGroups (Key 16) lists all registered consumer groups.
+func (h *Handler) handleListGroups(version int16, body []byte) ([]byte, error) {
+	req, err := protocol.DecodeListGroupsRequest(version, body)
+	if err != nil {
+		return nil, err
+	}
+	resp := &protocol.ListGroupsResponse{Version: req.Version, ErrorCode: protocol.ErrNone}
+	for _, id := range h.coord.ListGroupIDs() {
+		resp.Groups = append(resp.Groups, protocol.ListGroupsResponseGroup{
+			GroupID:      id,
+			ProtocolType: "consumer",
+		})
+	}
+	return protocol.EncodeListGroupsResponse(resp)
+}
+
+// handleDescribeGroups (Key 15) returns per-group state, members and protocol.
+func (h *Handler) handleDescribeGroups(version int16, body []byte) ([]byte, error) {
+	req, err := protocol.DecodeDescribeGroupsRequest(version, body)
+	if err != nil {
+		return nil, err
+	}
+	resp := &protocol.DescribeGroupsResponse{Version: req.Version}
+	for _, id := range req.GroupIDs {
+		g := protocol.DescribeGroupsResponseGroup{GroupID: id}
+		info := h.coord.DescribeGroup(id)
+		if info == nil {
+			g.ErrorCode = protocol.ErrGroupIDNotFound
+			g.State = "Dead"
+			resp.Groups = append(resp.Groups, g)
+			continue
+		}
+		g.ErrorCode = protocol.ErrNone
+		g.State = info.State
+		g.ProtocolType = "consumer"
+		g.Protocol = "range"
+		for _, m := range h.coord.MembersDetail(id) {
+			g.Members = append(g.Members, protocol.DescribeGroupsResponseMember{
+				MemberID:         m.MemberID,
+				ClientID:         m.ClientID,
+				ClientHost:       m.ClientHost,
+				MemberMetadata:   m.Metadata,
+				MemberAssignment: m.Assignment,
+			})
+		}
+		resp.Groups = append(resp.Groups, g)
+	}
+	return protocol.EncodeDescribeGroupsResponse(resp)
+}
+
+// handleDeleteGroups (Key 42) deletes empty groups.
+func (h *Handler) handleDeleteGroups(version int16, body []byte) ([]byte, error) {
+	req, err := protocol.DecodeDeleteGroupsRequest(version, body)
+	if err != nil {
+		return nil, err
+	}
+	resp := &protocol.DeleteGroupsResponse{Version: req.Version}
+	for _, id := range req.GroupIDs {
+		g := protocol.DeleteGroupsResponseGroup{GroupID: id, ErrorCode: protocol.ErrNone}
+		if err := h.coord.DeleteGroup(id); err != nil {
+			g.ErrorCode = protocol.ErrNonEmptyGroup
+			msg := "group is not empty"
+			g.ErrorMessage = &msg
+		}
+		resp.Groups = append(resp.Groups, g)
+	}
+	return protocol.EncodeDeleteGroupsResponse(resp)
+}
+
+// handleInitProducerID (Key 22) allocates a producer ID and epoch for
+// idempotent producers and transactions.
+func (h *Handler) handleInitProducerID(version int16, body []byte) ([]byte, error) {
+	req, err := protocol.DecodeInitProducerIdRequest(version, body)
+	if err != nil {
+		return nil, err
+	}
+	pid, epoch := h.coord.NextProducerID(req.TransactionalID)
+	resp := &protocol.InitProducerIdResponse{
+		Version:       req.Version,
+		ErrorCode:     protocol.ErrNone,
+		ProducerID:    pid,
+		ProducerEpoch: epoch,
+	}
+	return protocol.EncodeInitProducerIdResponse(resp)
+}
+
+// handleAddPartitionsToTxn (Key 24) registers partitions with a transaction.
+func (h *Handler) handleAddPartitionsToTxn(version int16, body []byte) ([]byte, error) {
+	req, err := protocol.DecodeAddPartitionsToTxnRequest(version, body)
+	if err != nil {
+		return nil, err
+	}
+	resp := &protocol.AddPartitionsToTxnResponse{Version: req.Version, ErrorCode: protocol.ErrNone}
+	if !h.coord.ValidateProducer(req.TransactionalID, req.ProducerID, req.ProducerEpoch) {
+		resp.ErrorCode = protocol.ErrTransactionCoordinatorFenced
+		return protocol.EncodeAddPartitionsToTxnResponse(resp)
+	}
+	for _, t := range req.Topics {
+		rt := protocol.AddPartitionsToTxnResponseTopic{Topic: t.Topic}
+		for _, p := range t.Partitions {
+			rt.Partitions = append(rt.Partitions, protocol.AddPartitionsToTxnResponsePartition{
+				Partition: p,
+				ErrorCode: protocol.ErrNone,
+			})
+		}
+		resp.Topics = append(resp.Topics, rt)
+	}
+	return protocol.EncodeAddPartitionsToTxnResponse(resp)
+}
+
+// handleAddOffsetsToTxn (Key 25) registers a consumer group with a transaction.
+func (h *Handler) handleAddOffsetsToTxn(version int16, body []byte) ([]byte, error) {
+	req, err := protocol.DecodeAddOffsetsToTxnRequest(version, body)
+	if err != nil {
+		return nil, err
+	}
+	resp := &protocol.AddOffsetsToTxnResponse{Version: req.Version, ErrorCode: protocol.ErrNone}
+	if !h.coord.ValidateProducer(req.TransactionalID, req.ProducerID, req.ProducerEpoch) {
+		resp.ErrorCode = protocol.ErrTransactionCoordinatorFenced
+	}
+	return protocol.EncodeAddOffsetsToTxnResponse(resp)
+}
+
+// handleEndTxn (Key 26) commits or aborts a transaction.
+func (h *Handler) handleEndTxn(version int16, body []byte) ([]byte, error) {
+	req, err := protocol.DecodeEndTxnRequest(version, body)
+	if err != nil {
+		return nil, err
+	}
+	resp := &protocol.EndTxnResponse{Version: req.Version, ErrorCode: protocol.ErrNone}
+	if !h.coord.ValidateProducer(req.TransactionalID, req.ProducerID, req.ProducerEpoch) {
+		resp.ErrorCode = protocol.ErrTransactionCoordinatorFenced
+	}
+	return protocol.EncodeEndTxnResponse(resp)
 }
 
 // longPoll blocks until data beyond fetchOffset is available or maxWait elapses.

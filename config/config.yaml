@@ -57,6 +57,9 @@ logging:
 
 web:
   listen: "0.0.0.0:8080"  # Embedded dashboard (REST + WebSocket live tail)
+  enabled: true
+  auth: false             # Require login to the web UI (uses security.users)
+  auth_secret: "change-me-in-production"
 
 schema_registry:
   listen: "0.0.0.0:8081"  # Confluent-compatible Schema Registry

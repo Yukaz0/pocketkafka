@@ -84,7 +84,12 @@ type Logging struct {
 
 // Web configures the embedded dashboard server.
 type Web struct {
-	Listen string `yaml:"listen"`
+	Listen  string `yaml:"listen"`
+	Enabled bool   `yaml:"enabled"`
+	// Auth enables web UI login using the security.users credentials. The
+	// cookie is HMAC-signed with the secret below.
+	Auth       bool   `yaml:"auth"`
+	AuthSecret string `yaml:"auth_secret"`
 }
 
 // SchemaRegistry configures the embedded Confluent-compatible registry.
@@ -177,7 +182,7 @@ func Default() Config {
 			MaxRequestSizeBytes: 104857600,
 		},
 		Logging:        Logging{Level: "info", Format: "json"},
-		Web:            Web{Listen: "0.0.0.0:8080"},
+		Web:            Web{Listen: "0.0.0.0:8080", Enabled: true, Auth: false, AuthSecret: "go-kafka-neu-web-secret"},
 		SchemaRegistry: SchemaRegistry{Listen: "0.0.0.0:8081"},
 		Gateway:        Gateway{Listen: "0.0.0.0:8082"},
 		MQTT:           MQTT{Listen: "0.0.0.0:1883"},

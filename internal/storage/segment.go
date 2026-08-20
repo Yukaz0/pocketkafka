@@ -208,6 +208,89 @@ func (s *Segment) read(offset int64, maxBytes int32) ([]byte, error) {
 // logEndOffset returns the LEO of this segment.
 func (s *Segment) logEndOffset() int64 { return s.nextOffset }
 
+// truncateTo truncates the segment file to the first byte of the batch that
+// contains the target offset, dropping all data at or after it. The index is
+// rebuilt from the remaining log.
+func (s *Segment) truncateTo(target int64) error {
+	if target <= s.baseOffset {
+		// Everything is after the target: empty the segment.
+		if s.logFile != nil {
+			if err := s.logFile.Truncate(0); err != nil {
+				return err
+			}
+		}
+		s.size = 0
+		s.nextOffset = s.baseOffset
+		if s.index != nil {
+			s.index.reset()
+		}
+		return nil
+	}
+	pos := s.index.positionForOffset(target)
+	var prefix [12]byte
+	for pos < s.size {
+		if _, err := s.logFile.ReadAt(prefix[:], pos); err != nil {
+			return err
+		}
+		baseOffset := int64(binary.BigEndian.Uint64(prefix[0:8]))
+		length := int32(binary.BigEndian.Uint32(prefix[8:12]))
+		if length <= 0 || pos+12+int64(length) > s.size {
+			break
+		}
+		lastOffsetDelta := int32(0)
+		var delta [4]byte
+		if _, err := s.logFile.ReadAt(delta[:], pos+23); err == nil {
+			lastOffsetDelta = int32(binary.BigEndian.Uint32(delta[:]))
+		}
+		if baseOffset+int64(lastOffsetDelta) >= target {
+			break // this batch contains the target; truncate here
+		}
+		pos += 12 + int64(length)
+	}
+	if err := s.logFile.Truncate(pos); err != nil {
+		return err
+	}
+	s.size = pos
+	s.nextOffset = target
+	if s.index != nil {
+		s.index.reset()
+		// Rebuild a sparse index over the remaining log.
+		scan := int64(0)
+		rebuild := int64(0)
+		for scan < s.size {
+			if _, err := s.logFile.ReadAt(prefix[:], scan); err != nil {
+				break
+			}
+			baseOffset := int64(binary.BigEndian.Uint64(prefix[0:8]))
+			length := int32(binary.BigEndian.Uint32(prefix[8:12]))
+			if length <= 0 || scan+12+int64(length) > s.size {
+				break
+			}
+			s.index.maybeAppend(baseOffset, scan)
+			scan += 12 + int64(length)
+			rebuild = scan
+		}
+		_ = rebuild
+	}
+	return nil
+}
+
+// deleteFiles removes the segment's on-disk files (.log, .index, .remote).
+func (s *Segment) deleteFiles() error {
+	if s.logFile != nil {
+		s.logFile.Close()
+	}
+	if s.index != nil {
+		s.index.close()
+	}
+	os.Remove(s.logPath())
+	os.Remove(s.indexPath())
+	if s.remoteStub != "" {
+		os.Remove(s.remoteStub)
+	}
+	return nil
+}
+
 // sizeBytes returns the current on-disk log size.
 func (s *Segment) sizeBytes() int64 { return s.size }
 

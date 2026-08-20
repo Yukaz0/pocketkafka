@@ -13,6 +13,12 @@ type ProducerConfig struct {
 	LingerMs     time.Duration // linger before flushing a batch
 	MaxRetries   int
 	RetryBackoff time.Duration
+
+	// Idempotent enables sequence-numbered idempotent produce (InitProducerId).
+	Idempotent bool
+	// TransactionalID enables exactly-once transactional produce. When set the
+	// producer runs in transactional mode and requires Begin/Commit/Abort.
+	TransactionalID string
 }
 
 // DefaultProducerConfig returns sensible defaults.

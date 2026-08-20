@@ -131,6 +131,16 @@ func (idx *indexFile) size() int64 {
 	return idx.writtenSize
 }
 
+// reset clears the in-memory entries and truncates the index file to zero.
+func (idx *indexFile) reset() error {
+	idx.entries = idx.entries[:0]
+	idx.writtenSize = 0
+	if idx.file != nil {
+		return idx.file.Truncate(0)
+	}
+	return nil
+}
+
 func (idx *indexFile) close() error {
 	if err := idx.file.Sync(); err != nil {
 		idx.file.Close()

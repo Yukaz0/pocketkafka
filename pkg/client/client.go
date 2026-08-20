@@ -68,6 +68,9 @@ func defaultAPIVersions() map[int16]int16 {
 		protocol.APKFindCoordinator, protocol.APKJoinGroup, protocol.APKHeartbeat,
 		protocol.APKLeaveGroup, protocol.APKSyncGroup, protocol.APKApiVersions,
 		protocol.APKCreateTopics, protocol.APKDeleteTopics,
+		protocol.APKDescribeGroups, protocol.APKListGroups, protocol.APKDeleteGroups,
+		protocol.APKInitProducerID, protocol.APKAddPartitionsToTxn,
+		protocol.APKAddOffsetsToTxn, protocol.APKEndTxn,
 	} {
 		out[k] = protocol.MaxVersion(k)
 	}
@@ -203,4 +206,11 @@ func (c *KafkaClient) Close() error {
 		return c.conn.Close()
 	}
 	return nil
+}
+
+// RoundTrip sends a raw request body for an API key/version and returns the
+// raw response body (excluding the correlation ID). It is used by tests and
+// advanced tooling that need direct protocol access.
+func (c *KafkaClient) RoundTrip(apiKey, version int16, reqBody []byte) ([]byte, error) {
+	return c.roundTrip(apiKey, version, reqBody)
 }

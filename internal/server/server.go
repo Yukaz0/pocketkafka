@@ -4,6 +4,7 @@
 package server
 
 import (
+	"crypto/rand"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -26,6 +27,14 @@ type Server struct {
 	tlsConf    *tls.Config
 	wg         sync.WaitGroup
 	closeCh    chan struct{}
+}
+
+// connState carries per-connection authentication state.
+type connState struct {
+	authed        bool
+	mechanism     string // "PLAIN" or "SCRAM-SHA-256"/"SCRAM-SHA-512"
+	scram         *scramSession
+	scramUsername string
 }
 
 // New creates a Server that routes requests to h.
@@ -115,7 +124,7 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	// When SASL is enabled, a connection must authenticate before issuing any
 	// non-SASL request.
-	authed := !s.cfg.Security.Enabled
+	st := &connState{authed: !s.cfg.Security.Enabled}
 
 	for {
 		hdr, body, err := protocol.ReadRequestFrame(conn, s.maxReqSize)
@@ -123,23 +132,23 @@ func (s *Server) handleConn(conn net.Conn) {
 			return
 		}
 
-		if !authed {
+		if !st.authed {
 			switch hdr.ApiKey {
 			case protocol.APKApiVersions:
 				// Allowed pre-auth; falls through to the normal handler.
 			case protocol.APKSaslHandshake:
-				resp, err := s.handleSASLHandshake(hdr, body)
+				resp, err := s.handleSASLHandshake(st, hdr, body)
 				if err != nil {
 					return
 				}
 				s.writeResponse(conn, hdr.CorrelationID, resp)
 				continue
 			case protocol.APKSaslAuthenticate:
-				resp, ok, err := s.handleSASLAuthenticate(hdr, body)
+				resp, ok, err := s.handleSASLAuthenticate(st, hdr, body)
 				if err != nil {
 					return
 				}
-				authed = ok
+				st.authed = ok
 				s.writeResponse(conn, hdr.CorrelationID, resp)
 				continue
 			default:
@@ -158,36 +167,148 @@ func (s *Server) handleConn(conn net.Conn) {
 	}
 }
 
-// handleSASLHandshake responds with the supported SASL mechanism.
-func (s *Server) handleSASLHandshake(hdr *protocol.RequestHeader, body []byte) ([]byte, error) {
+// supportedMechanisms returns the SASL mechanisms this broker implements.
+func (s *Server) supportedMechanisms() []string {
+	if !s.cfg.Security.Enabled {
+		return nil
+	}
+	return []string{"PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"}
+}
+
+// handleSASLHandshake responds with the supported SASL mechanisms and records
+// the mechanism the client selected.
+func (s *Server) handleSASLHandshake(st *connState, hdr *protocol.RequestHeader, body []byte) ([]byte, error) {
 	req, err := protocol.DecodeSASLHandshakeRequest(hdr.ApiVersion, body)
 	if err != nil {
 		return nil, err
 	}
-	resp := &protocol.SASLHandshakeResponse{Version: hdr.ApiVersion, ErrorCode: protocol.ErrNone, Mechanisms: []string{"PLAIN"}}
-	if req.Mechanism != "PLAIN" {
+	resp := &protocol.SASLHandshakeResponse{
+		Version:    hdr.ApiVersion,
+		ErrorCode:  protocol.ErrNone,
+		Mechanisms: s.supportedMechanisms(),
+	}
+	switch req.Mechanism {
+	case "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512":
+		st.mechanism = req.Mechanism
+	default:
 		resp.ErrorCode = protocol.ErrIllegalSaslState
 	}
 	return protocol.EncodeSASLHandshakeResponse(resp)
 }
 
-// handleSASLAuthenticate validates a SASL/PLAIN token and reports success.
-func (s *Server) handleSASLAuthenticate(hdr *protocol.RequestHeader, body []byte) ([]byte, bool, error) {
+// handleSASLAuthenticate validates one SASL exchange step. For PLAIN a single
+// token authenticates; for SCRAM the exchange spans multiple SaslAuthenticate
+// calls (client-first -> server-first -> client-final -> server-final).
+func (s *Server) handleSASLAuthenticate(st *connState, hdr *protocol.RequestHeader, body []byte) ([]byte, bool, error) {
 	req, err := protocol.DecodeSaslAuthenticateRequest(hdr.ApiVersion, body)
 	if err != nil {
 		return nil, false, err
 	}
 	resp := &protocol.SaslAuthenticateResponse{Version: hdr.ApiVersion, SessionLifetimeMs: 0}
-	if s.authenticatePlain(req.AuthBytes) {
-		resp.ErrorCode = protocol.ErrNone
-		out, err := protocol.EncodeSaslAuthenticateResponse(resp)
-		return out, true, err
+
+	switch st.mechanism {
+	case "PLAIN", "":
+		if s.authenticatePlain(req.AuthBytes) {
+			resp.ErrorCode = protocol.ErrNone
+			out, err := protocol.EncodeSaslAuthenticateResponse(resp)
+			return out, true, err
+		}
+		resp.ErrorCode = protocol.ErrSaslAuthenticationFailed
+		msg := "SASL authentication failed"
+		resp.ErrorMessage = &msg
+		out, _ := protocol.EncodeSaslAuthenticateResponse(resp)
+		return out, false, nil
+
+	case "SCRAM-SHA-256", "SCRAM-SHA-512":
+		return s.handleSCRAM(st, hdr.ApiVersion, req.AuthBytes)
+	default:
+		resp.ErrorCode = protocol.ErrIllegalSaslState
+		msg := "no SASL mechanism selected"
+		resp.ErrorMessage = &msg
+		out, _ := protocol.EncodeSaslAuthenticateResponse(resp)
+		return out, false, nil
 	}
+}
+
+// handleSCRAM drives the 4-step SCRAM exchange using the SaslAuthenticate
+// payload as the message carrier.
+func (s *Server) handleSCRAM(st *connState, version int16, authBytes []byte) ([]byte, bool, error) {
+	resp := &protocol.SaslAuthenticateResponse{Version: version, SessionLifetimeMs: 0}
+	msg := string(authBytes)
+
+	// Step 1: client-first-message arrives with no prior session.
+	if st.scram == nil {
+		mech := scramSHA256
+		if st.mechanism == "SCRAM-SHA-512" {
+			mech = scramSHA512
+		}
+		username := scramUsername(msg)
+		user := s.findUser(username)
+		if user == nil {
+			return s.scramErrorResponse(resp, "unknown user")
+		}
+		cred := newScramCredential(mech, user.Password, randomSalt(mech.keySize), mech.iterations)
+		session, serverFirst, err := newScramSession(mech, cred, msg)
+		if err != nil {
+			return s.scramErrorResponse(resp, err.Error())
+		}
+		st.scram = session
+		st.scramUsername = username
+		resp.ErrorCode = protocol.ErrNone
+		resp.AuthBytes = []byte(serverFirst)
+		out, _ := protocol.EncodeSaslAuthenticateResponse(resp)
+		return out, false, nil
+	}
+
+	// Step 2: client-final-message.
+	final, err := st.scram.finish(msg)
+	if err != nil {
+		return s.scramErrorResponse(resp, err.Error())
+	}
+	resp.ErrorCode = protocol.ErrNone
+	resp.AuthBytes = final
+	out, _ := protocol.EncodeSaslAuthenticateResponse(resp)
+	return out, true, nil
+}
+
+func (s *Server) scramErrorResponse(resp *protocol.SaslAuthenticateResponse, reason string) ([]byte, bool, error) {
 	resp.ErrorCode = protocol.ErrSaslAuthenticationFailed
-	msg := "SASL authentication failed"
-	resp.ErrorMessage = &msg
+	resp.ErrorMessage = &reason
 	out, _ := protocol.EncodeSaslAuthenticateResponse(resp)
 	return out, false, nil
+}
+
+func (s *Server) findUser(username string) *config.SecurityUser {
+	for i := range s.cfg.Security.Users {
+		if s.cfg.Security.Users[i].Username == username {
+			return &s.cfg.Security.Users[i]
+		}
+	}
+	return nil
+}
+
+// scramUsername extracts the username from a SCRAM client-first message.
+func scramUsername(clientFirst string) string {
+	// gs2 header "n,," followed by "n=<user>,r=<nonce>[,extensions]"
+	rest := clientFirst
+	if idx := strings.Index(clientFirst, ",,"); idx >= 0 {
+		rest = clientFirst[idx+2:]
+	}
+	for _, part := range strings.Split(rest, ",") {
+		if strings.HasPrefix(part, "n=") {
+			return strings.TrimPrefix(part, "n=")
+		}
+	}
+	return ""
+}
+
+// randomSalt returns a cryptographically random SCRAM salt.
+func randomSalt(n int) []byte {
+	salt := make([]byte, n)
+	if _, err := rand.Read(salt); err != nil {
+		return []byte("go-kafka-neu-salt")
+	}
+	return salt
 }
 
 // authenticatePlain checks a SASL/PLAIN token ("authzid\0authcid\0passwd").

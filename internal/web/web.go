@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
+	"github.com/neu/go-kafka-neu/internal/config"
 	"github.com/neu/go-kafka-neu/internal/coordinator"
+	"github.com/neu/go-kafka-neu/internal/metrics"
 	"github.com/neu/go-kafka-neu/internal/schemaregistry"
 	"github.com/neu/go-kafka-neu/internal/storage"
 	"github.com/neu/go-kafka-neu/pkg/protocol"
@@ -25,11 +25,35 @@ type Server struct {
 	brokerID  int32
 	clusterID string
 	version   string
+	startTime time.Time
+	metrics   *metrics.Registry
+
+	// Auth (Fitur 12).
+	users       []config.SecurityUser
+	authSecret  string
+	authEnabled bool
 }
 
 // New builds a web server bound to the given storage and coordinator.
 func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.Registry, brokerID int32, clusterID string, version string) *Server {
-	return &Server{store: store, gm: gm, sr: sr, brokerID: brokerID, clusterID: clusterID, version: version}
+	return &Server{
+		store:     store,
+		gm:        gm,
+		sr:        sr,
+		brokerID:  brokerID,
+		clusterID: clusterID,
+		version:   version,
+		startTime: time.Now(),
+		metrics:   metrics.NewRegistry(),
+	}
+}
+
+// WithAuth enables web UI login using the given credentials.
+func (s *Server) WithAuth(cfg config.Config) *Server {
+	s.users = cfg.Security.Users
+	s.authSecret = cfg.Web.AuthSecret
+	s.authEnabled = cfg.Security.Enabled && cfg.Web.Auth
+	return s
 }
 
 // Handler returns the HTTP handler exposing the dashboard and API.
@@ -42,40 +66,30 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/topics", s.handleTopics)
 	mux.HandleFunc("POST /api/v1/topics", s.handleCreateTopic)
 	mux.HandleFunc("DELETE /api/v1/topics/{topic}", s.handleDeleteTopic)
-	mux.HandleFunc("GET /api/v1/topics/{topic}/messages", s.handleGetMessages)
+	mux.HandleFunc("GET /api/v1/topics/{topic}/messages", s.handleSearchMessages)
 	mux.HandleFunc("POST /api/v1/topics/{topic}/messages", s.handlePostMessage)
+	mux.HandleFunc("GET /api/v1/topics/{topic}/partitions", s.handleTopicPartitions)
+	mux.HandleFunc("POST /api/v1/topics/{topic}/truncate", s.handleTruncateTopic)
+	mux.HandleFunc("POST /api/v1/topics/{topic}/compact", s.handleCompactTopic)
 	mux.HandleFunc("GET /api/v1/groups", s.handleGroups)
+	mux.HandleFunc("GET /api/v1/groups/{group}", s.handleGroupDetail)
+	mux.HandleFunc("DELETE /api/v1/groups/{group}", s.handleDeleteGroup)
+	mux.HandleFunc("POST /api/v1/groups/{group}/offsets/reset", s.handleResetGroupOffset)
 	mux.HandleFunc("GET /api/v1/schemas", s.handleSchemas)
 	mux.HandleFunc("GET /api/v1/topics/{topic}/tail", s.handleTailWS)
+	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
+	mux.HandleFunc("GET /api/v1/auth/status", s.handleAuthStatus)
+	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("GET /livez", s.handleLivez)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
-	return mux
+	return newAuthMiddleware(s.users, s.authSecret, s.authEnabled)(mux)
 }
 
 // handleMetrics exposes go-kafka-neu metrics in Prometheus text format.
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	var b strings.Builder
-	topics := s.store.TopicsSnapshot()
-	var partitions int
-	var totalBytes, totalMsgs int64
-	for _, t := range topics {
-		for pid, p := range t.Partitions {
-			partitions++
-			leo := p.LogEndOffset()
-			earliest := p.EarliestOffset()
-			bytes := p.SizeBytes()
-			totalBytes += bytes
-			totalMsgs += leo - earliest
-			fmt.Fprintf(&b, "go_kafka_topic_log_end_offset{topic=%q,partition=\"%d\"} %d\n", t.Name, pid, leo)
-			fmt.Fprintf(&b, "go_kafka_topic_bytes{topic=%q,partition=\"%d\"} %d\n", t.Name, pid, bytes)
-		}
-	}
-	fmt.Fprintf(&b, "go_kafka_broker_info{cluster_id=%q} 1\n", s.clusterID)
-	fmt.Fprintf(&b, "go_kafka_topics %d\n", len(topics))
-	fmt.Fprintf(&b, "go_kafka_partitions %d\n", partitions)
-	fmt.Fprintf(&b, "go_kafka_total_bytes %d\n", totalBytes)
-	fmt.Fprintf(&b, "go_kafka_total_messages %d\n", totalMsgs)
-	w.Write([]byte(b.String()))
+	w.Write([]byte(s.metrics.Render(s.store, s.gm, s.clusterID)))
 }
 
 // noCache disables HTTP caching for embedded frontend assets.
@@ -226,32 +240,6 @@ type messageRecord struct {
 	ValueSize int               `json:"valueSize"`
 	IsJSON    bool              `json:"isJSON"`
 	Headers   map[string]string `json:"headers"`
-}
-
-func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
-	topic := r.PathValue("topic")
-	offset, _ := strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64)
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 500 {
-		limit = 50
-	}
-	partition, _ := strconv.Atoi(r.URL.Query().Get("partition"))
-
-	p := s.store.GetPartition(topic, int32(partition))
-	if p == nil {
-		writeErr(w, 404, "unknown topic or partition")
-		return
-	}
-	raw, _, err := p.Read(offset, int32(limit*4096+4096))
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	records := decodeRecords(topic, int32(partition), raw)
-	if len(records) > limit {
-		records = records[:limit]
-	}
-	writeJSON(w, 200, records)
 }
 
 func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {

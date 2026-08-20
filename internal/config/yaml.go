@@ -258,6 +258,9 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 	}
 	if w := asMap(m, "web"); w != nil {
 		cfg.Web.Listen = getString(w, "listen", cfg.Web.Listen)
+		cfg.Web.Enabled = getBool(w, "enabled", cfg.Web.Enabled)
+		cfg.Web.Auth = getBool(w, "auth", cfg.Web.Auth)
+		cfg.Web.AuthSecret = getString(w, "auth_secret", cfg.Web.AuthSecret)
 	}
 	if sr := asMap(m, "schema_registry"); sr != nil {
 		cfg.SchemaRegistry.Listen = getString(sr, "listen", cfg.SchemaRegistry.Listen)

@@ -24,6 +24,10 @@ type Partition struct {
 	maxSegmentBytes int64
 	indexInterval   int64
 
+	// idempotence tracks per-producer sequence numbers when idempotent produce
+	// is enabled.
+	idempotence *PartitionIdempotenceTracker
+
 	// remoteFetch downloads an object-store key (set when tiering is enabled).
 	remoteFetch func(key string) ([]byte, error)
 }
@@ -39,6 +43,7 @@ func OpenPartition(dir, topic string, partitionID int32, maxSegmentBytes, indexI
 		dir:             dir,
 		maxSegmentBytes: maxSegmentBytes,
 		indexInterval:   indexInterval,
+		idempotence:     NewPartitionIdempotenceTracker(),
 	}
 	if err := p.recover(); err != nil {
 		return nil, err
@@ -114,6 +119,91 @@ func (p *Partition) Append(raw []byte) (int64, error) {
 	p.nextOffset = p.activeSegment.nextOffset
 	p.highWatermark = p.nextOffset
 	return assigned, nil
+}
+
+// AppendIdempotent validates the producer sequence for (pid, epoch, baseSeq)
+// and appends the batch only when the sequence advances by one. Duplicate
+// sequences return the previously assigned offset without persisting again.
+func (p *Partition) AppendIdempotent(pid int64, epoch int16, baseSeq int32, raw []byte) (int64, error) {
+	return p.idempotence.ValidateAndAppend(pid, epoch, baseSeq, func() (int64, error) {
+		return p.Append(raw)
+	})
+}
+
+// TruncateTo truncates the log to the given offset (inclusive of earlier data),
+// dropping all records at or after the target offset. It is used by the admin
+// reset-offset / truncate APIs.
+func (p *Partition) TruncateTo(target int64) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if target <= 0 {
+		target = 0
+	}
+	if target >= p.nextOffset {
+		return nil
+	}
+
+	// Drop segments whose entire range starts at or after the target.
+	kept := p.closedSegments[:0]
+	for _, seg := range p.closedSegments {
+		if seg.baseOffset >= target {
+			if err := seg.deleteFiles(); err != nil {
+				return err
+			}
+			continue
+		}
+		kept = append(kept, seg)
+	}
+	p.closedSegments = kept
+
+	if p.activeSegment != nil && p.activeSegment.baseOffset >= target {
+		if err := p.activeSegment.deleteFiles(); err != nil {
+			return err
+		}
+		// Reopen the newest kept segment as active (or a fresh one at target).
+		if len(p.closedSegments) > 0 {
+			last := p.closedSegments[len(p.closedSegments)-1]
+			p.closedSegments = p.closedSegments[:len(p.closedSegments)-1]
+			p.activeSegment = last
+		} else {
+			seg, err := openSegment(p.dir, 0, p.maxSegmentBytes, p.indexInterval)
+			if err != nil {
+				return err
+			}
+			p.activeSegment = seg
+		}
+	}
+
+	if err := p.activeSegment.truncateTo(target); err != nil {
+		return err
+	}
+	p.nextOffset = target
+	p.highWatermark = target
+	return nil
+}
+
+// SegmentInfo describes one on-disk log segment for the topic detail UI.
+type SegmentInfo struct {
+	BaseOffset int64
+	SizeBytes  int64
+	Remote     bool
+}
+
+// SegmentInfos returns metadata for every segment of the partition.
+func (p *Partition) SegmentInfos() []SegmentInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	segs := p.orderedSegmentsLocked()
+	out := make([]SegmentInfo, 0, len(segs))
+	for _, s := range segs {
+		out = append(out, SegmentInfo{
+			BaseOffset: s.baseOffset,
+			SizeBytes:  s.sizeBytes(),
+			Remote:     s.isRemote(),
+		})
+	}
+	return out
 }
 
 // roll closes the active segment and starts a new one at the current LEO. The

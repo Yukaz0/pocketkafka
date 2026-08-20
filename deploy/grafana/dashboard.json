@@ -1,0 +1,131 @@
+{
+  "dashboard": {
+    "uid": "go-kafka-neu",
+    "title": "go-kafka-neu",
+    "tags": ["kafka"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "10s",
+    "time": { "from": "now-1h", "to": "now" },
+    "panels": [
+      {
+        "id": 1,
+        "type": "stat",
+        "title": "Total Messages/sec",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
+        "targets": [
+          {
+            "expr": "sum(rate(kafka_messages_in_total[1m]))",
+            "legendFormat": "messages/s"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": { "mode": "thresholds" },
+            "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "type": "gauge",
+        "title": "Total Bytes/sec",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "gridPos": { "h": 8, "w": 6, "x": 6, "y": 0 },
+        "targets": [
+          {
+            "expr": "sum(rate(kafka_bytes_in_total[1m]))",
+            "legendFormat": "bytes/s"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": { "unit": "Bps", "max": 1000000 }
+        }
+      },
+      {
+        "id": 3,
+        "type": "graph",
+        "title": "Messages per Topic",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+        "targets": [
+          {
+            "expr": "rate(kafka_messages_in_total[1m])",
+            "legendFormat": "{{topic}}"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "type": "bargauge",
+        "title": "Lag per Consumer Group",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+        "targets": [
+          {
+            "expr": "max by (group, topic, partition) (kafka_consumer_lag)",
+            "legendFormat": "{{group}}/{{topic}}/{{partition}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "thresholds" },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 100 },
+                { "color": "red", "value": 1000 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "type": "graph",
+        "title": "Disk Space Usage per Topic",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+        "targets": [
+          {
+            "expr": "go_kafka_topic_bytes",
+            "legendFormat": "{{topic}}/{{partition}}"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "decbytes" } }
+      },
+      {
+        "id": 6,
+        "type": "graph",
+        "title": "Request Latency (p95)",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(kafka_request_latency_seconds_bucket[5m])) by (le, api))",
+            "legendFormat": "{{api}}"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "s" } }
+      },
+      {
+        "id": 7,
+        "type": "stat",
+        "title": "Uptime",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+        "targets": [
+          {
+            "expr": "kafka_broker_uptime_seconds",
+            "legendFormat": "uptime"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "s" } }
+      }
+    ]
+  }
+}

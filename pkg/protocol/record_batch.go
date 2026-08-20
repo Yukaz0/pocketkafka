@@ -200,6 +200,12 @@ func decodeRecord(src []byte) (Record, int, error) {
 	return rec, n + int(length), nil
 }
 
+// DecodeRecordBytes parses a single varint-length-prefixed record (as stored in
+// a RecordBatch payload) and returns the record plus its total byte size.
+func DecodeRecordBytes(src []byte) (Record, int, error) {
+	return decodeRecord(src)
+}
+
 // ReadBytesVarint reads a length-prefixed byte array where the length is a
 // signed varint (as used inside records).
 func (r *Reader) ReadBytesVarint() ([]byte, error) {
