@@ -34,7 +34,7 @@ const (
 // RecordBatch magic byte for the modern (v2) record format.
 const RecordMagic = int8(2)
 
-// Error codes used by the broker engine (see docs/ERROR_CODES_AND_PROTOCOLS.md).
+// Error codes used by the broker engine.
 const (
 	ErrNone                               int16 = 0
 	ErrUnknownServerError                 int16 = -1

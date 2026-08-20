@@ -1,6 +1,5 @@
 // Package config loads the broker configuration from a YAML file and applies
-// environment variable overrides (12-factor style) as described in
-// docs/CONFIG_SPEC.md.
+// environment variable overrides (12-factor style).
 package config
 
 import (

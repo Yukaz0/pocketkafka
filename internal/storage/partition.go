@@ -10,7 +10,7 @@ import (
 
 // Partition is a single topic-partition backed by a directory of log segments.
 // It serializes appends under a write lock while allowing concurrent reads
-// under a read lock, matching the design in docs/ARCHITECTURE_PLAN.md section 3.3.
+// under a read lock.
 type Partition struct {
 	topic       string
 	partitionID int32

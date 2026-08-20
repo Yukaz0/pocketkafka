@@ -1,5 +1,4 @@
 # pocketkafka: multi-stage scratch build (< 25MB, zero external deps).
-# See docs/DEPLOYMENT_AND_OPS.md.
 
 # Stage 1: build the broker binary
 FROM golang:1.26-alpine AS builder

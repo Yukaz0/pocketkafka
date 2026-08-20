@@ -231,7 +231,6 @@ pocketkafka/
 │   └── config/             # YAML & 12-factor environment loader
 ├── web/                    # Frontend SPA source code & embedded assets
 │   └── dist/index.html     # Embedded single-file dashboard
-├── docs/                   # Complete architectural and technical specs
 ├── deploy/                 # Docker Compose, Prometheus & Grafana configs
 ├── Dockerfile              # Ultra-lightweight multi-stage container (< 29MB)
 ├── go.mod                  # 100% clean - zero external requires

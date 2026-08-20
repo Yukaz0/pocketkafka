@@ -1,5 +1,4 @@
 # pocketkafka broker configuration.
-# See docs/CONFIG_SPEC.md for the full parameter reference and env overrides.
 
 broker:
   id: 0
