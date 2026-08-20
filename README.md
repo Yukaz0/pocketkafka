@@ -9,16 +9,16 @@
 [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-success.svg?style=flat-square)](go.mod)
-[![Docker Image Size](https://img.shields.io/badge/Docker%20Size-%3C%2029MB-brightgreen.svg?style=flat-square)](#-run-with-docker)
-[![Idle Memory](https://img.shields.io/badge/Idle%20RAM-%3C%2060MB-purple.svg?style=flat-square)](#-performance--resource-comparison)
+[![Docker Image Size](https://img.shields.io/badge/Docker%20Size-%3C%2029MB-brightgreen.svg?style=flat-square)](#-quick-start)
+[![Idle Memory](https://img.shields.io/badge/Idle%20RAM-%3C%2060MB-purple.svg?style=flat-square)](#-why-pocketkafka)
 
 <p align="center">
   <a href="#-quick-start">Quick Start</a> •
   <a href="#-why-pocketkafka">Why PocketKafka?</a> •
   <a href="#-components--ports">Components & Ports</a> •
-  <a href="#-embedded-web-ui">Embedded Web UI</a> •
-  <a href="#-client-sdk">Client SDK</a> •
-  <a href="#-docs">Documentation</a>
+  <a href="#-embedded-web-ui-kadeck-5-aesthetic">Embedded Web UI</a> •
+  <a href="#-client-sdk--multi-language-usage">Client SDK</a> •
+  <a href="#-testing">Testing</a>
 </p>
 
 ---
