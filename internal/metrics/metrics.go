@@ -94,20 +94,20 @@ func (r *Registry) Render(store *storage.Store, gm *coordinator.GroupManager, cl
 	var b strings.Builder
 
 	// Counters.
-	fmt.Fprintf(&b, "# HELP kafka_messages_in_total Total messages appended\n")
-	fmt.Fprintf(&b, "# TYPE kafka_messages_in_total counter\n")
+	fmt.Fprintf(&b, "# HELP pocketkafka_messages_in_total Total messages appended\n")
+	fmt.Fprintf(&b, "# TYPE pocketkafka_messages_in_total counter\n")
 	for topic, n := range messages {
-		fmt.Fprintf(&b, "kafka_messages_in_total{topic=%q} %d\n", topic, n)
+		fmt.Fprintf(&b, "pocketkafka_messages_in_total{topic=%q} %d\n", topic, n)
 	}
-	fmt.Fprintf(&b, "# HELP kafka_bytes_in_total Total bytes received\n")
-	fmt.Fprintf(&b, "# TYPE kafka_bytes_in_total counter\n")
+	fmt.Fprintf(&b, "# HELP pocketkafka_bytes_in_total Total bytes received\n")
+	fmt.Fprintf(&b, "# TYPE pocketkafka_bytes_in_total counter\n")
 	for topic, n := range bytes {
-		fmt.Fprintf(&b, "kafka_bytes_in_total{topic=%q} %d\n", topic, n)
+		fmt.Fprintf(&b, "pocketkafka_bytes_in_total{topic=%q} %d\n", topic, n)
 	}
 
 	// Consumer lag gauge per group/topic/partition.
-	fmt.Fprintf(&b, "# HELP kafka_consumer_lag Current partition lag\n")
-	fmt.Fprintf(&b, "# TYPE kafka_consumer_lag gauge\n")
+	fmt.Fprintf(&b, "# HELP pocketkafka_consumer_lag Current partition lag\n")
+	fmt.Fprintf(&b, "# TYPE pocketkafka_consumer_lag gauge\n")
 	for _, info := range gm.ListGroups() {
 		for topic, parts := range info.Offsets {
 			for part, committed := range parts {
@@ -119,15 +119,15 @@ func (r *Registry) Render(store *storage.Store, gm *coordinator.GroupManager, cl
 				if lag < 0 {
 					lag = 0
 				}
-				fmt.Fprintf(&b, "kafka_consumer_lag{group=%q,topic=%q,partition=%q} %d\n",
+				fmt.Fprintf(&b, "pocketkafka_consumer_lag{group=%q,topic=%q,partition=%q} %d\n",
 					info.Name, topic, fmt.Sprintf("%d", part), lag)
 			}
 		}
 	}
 
 	// Request latency histogram.
-	fmt.Fprintf(&b, "# HELP kafka_request_latency_seconds Request duration\n")
-	fmt.Fprintf(&b, "# TYPE kafka_request_latency_seconds histogram\n")
+	fmt.Fprintf(&b, "# HELP pocketkafka_request_latency_seconds Request duration\n")
+	fmt.Fprintf(&b, "# TYPE pocketkafka_request_latency_seconds histogram\n")
 	apis := make([]string, 0, len(latTotal))
 	for api := range latTotal {
 		apis = append(apis, api)
@@ -136,16 +136,16 @@ func (r *Registry) Render(store *storage.Store, gm *coordinator.GroupManager, cl
 		var cum uint64
 		for i, bkt := range r.latencyBuckets {
 			cum += latCounts[api][i]
-			fmt.Fprintf(&b, "kafka_request_latency_seconds_bucket{api=%q,le=%q} %d\n", api, fmt.Sprintf("%g", bkt), cum)
+			fmt.Fprintf(&b, "pocketkafka_request_latency_seconds_bucket{api=%q,le=%q} %d\n", api, fmt.Sprintf("%g", bkt), cum)
 		}
-		fmt.Fprintf(&b, "kafka_request_latency_seconds_bucket{api=%q,le=\"+Inf\"} %d\n", api, latTotal[api])
-		fmt.Fprintf(&b, "kafka_request_latency_seconds_sum{api=%q} %g\n", api, latSum[api])
-		fmt.Fprintf(&b, "kafka_request_latency_seconds_count{api=%q} %d\n", api, latTotal[api])
+		fmt.Fprintf(&b, "pocketkafka_request_latency_seconds_bucket{api=%q,le=\"+Inf\"} %d\n", api, latTotal[api])
+		fmt.Fprintf(&b, "pocketkafka_request_latency_seconds_sum{api=%q} %g\n", api, latSum[api])
+		fmt.Fprintf(&b, "pocketkafka_request_latency_seconds_count{api=%q} %d\n", api, latTotal[api])
 	}
 
 	// Broker info + uptime.
-	fmt.Fprintf(&b, "kafka_broker_info{cluster_id=%q} 1\n", clusterID)
-	fmt.Fprintf(&b, "kafka_broker_uptime_seconds %g\n", time.Since(r.startTime).Seconds())
+	fmt.Fprintf(&b, "pocketkafka_broker_info{cluster_id=%q} 1\n", clusterID)
+	fmt.Fprintf(&b, "pocketkafka_broker_uptime_seconds %g\n", time.Since(r.startTime).Seconds())
 
 	// Storage gauges (computed live).
 	topics := store.TopicsSnapshot()

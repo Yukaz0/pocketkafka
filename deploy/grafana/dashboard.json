@@ -17,7 +17,7 @@
         "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
         "targets": [
           {
-            "expr": "sum(rate(kafka_messages_in_total[1m]))",
+            "expr": "sum(rate(pocketkafka_messages_in_total[1m]))",
             "legendFormat": "messages/s"
           }
         ],
@@ -37,7 +37,7 @@
         "gridPos": { "h": 8, "w": 6, "x": 6, "y": 0 },
         "targets": [
           {
-            "expr": "sum(rate(kafka_bytes_in_total[1m]))",
+            "expr": "sum(rate(pocketkafka_bytes_in_total[1m]))",
             "legendFormat": "bytes/s"
           }
         ],
@@ -53,7 +53,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
         "targets": [
           {
-            "expr": "rate(kafka_messages_in_total[1m])",
+            "expr": "rate(pocketkafka_messages_in_total[1m])",
             "legendFormat": "{{topic}}"
           }
         ]
@@ -66,7 +66,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
         "targets": [
           {
-            "expr": "max by (group, topic, partition) (kafka_consumer_lag)",
+            "expr": "max by (group, topic, partition) (pocketkafka_consumer_lag)",
             "legendFormat": "{{group}}/{{topic}}/{{partition}}"
           }
         ],
@@ -106,7 +106,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, sum(rate(kafka_request_latency_seconds_bucket[5m])) by (le, api))",
+            "expr": "histogram_quantile(0.95, sum(rate(pocketkafka_request_latency_seconds_bucket[5m])) by (le, api))",
             "legendFormat": "{{api}}"
           }
         ],
@@ -120,7 +120,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
         "targets": [
           {
-            "expr": "kafka_broker_uptime_seconds",
+            "expr": "pocketkafka_broker_uptime_seconds",
             "legendFormat": "uptime"
           }
         ],
