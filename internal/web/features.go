@@ -303,9 +303,9 @@ type captureResponse struct {
 	code   int
 }
 
-func (c *captureResponse) Header() http.Header       { return c.header }
+func (c *captureResponse) Header() http.Header         { return c.header }
 func (c *captureResponse) Write(b []byte) (int, error) { return c.buf.Write(b) }
-func (c *captureResponse) WriteHeader(code int)       { c.code = code }
+func (c *captureResponse) WriteHeader(code int)        { c.code = code }
 
 // ---------------------------------------------------------------------------
 // MQTT bridge status
