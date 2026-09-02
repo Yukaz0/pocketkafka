@@ -5,85 +5,96 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PocketKafka</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
-
   :root{
-    --bg:#080c14; --surface:#0f172a; --surface2:#111827; --surface3:#1e293b; --border:#1e293b; --border-soft:rgba(255,255,255,.06);
-    --primary:#7c3aed; --primary-strong:#7c3aed; --primary-soft:rgba(124,58,237,.16); --primary-text:#c4b5fd; --accent:#8b5cf6; --on-primary:#ffffff;
-    --live:#10b981; --success:#10b981; --warn:#f59e0b; --danger:#ef4444;
-    --str:#34d399; --num:#38bdf8; --bool:#fbbf24; --key:#e2e8f0;
-    --text:#e2e8f0; --muted:#94a3b8;
-    --font-ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-    --font-mono:'Geist Mono','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    --rail-w:56px; --radius:16px; --radius-sm:10px;
-    --ring:0 0 0 3px rgba(139,92,246,.35);
-    --glow:0 0 24px rgba(139,92,246,.35);
-    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px rgba(0,0,0,.35);
+    color-scheme:dark;
+    --bg:#12141a; --bg-canvas:#0e1015; --surface:#1b1e24; --surface2:#22262e; --surface3:#2a2f39;
+    --border:#2e3440; --border-soft:rgba(255,255,255,.06);
+    --primary:#4c7dff; --primary-strong:#3d66d9; --primary-soft:rgba(76,125,255,.14); --primary-text:#8ab0ff; --accent:#4c7dff; --on-primary:#ffffff;
+    --live:#3ecf8e; --success:#3ecf8e; --warn:#e8b339; --danger:#f16a5c;
+    --str:#7ee0a3; --num:#7cb8ff; --bool:#ecc86b; --key:#dfe5ee;
+    --text:#e8ecf3; --muted:#98a2b3;
+    --font-ui:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+    --font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+    --rail-w:56px; --radius:4px; --radius-sm:4px;
+    --ring:0 0 0 1px var(--primary);
+    --shadow:0 8px 24px rgba(0,0,0,.35);
   }
   html[data-theme="light"]{
-    --bg:#f5f6fb; --surface:#ffffff; --surface2:#f1f3f9; --surface3:#e9ecf5; --border:#e3e6f0; --border-soft:rgba(15,23,42,.05);
-    --primary:#7c3aed; --primary-soft:rgba(124,58,237,.12); --primary-text:#6d28d9; --accent:#8b5cf6; --on-primary:#fff;
-    --success:#059669; --warn:#d97706; --danger:#dc2626;
-    --str:#059669; --num:#2563eb; --bool:#b45309; --key:#334155;
-    --text:#0f172a; --muted:#5b6478;
-    --ring:0 0 0 3px rgba(124,58,237,.22); --glow:0 0 20px rgba(124,58,237,.18);
-    --shadow:0 1px 2px rgba(15,20,40,.06),0 12px 32px rgba(15,20,40,.10);
+    color-scheme:light;
+    --bg:#f0f2f5; --bg-canvas:#e8eaef; --surface:#ffffff; --surface2:#eef0f3; --surface3:#e5e8ee;
+    --border:#d7dbe2; --border-soft:rgba(15,18,25,.06);
+    --primary:#2f6bff; --primary-strong:#2450c8; --primary-soft:rgba(47,107,255,.10); --primary-text:#2450c8; --accent:#2f6bff; --on-primary:#fff;
+    --success:#188554; --warn:#a8700a; --danger:#c93f31;
+    --str:#188554; --num:#2450c8; --bool:#a8700a; --key:#2a3340;
+    --text:#1a2029; --muted:#5c6674;
+    --shadow:0 8px 24px rgba(15,20,40,.10);
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+  body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
   .app{display:flex;height:100vh}
 
-  /* rail */
-  .rail{width:var(--rail-w);background:#0b0f19;border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:10px 0;flex-shrink:0;gap:4px}
-  html[data-theme="light"] .rail{background:#f6f7fb}
-  .rail .logo{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#8b5cf6,#6d28d9);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;margin-bottom:16px;box-shadow:0 4px 16px rgba(124,58,237,.5)}
-  .rail button{position:relative;width:40px;height:40px;border:none;background:transparent;color:var(--muted);border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s,transform .1s}
-  .rail button:hover{background:var(--surface2);color:var(--text)}
-  .rail button:active{transform:scale(.92)}
-  .rail button.active{background:var(--primary-soft);color:var(--primary-text)}
-  .rail button.active::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;width:3px;border-radius:3px;background:var(--accent);box-shadow:var(--glow)}
-  .rail button[data-tip]:hover::after{content:attr(data-tip);position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%);background:var(--surface3);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:7px;font-size:11px;white-space:nowrap;box-shadow:var(--shadow);z-index:40}
-  .rail .spacer{flex:1}
+  /* burger + drawer menu */
+  .burger{width:36px;height:36px;border:1px solid var(--border);background:transparent;border-radius:4px;cursor:pointer;display:flex;flex-direction:column;gap:4px;align-items:center;justify-content:center;flex-shrink:0;transition:background .12s}
+  .burger span{display:block;width:16px;height:2px;background:var(--text)}
+  .burger:hover{background:var(--surface2)}
+  .drawer{position:fixed;top:0;left:0;bottom:0;width:240px;background:var(--bg-canvas);border-right:1px solid var(--border);z-index:90;padding:16px 0;display:flex;flex-direction:column;transform:translateX(-100%);transition:transform .16s ease;overflow:auto}
+  .drawer.open{transform:translateX(0)}
+  .drawer .dLogo{padding:0 20px 14px;border-bottom:1px solid var(--border);margin-bottom:10px}
+  .drawer .dLogo b{font-size:15px;letter-spacing:.02em}
+  .drawer .dLogo span{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.14em;font-family:var(--font-mono);margin-top:2px}
+  .dItem{display:flex;justify-content:space-between;align-items:center;padding:9px 20px;color:var(--muted);cursor:pointer;font-size:13px;border:none;background:none;text-align:left;width:100%;font-family:var(--font-ui)}
+  .dItem:hover{background:var(--surface2);color:var(--text)}
+  .dItem.active{color:var(--primary-text);background:var(--primary-soft);box-shadow:inset 3px 0 0 var(--primary)}
+  .dItem .dHint{font-size:10px;color:var(--muted);font-family:var(--font-mono);letter-spacing:.05em}
+  .dItem.active .dHint{color:var(--primary-text)}
+  .dSpacer{flex:1;min-height:16px}
+  .drawerBackdrop{position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:85}
+  .hidden{display:none}
 
   .col{flex:1;display:flex;flex-direction:column;min-width:0}
-  .topbar{height:56px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;padding:0 24px;gap:12px;flex-shrink:0}
-  .topbar h1{font-size:20px;font-weight:600;letter-spacing:-.025em;line-height:28px;font-family:var(--font-ui)}
-  .topbar .crumb{color:var(--muted);font-size:12px}
+  .topbar{height:56px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;padding:0 20px;gap:10px;flex-shrink:0}
+  .topbar h1{font-size:18px;font-weight:600;letter-spacing:-.01em;line-height:28px}
+  .topbar .crumb{color:var(--muted);font-size:12px;font-family:var(--font-mono)}
   .topbar .sp{flex:1}
-  .btn{background:var(--primary);color:var(--on-primary);border:none;padding:8px 16px;border-radius:10px;font-weight:500;cursor:pointer;font-size:13px;letter-spacing:-.01em;font-family:var(--font-ui);transition:filter .15s,transform .1s,box-shadow .15s,background .15s}
-  .btn:hover{filter:brightness(1.08);box-shadow:var(--glow)}
-  .btn:active{transform:translateY(1px) scale(.99)}
+  #topActions{display:flex;align-items:center;gap:8px;flex-shrink:0;white-space:nowrap}
+  .btn{background:var(--primary);color:var(--on-primary);border:1px solid var(--primary);padding:7px 14px;border-radius:4px;font-weight:500;cursor:pointer;font-size:13px;font-family:var(--font-ui);transition:background .12s,border-color .12s}
+  .btn:hover{background:var(--primary-strong);border-color:var(--primary-strong)}
+  .btn:active{transform:translateY(1px)}
   .btn:focus-visible{outline:none;box-shadow:var(--ring)}
+  .btn:disabled{opacity:.55;cursor:default}
   .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--border)}
-  .btn.ghost:hover{background:var(--surface2);box-shadow:none}
-  .btn.danger{background:transparent;color:var(--danger);border:1px solid rgba(239,68,68,.4)}
-  .btn.danger:hover{background:rgba(239,68,68,.08);box-shadow:none}
+  .btn.ghost:hover{background:var(--surface2)}
+  .btn.danger{background:transparent;color:var(--danger);border:1px solid rgba(241,106,92,.4)}
+  .btn.danger:hover{background:rgba(241,106,92,.08)}
 
-  main{flex:1;overflow:auto;padding:26px}
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow)}
-  .grid{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+  main{flex:1;overflow:auto;padding:24px;max-width:1008px;width:100%;margin:0 auto}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:18px;width:100%;margin-bottom:16px}
+  .card h3{font-size:14px;font-weight:600}
+  .grid{display:flex;flex-direction:column;gap:0}
+  .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 
   /* connection card */
-  .conn{border:1px solid var(--border);transition:border-color .2s,transform .15s,box-shadow .2s}
-  .conn:hover{border-color:rgba(139,92,246,.5);transform:translateY(-3px);box-shadow:var(--glow)}
-  .conn .dot{width:8px;height:8px;border-radius:50%;background:var(--live);display:inline-block;margin-right:8px;box-shadow:0 0 0 3px rgba(16,185,129,.2)}
-  .conn .tag{background:var(--primary-soft);color:var(--primary-text);border-radius:6px;padding:2px 9px;font-size:10px;font-weight:600;letter-spacing:.05em;margin-left:8px;font-family:var(--font-mono);font-feature-settings:'tnum' on,'zero' on}
+  .conn{border:1px solid var(--border);transition:border-color .15s}
+  .conn:hover{border-color:var(--primary)}
+  .conn .dot{width:8px;height:8px;border-radius:50%;background:var(--live);display:inline-block;margin-right:8px}
+  .conn .tag{background:var(--primary-soft);color:var(--primary-text);border-radius:4px;padding:2px 8px;font-size:10px;font-weight:600;letter-spacing:.05em;margin-left:8px;font-family:var(--font-mono)}
   .conn .row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft);font-size:12px}
   .conn .row:last-child{border-bottom:none}
   .conn .k{color:var(--muted)}
   .conn .actions{display:flex;gap:8px;margin-top:16px}
 
   /* toolbar */
-  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px}
-  .toolbar .group{display:flex;gap:2px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:4px;backdrop-filter:blur(8px)}
-  .toolbar .pill{background:transparent;border:none;color:var(--muted);padding:6px 12px;border-radius:9px;cursor:pointer;font-size:12px;transition:background .15s,color .15s}
+  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
+  .toolbar .group{display:flex;gap:2px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px}
+  .toolbar .pill{background:transparent;border:none;color:var(--muted);padding:6px 11px;border-radius:3px;cursor:pointer;font-size:12px;transition:background .12s,color .12s}
   .toolbar .pill:hover{background:var(--surface2);color:var(--text)}
   .toolbar .pill.active{background:var(--primary-soft);color:var(--primary-text)}
-  .pill.part{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:4px 12px;cursor:pointer;font-size:11px;color:var(--muted);transition:all .15s;font-family:var(--font-mono)}
+  .pill.part{background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:4px 10px;cursor:pointer;font-size:11px;color:var(--muted);transition:all .12s;font-family:var(--font-mono)}
   .pill.part:hover{color:var(--text)}
   .pill.part.active{background:var(--primary-soft);color:var(--primary-text);border-color:var(--primary)}
-  select,input{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:7px 11px;font-size:12px;transition:border-color .15s,box-shadow .15s;font-family:var(--font-ui)}
+  select,input{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:7px 11px;font-size:12px;transition:border-color .12s,box-shadow .12s;font-family:var(--font-ui)}
   select:focus,input:focus{outline:none;border-color:var(--primary);box-shadow:var(--ring)}
+  select option{background:var(--bg-canvas);color:var(--text)}
   input{width:100%}
 
   /* pulsing live dot */
@@ -93,56 +104,62 @@
   @keyframes ping{75%,100%{transform:scale(2.4);opacity:0}}
 
   /* row entry flash */
-  @keyframes row-entry-flash{0%{background-color:rgba(16,185,129,.22);transform:translateY(-4px);opacity:0}50%{background-color:rgba(16,185,129,.12);opacity:1;transform:translateY(0)}100%{background-color:transparent}}
-  .animate-row-entry{animation:row-entry-flash 1.2s cubic-bezier(.16,1,.3,1) forwards}
+  @keyframes row-entry-flash{0%{background-color:rgba(62,207,142,.20);opacity:0}40%{background-color:rgba(62,207,142,.10);opacity:1}100%{background-color:transparent}}
+  .animate-row-entry{animation:row-entry-flash 1s cubic-bezier(.16,1,.3,1) forwards}
+
+  /* view fade-in */
+  @keyframes view-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+  #view>*{animation:view-in .18s ease-out}
+
+  /* skeleton loading */
+  .skel{display:inline-block;height:11px;border-radius:2px;background:var(--surface3);animation:skel-pulse 1.4s ease-in-out infinite;vertical-align:middle}
+  @keyframes skel-pulse{0%,100%{opacity:.5}50%{opacity:1}}
 
   /* table */
   table{width:100%;border-collapse:collapse;font-size:12px}
-  th{color:var(--muted);text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface2);font-family:var(--font-ui)}
+  th{color:var(--muted);text-align:left;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface2)}
   td{padding:10px 12px;border-bottom:1px solid var(--border-soft);vertical-align:top;font-family:var(--font-mono);font-feature-settings:'tnum' on,'zero' on;font-variant-numeric:tabular-nums}
-  
+
   tbody tr{transition:background .1s}
   tbody tr:hover td{background:var(--surface3)}
   .muted{color:var(--muted)}
   .rel{color:var(--muted);font-size:11px}
-  .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700}
-  .b-green{background:rgba(16,185,129,.15);color:var(--success)}
-  .b-amber{background:rgba(245,158,11,.15);color:var(--warn)}
+  .badge{display:inline-block;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;font-family:var(--font-mono);letter-spacing:.03em}
+  .b-green{background:rgba(62,207,142,.14);color:var(--success)}
+  .b-amber{background:rgba(232,179,57,.14);color:var(--warn)}
   .b-purple{background:var(--primary-soft);color:var(--primary-text)}
-  .chip{font-family:var(--font-mono);font-size:10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:1px 7px;margin:0 2px}
+  .chip{font-family:var(--font-mono);font-size:10px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 7px;margin:0 2px}
   .rowclick{cursor:pointer}
 
-  /* glass inspector */
-  .inspector{position:relative;background:rgba(15,23,42,.6);border:1px solid rgba(255,255,255,.08);border-radius:var(--radius);margin-top:16px;padding:18px;box-shadow:var(--shadow);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
-  html[data-theme="light"] .inspector{background:rgba(255,255,255,.7);border-color:rgba(15,23,42,.08)}
+  /* inspector */
+  .inspector{background:var(--surface);border:1px solid var(--border);border-radius:4px;margin-top:16px;padding:18px}
   .inspector h3{font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;margin-bottom:12px;font-family:var(--font-mono)}
-  pre{font-family:var(--font-mono);font-size:12px;font-feature-settings:'tnum' on,'zero' on;white-space:pre-wrap;word-break:break-word;background:rgba(8,12,20,.4);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:12px;overflow:auto;line-height:1.6}
-  html[data-theme="light"] pre{background:var(--surface2);border-color:var(--border)}
+  pre{font-family:var(--font-mono);font-size:12px;font-feature-settings:'tnum' on,'zero' on;white-space:pre-wrap;word-break:break-word;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;overflow:auto;line-height:1.6}
   .jkey{color:var(--key)}.jstr{color:var(--str)}.jnum{color:var(--num)}.jbool{color:var(--bool)}.jnull{color:var(--muted)}
   .jnode{padding-left:14px;border-left:1px solid var(--border-soft);margin-left:6px}
-  .jrow{cursor:pointer;border-radius:4px;padding:1px 4px;transition:background .1s}
+  .jrow{cursor:pointer;border-radius:2px;padding:1px 4px;transition:background .1s}
   .jrow:hover{background:var(--surface3)}
   .jarrow{display:inline-block;width:14px;color:var(--muted);font-family:var(--font-mono);font-size:10px}
 
   .kv{display:flex;gap:12px;margin-bottom:10px}.kv>div{flex:1}
   label{display:block;color:var(--muted);font-size:11px;margin-bottom:5px;font-weight:500}
-  textarea{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:11px;font-family:var(--font-mono);font-size:12px;resize:vertical;transition:border-color .15s,box-shadow .15s}
+  textarea{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:11px;font-family:var(--font-mono);font-size:12px;resize:vertical;transition:border-color .12s,box-shadow .12s}
   textarea:focus{outline:none;border-color:var(--primary);box-shadow:var(--ring)}
-  .msg{position:fixed;right:18px;bottom:18px;background:var(--surface);border:1px solid var(--accent);color:var(--text);padding:12px 18px;border-radius:12px;box-shadow:var(--shadow);opacity:0;transition:opacity .25s,transform .25s;font-size:12px;transform:translateY(10px);z-index:50}
+  .msg{position:fixed;right:18px;bottom:18px;background:var(--surface);border:1px solid var(--primary);color:var(--text);padding:12px 18px;border-radius:4px;box-shadow:var(--shadow);opacity:0;transition:opacity .2s,transform .2s;font-size:12px;transform:translateY(10px);z-index:50}
   .msg.show{opacity:1;transform:translateY(0)}
   .hdr{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
   .hidden{display:none}
   a{color:var(--primary-text);text-decoration:none}
   a:hover{text-decoration:underline}
   ::-webkit-scrollbar{width:10px;height:10px}
-  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px;border:2px solid var(--bg)}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;border:2px solid var(--bg)}
   ::-webkit-scrollbar-track{background:transparent}
   /* partition bars */
-  .pbar{height:6px;border-radius:4px;background:var(--surface3);overflow:hidden;margin-top:4px}
-  .pbar>span{display:block;height:100%;background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:4px}
+  .pbar{height:6px;border-radius:2px;background:var(--surface3);overflow:hidden;margin-top:4px}
+  .pbar>span{display:block;height:100%;background:var(--primary);border-radius:2px}
 
   /* ---- Fitur 3.2: filter builder ---- */
-  .filterPanel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px}
+  .filterPanel{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:14px;margin-bottom:16px}
   .filterRow{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
   .filterRow select,.filterRow input{width:auto;flex:0 1 auto}
   .filterRow .fField{width:200px}
@@ -150,70 +167,113 @@
   .filterRow .fVal{width:180px}
   .frmBtn{background:transparent;border:none;color:var(--danger);cursor:pointer;font-size:15px;line-height:1}
   .autocomplete{position:relative}
-  .acList{position:absolute;top:100%;left:0;right:0;background:var(--surface3);border:1px solid var(--border);border-radius:8px;max-height:180px;overflow:auto;z-index:60;box-shadow:var(--shadow)}
+  .acList{position:absolute;top:100%;left:0;right:0;background:var(--surface3);border:1px solid var(--border);border-radius:4px;max-height:180px;overflow:auto;z-index:60;box-shadow:var(--shadow)}
   .acList div{padding:7px 11px;cursor:pointer;font-family:var(--font-mono);font-size:11px}
   .acList div:hover,.acList div.act{background:var(--primary-soft);color:var(--primary-text)}
-  .presetChip{display:inline-flex;align-items:center;gap:4px;background:var(--primary-soft);color:var(--primary-text);border-radius:6px;padding:2px 9px;font-size:11px;margin:2px 4px 2px 0;cursor:pointer}
+  .presetChip{display:inline-flex;align-items:center;gap:4px;background:var(--primary-soft);color:var(--primary-text);border-radius:3px;padding:2px 9px;font-size:11px;margin:2px 4px 2px 0;cursor:pointer}
   .presetChip button{background:none;border:none;color:inherit;cursor:pointer;font-size:11px;padding:0 2px}
 
   /* ---- Fitur 3.3: column projection ---- */
   .projBar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
-  .projTag{display:inline-flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:11px;font-family:var(--font-mono)}
+  .projTag{display:inline-flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:2px 8px;font-size:11px;font-family:var(--font-mono)}
   .projTag button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px}
   .projTag button:hover{color:var(--danger)}
 
   /* ---- Fitur 3.4: message diff ---- */
-  .diffPanel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:16px}
+  .diffPanel{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:14px;margin-top:16px}
   .diffWrap{display:flex;gap:14px}
   .diffCol{flex:1;min-width:0}
   .diffCol h4{font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;margin-bottom:8px}
   .diffCol pre{max-height:360px;overflow:auto}
-  .d-rem{background:rgba(239,68,68,.15);color:#fca5a5}
-  .d-add{background:rgba(16,185,129,.15);color:#6ee7b7}
+  .d-rem{background:rgba(241,106,92,.12);color:#f5a49b}
+  .d-add{background:rgba(62,207,142,.12);color:#8fe3bd}
   .d-ctx{color:var(--muted)}
 
   /* ---- Fitur 3.5: replay / DLQ ---- */
-  .overlay{position:fixed;inset:0;background:rgba(8,12,20,.6);backdrop-filter:blur(4px);z-index:70;display:flex;align-items:center;justify-content:center}
-  .modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;width:min(620px,94vw);box-shadow:var(--shadow)}
+  .overlay{position:fixed;inset:0;background:rgba(8,10,14,.6);z-index:70;display:flex;align-items:center;justify-content:center}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:20px;width:min(620px,94vw);box-shadow:var(--shadow);animation:view-in .15s ease-out}
   .modal h3{font-size:15px;margin-bottom:14px}
   .chkCell{width:32px;text-align:center}
 
   /* ---- Fitur 4.x enterprise ---- */
   .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px}
-  .stat .v{font-family:var(--font-mono);font-size:22px;font-weight:600}
-  .stat .l{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
-  .graph{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:16px}
-  .gNode{position:absolute;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:6px 10px;font-family:var(--font-mono);font-size:11px;text-align:center}
-  .gNode .glabel{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.5px}
-  .gNode.hot{border-color:var(--warn);box-shadow:0 0 12px rgba(245,158,11,.25)}
-  .gEdge{position:absolute;height:2px;background:var(--border);transform-origin:left center;z-index:-1}
-  .edgeFlow{background:linear-gradient(90deg,var(--primary),var(--accent));height:2px;position:absolute;z-index:0;animation:edgePulse 2s ease-in-out infinite}
-  @keyframes edgePulse{0%,100%{opacity:.2}50%{opacity:1}}
+  .topoLayer{margin-bottom:14px}
+  .topoLayer:last-child{margin-bottom:0}
+  .topoLabel{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px;font-family:var(--font-mono)}
+  .topoNodes{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .tRow{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+  .topoArrow{color:var(--muted);font-size:11px;margin:0 0 10px 2px;font-family:var(--font-mono)}
+  .gNode{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:5px 10px;font-family:var(--font-mono);font-size:11px;text-align:center;white-space:nowrap}
   .skewBar{display:flex;align-items:flex-end;gap:6px;height:110px;margin-top:8px}
-  .skewBar>div{flex:1;background:linear-gradient(180deg,var(--primary),var(--accent));border-radius:4px 4px 0 0;position:relative;min-width:0}
+  .skewBar>div{flex:1;background:var(--primary);border-radius:2px 2px 0 0;position:relative;min-width:0}
   .skewBar>div span{position:absolute;bottom:-18px;left:0;right:0;text-align:center;font-family:var(--font-mono);font-size:9px;color:var(--muted)}
-  .segBlock{height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10px;color:#fff;margin:2px 0;overflow:hidden;white-space:nowrap}
-  .segBlock.act{background:linear-gradient(90deg,var(--primary),var(--accent))}
+  .segBlock{height:26px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10px;color:#fff;margin:2px 0;overflow:hidden;white-space:nowrap}
+  .segBlock.act{background:var(--primary)}
   .segBlock.closed{background:var(--surface3);border:1px solid var(--border);color:var(--muted)}
-  .segBlock.remote{background:linear-gradient(90deg,#059669,#10b981)}
-  .toggle{position:relative;width:38px;height:20px;border-radius:20px;background:var(--surface3);cursor:pointer;border:none;transition:background .15s}
-  .toggle.on{background:var(--primary)}
-  .toggle::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
+  .segBlock.remote{background:var(--success)}
+  .toggle{position:relative;width:38px;height:20px;border-radius:4px;background:var(--surface3);cursor:pointer;border:1px solid var(--border);transition:background .12s}
+  .toggle.on{background:var(--primary);border-color:var(--primary)}
+  .toggle::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:2px;background:#fff;transition:transform .12s}
   .toggle.on::after{transform:translateX(18px)}
-  .codeOut{background:rgba(8,12,20,.5);border:1px solid var(--border);border-radius:10px;padding:12px;font-family:var(--font-mono);font-size:11px;overflow:auto;max-height:320px}
-  .alarmBanner{position:fixed;top:0;left:0;right:0;z-index:80;padding:10px 18px;font-size:13px;display:flex;gap:10px;align-items:center;justify-content:center;background:rgba(239,68,68,.15);border-bottom:1px solid rgba(239,68,68,.4);color:#fca5a5;backdrop-filter:blur(8px)}
-  .switchWrap{display:flex;gap:6px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:4px 8px;font-size:11px}
+  .codeOut{background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;font-family:var(--font-mono);font-size:11px;overflow:auto;max-height:320px}
+  .alarmBanner{position:fixed;top:0;left:0;right:0;z-index:80;padding:10px 18px;font-size:13px;display:flex;gap:10px;align-items:center;justify-content:center;background:rgba(241,106,92,.12);border-bottom:1px solid rgba(241,106,92,.4);color:#f5a49b}
+  .switchWrap{display:flex;gap:6px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:11px}
+  .updatedAgo{color:var(--muted);font-size:11px;font-family:var(--font-mono);white-space:nowrap}
+
+  /* ---- hierarki visual (anti-monoton, tetap flat) ---- */
+  .kicker{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-family:var(--font-mono);margin-bottom:4px}
+  .kicker::before{content:"";display:inline-block;width:16px;height:2px;background:var(--primary);margin-right:8px;vertical-align:3px}
+  .statXL{font-family:var(--font-mono);font-size:34px;font-weight:600;line-height:1.1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .statXL small{font-size:13px;font-weight:500;color:var(--muted);letter-spacing:0;margin-left:2px}
+  .statSub{color:var(--muted);font-size:11px;margin-top:2px;font-family:var(--font-mono)}
+  .hr{border:none;border-top:1px solid var(--border-soft);margin:14px 0}
+  .secRule{height:1px;background:var(--border);margin:20px 0}
+  .secRule::before{content:"";display:block}
+  .conn .dot{width:8px;height:8px;border-radius:50%;background:var(--live);display:inline-block;margin-right:8px}
+  .brokerBadge{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:3px 9px;font-family:var(--font-mono);font-size:11px}
+  .brokerBadge .dot{width:6px;height:6px;border-radius:50%;background:var(--live);animation:ping 2.4s cubic-bezier(0,0,.2,1) infinite}
+
+  /* compact density */
+  body.compact td{padding:4px 10px}
+  body.compact th{padding:6px 10px}
+  body.compact .card{padding:14px}
+  body.compact .statXL{font-size:26px}
+
+  /* sortable headers */
+  th.sortable{cursor:pointer;user-select:none}
+  th.sortable:hover{color:var(--text)}
+  th .sortInd{color:var(--primary);margin-left:4px}
+
+  /* throughput sparkline (CSS bars) */
+  .spark{display:flex;align-items:flex-end;gap:2px;height:56px;margin-top:10px}
+  .spark>span{flex:1;background:var(--primary);border-radius:1px 1px 0 0;min-height:1px;min-width:2px;opacity:.85}
+
+  /* command palette */
+  .paletteBox{background:var(--surface);border:1px solid var(--border);border-radius:4px;width:min(520px,92vw);max-height:60vh;overflow:auto;box-shadow:var(--shadow)}
+  .paletteBox input{border:none;border-bottom:1px solid var(--border);border-radius:0;padding:14px 16px;font-size:14px}
+  .paletteBox input:focus{box-shadow:none}
+  .palItem{padding:10px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-size:13px}
+  .palItem:hover,.palItem.sel{background:var(--primary-soft);color:var(--primary-text)}
+  .palItem .palHint{color:var(--muted);font-size:10px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.08em}
+
+  /* log viewer */
+  .logView{background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;font-family:var(--font-mono);font-size:11px;line-height:1.7;max-height:60vh;overflow:auto;white-space:pre-wrap;word-break:break-all}
+  .logView .lwarn{color:var(--warn)}
+  .logView .lerr{color:var(--danger)}
+
+  /* tail paused notice */
+  .tailPausedBar{background:var(--primary-soft);color:var(--primary-text);border:1px solid var(--primary);border-radius:4px;padding:6px 12px;font-size:12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;cursor:pointer}
 </style>
 </head>
 <body>
 <div class="app">
-  <nav class="rail" id="rail"></nav>
   <div class="col">
     <header class="topbar">
+      <button class="burger" id="burgerBtn" title="Menu" aria-label="Menu"><span></span><span></span><span></span></button>
       <h1 id="title">Connections</h1>
       <span class="crumb" id="crumb"></span>
       <span class="sp"></span>
+      <span class="updatedAgo" id="updAgo"></span>
       <span id="topActions"></span>
     </header>
     <main id="view"></main>
@@ -233,7 +293,13 @@ const I={server:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" str
   moon:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>',
   gear:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'};
 
-const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,
+const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,alarmsDismissed:new Set((()=>{try{return JSON.parse(sessionStorage.getItem('pk_dismissed')||'[]');}catch(e){return [];}})()),
+  /* pengaturan persisten */
+  refreshMs:+(localStorage.getItem('pk_refreshMs')||5000)||5000,
+  density:localStorage.getItem('pk_density')||'comfortable',
+  timeAbs:localStorage.getItem('pk_timeAbs')==='1',
+  sort:{},
+  tpSamples:[], tpTotal:0, tailPaused:false, pendingTail:0,
   /* Fitur 3.2 filter builder */
   filters:[], fieldHint:[], filterPanel:false,
   /* Fitur 3.3 column projection */
@@ -241,7 +307,7 @@ const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],sc
   /* Fitur 3.4 message diff */
   diffSel:[], diffOpen:false,
 };
-const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.users],['schemas','Schemas',I.code],['producer','Producer Studio',I.send],['devstudio','Dev Studio',I.code],['topology','Topology',I.layers],['storage','Storage',I.table],['security','Security & ACL',I.users]];
+const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.users],['schemas','Schemas',I.code],['producer','Producer Studio',I.send],['devstudio','Dev Studio',I.code],['topology','Topology',I.layers],['storage','Storage',I.table],['metrics','Metrics',I.layers],['logs','Broker Logs',I.code],['security','Security & ACL',I.users]];
 
 /* ---- Fitur 15: auto theme detection (prefers-color-scheme) ---- */
 function initTheme(){
@@ -265,19 +331,53 @@ async function refresh(){
     api('/api/v1/groups').then(d=>state.groups=d).catch(()=>{}),
     api('/api/v1/schemas').then(d=>state.schemas=d).catch(()=>{}),
     api('/api/v1/auth/status').then(d=>state.auth=d).catch(()=>{})]);
+  state.lastRefresh=Date.now();
+  updAgo();
   checkAlarms();
 }
 
-function buildRail(){
-  const r=$('#rail');
-  r.innerHTML='<div class="logo">G</div>'+navItems.map(([k,_,ic])=>`<button data-nav="${k}" class="${state.view===k?'active':''}" title="${_}">${ic}</button>`).join('')
-    +'<span class="spacer"></span>'
-    +`<button id="theme" title="Theme">${state.theme==='dark'?I.moon:I.sun}</button>`
-    +`<button id="settingsBtn" title="Settings">${I.gear}</button>`;
-  navItems.forEach(([k])=>r.querySelector(`[data-nav="${k}"]`).onclick=()=>goView(k));
-  r.querySelector('#theme').onclick=()=>{state.theme=state.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=state.theme;localStorage.setItem('kadeck_theme',state.theme);render();};
-  r.querySelector('#settingsBtn').onclick=()=>goView('settings');
+/* dinamis: auto-refresh berkala + indikator "updated Xs ago" */
+function updAgo(){
+  const el=document.getElementById('updAgo');
+  if(!el||!state.lastRefresh)return;
+  const s=Math.max(0,Math.floor((Date.now()-state.lastRefresh)/1000));
+  el.textContent='updated '+s+'s ago';
+  el.title='Auto-refresh: '+(state.refreshMs/1000)+'s';
 }
+setInterval(updAgo,1000);
+function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden){ await refresh(); if(state.view==='connections')render(); if(state.view==='metrics')loadThroughput(); } scheduleRefresh(); },state.refreshMs); }
+function skel(w){return '<span class="skel" style="width:'+(w||60)+'px"></span>';}
+scheduleRefresh();
+
+function buildRail(){
+  // Drawer menu: hanya view, hint berisi jumlah data. Topik diakses via
+  // Ctrl+K / select Data Browser agar drawer tetap ramping.
+  const count=k=>({databrowser:(state.topics||[]).length+' topics',
+    groups:(state.groups||[]).length+' groups',
+    schemas:(state.schemas||[]).length+' subs'}[k]||'view');
+  const items=navItems.map(([k,label])=>({k,label,hint:count(k)}));
+  let drawer=document.getElementById('drawer');
+  const theme=state.theme==='dark'?'Theme: Dark':'Theme: Light';
+  const html='<div class="dLogo"><b>PocketKafka</b><span>embedded broker ui</span></div>'
+    +items.map(it=>{
+      const active=state.view===it.k;
+      return `<button class="dItem ${active?'active':''}" onclick="closeDrawer();goView('${it.k}')"><span>${esc(it.label)}</span><span class="dHint">${esc(it.hint)}</span></button>`;}).join('')
+    +'<div class="dSpacer"></div>'
+    +`<button class="dItem" onclick="closeDrawer();cycleTheme()"><span>${theme}</span><span class="dHint">theme</span></button>`
+    +`<button class="dItem" onclick="closeDrawer();goView('settings')"><span>Settings</span><span class="dHint">ctrl+,</span></button>`;
+  if(!drawer){
+    drawer=document.createElement('div'); drawer.id='drawer'; drawer.className='drawer';
+    document.body.appendChild(drawer);
+    const bd=document.createElement('div'); bd.id='drawerBd'; bd.className='drawerBackdrop hidden';
+    bd.onclick=closeDrawer; document.body.appendChild(bd);
+  }
+  drawer.innerHTML=html;
+  document.getElementById('burgerBtn').onclick=()=>openDrawer();
+}
+function openDrawer(){ document.getElementById('drawer').classList.add('open'); const bd=document.getElementById('drawerBd'); if(bd)bd.classList.remove('hidden'); }
+function closeDrawer(){ document.getElementById('drawer').classList.remove('open'); const bd=document.getElementById('drawerBd'); if(bd)bd.classList.add('hidden'); }
+window.closeDrawer=closeDrawer;
+window.cycleTheme=function(){ state.theme=state.theme==='dark'?'light':'dark'; document.documentElement.dataset.theme=state.theme; localStorage.setItem('kadeck_theme',state.theme); render(); };
 
 /* ---- Fitur 13: hash router ---- */
 function currentHash(){
@@ -289,11 +389,20 @@ function currentHash(){
 function applyHash(){
   const [view,parts]=currentHash();
   state.view=view;
-  if(view==='databrowser'&&parts[0]){state.topic=decodeURIComponent(parts[0]);}
+  if(view==='databrowser'&&parts[0]){state.topic=decodeURIComponent(parts[0]);if(parts[1])state.partition=decodeURIComponent(parts[1]);if(parts[2])state.off=decodeURIComponent(parts[2]);}
   if(view==='groups'&&parts[0]){state.group=decodeURIComponent(parts[0]);}
   render();
 }
 window.addEventListener('hashchange',applyHash);
+// syncHash menulis state browser ke URL agar bisa di-share/refresh.
+function syncHash(){
+  if(state.view!=='databrowser')return;
+  let h='#/databrowser';
+  if(state.topic)h+='/'+encodeURIComponent(state.topic);
+  if(state.partition&&state.partition!=='all')h+='/'+encodeURIComponent(state.partition);
+  if(state.off!=null&&state.off!=='')h+='/'+encodeURIComponent(state.off);
+  if(location.hash!==h){ history.replaceState(null,'',h); }
+}
 
 function render(){
   buildRail();
@@ -313,9 +422,12 @@ function render(){
   else if(state.view==='devstudio')v.innerHTML=viewDevStudio();
   else if(state.view==='topology')v.innerHTML=viewTopology();
   else if(state.view==='storage')v.innerHTML=viewStorage();
+  else if(state.view==='metrics')v.innerHTML=viewMetrics();
+  else if(state.view==='logs')v.innerHTML=viewLogs();
   else if(state.view==='security')v.innerHTML=viewSecurity();
   else if(state.view==='settings')v.innerHTML=viewSettings();
   bindView();
+  applyDensity();
 }
 async function refreshAll(){await refresh();render();}
 window.refreshAll=refreshAll;
@@ -359,28 +471,47 @@ window.logout=async function(){
 function viewSettings(){
   const c=state.cluster||{};
   const auth=state.auth||{};
-  return `<div class="grid">
+  const refreshOpts=[1000,5000,15000,30000,0].map(ms=>`<option value="${ms}" ${state.refreshMs===ms?'selected':''}>${ms===0?'Off':(ms/1000)+'s'}</option>`).join('');
+  return `<div>
     <div class="card">
-      <h3 style="margin-bottom:14px">Appearance</h3>
+      <div class="kicker">Preferences</div>
+      <h3>Appearance</h3>
       <div class="row" style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-soft)">
         <span>Theme</span>
         <span><button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="setTheme('dark')">Dark</button>
         <button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="setTheme('light')">Light</button>
         <button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="setTheme('auto')">Auto</button></span>
       </div>
+      <div class="row" style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-soft)">
+        <span>Table density</span>
+        <span><button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="setDensity('comfortable')">Comfortable</button>
+        <button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="setDensity('compact')">Compact</button></span>
+      </div>
+      <div class="row" style="display:flex;justify-content:space-between;padding:10px 0">
+        <span>Timestamp format</span>
+        <span><button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="setTimeFmt('rel')">Relative</button>
+        <button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="setTimeFmt('abs')">Absolute</button></span>
+      </div>
       <div class="muted" style="font-size:11px;margin-top:8px">Auto follows your OS <code>prefers-color-scheme</code>.</div>
     </div>
     <div class="card">
-      <h3 style="margin-bottom:14px">Cluster</h3>
+      <h3 style="margin-bottom:10px">Auto-refresh</h3>
+      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)">
+        <span>Interval</span>
+        <select id="refreshSel" style="width:auto" onchange="setRefresh(+this.value)">${refreshOpts}</select>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:8px">Pause otomatis saat tab tidak aktif.</div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:10px">Cluster</h3>
       <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Cluster ID</span><span class="mono">${esc(c.clusterId||'-')}</span></div>
       <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Broker</span><span class="mono">${esc(c.brokerId??'-')}</span></div>
       <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Version</span><span class="mono">${esc(c.version||'-')}</span></div>
-      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Topics / Partitions</span><span class="mono">${c.topics??0} / ${c.partitions??0}</span></div>
       <div class="row" style="display:flex;justify-content:space-between;padding:8px 0"><span class="k muted">Disk usage</span><span class="mono">${fmtBytes(c.totalBytes||0)}</span></div>
       <div style="margin-top:12px"><button class="btn ghost" onclick="refreshAll()">Refresh</button></div>
     </div>
     <div class="card">
-      <h3 style="margin-bottom:14px">Session</h3>
+      <h3 style="margin-bottom:10px">Session</h3>
       <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)">
         <span>Authentication</span>
         <span class="badge ${auth.enabled?'b-amber':'b-green'}">${auth.enabled?'Enabled':'Disabled'}</span>
@@ -390,6 +521,10 @@ function viewSettings(){
     </div>
   </div>`;
 }
+window.setDensity=function(d){state.density=d;localStorage.setItem('pk_density',d);applyDensity();};
+window.setTimeFmt=function(m){state.timeAbs=m==='abs';localStorage.setItem('pk_timeAbs',state.timeAbs?'1':'0');render();};
+window.setRefresh=function(ms){state.refreshMs=ms;localStorage.setItem('pk_refreshMs',String(ms));};
+function applyDensity(){document.body.classList.toggle('compact',state.density==='compact');}
 window.setTheme=function(mode){
   if(mode==='auto'){
     localStorage.removeItem('kadeck_theme');
@@ -406,21 +541,29 @@ window.setTheme=function(mode){
 /* ---- Connections ---- */
 function viewConnections(){
   const c=state.cluster||{};
-  return `<div class="grid">
+  return `<div>
     <div class="card conn">
+      <div class="kicker">Cluster Overview</div>
+      <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-end;margin:6px 0 4px">
+        <div><div class="statXL">${c.topics??'--'}<small>topics</small></div><div class="statSub">${c.partitions??'--'} partitions</div></div>
+        <div><div class="statXL">${fmtBytes(c.totalBytes||0)}</div><div class="statSub">on disk</div></div>
+        <div><div class="statXL">${c.groups??'--'}<small>groups</small></div><div class="statSub">consumer groups</div></div>
+        <div style="margin-left:auto;text-align:right">
+          <span class="brokerBadge"><span class="dot"></span>BROKER ${esc(String(c.brokerId??'0'))}</span>
+          <div class="statSub" style="margin-top:6px">${esc(c.version||'')} &middot; ${c.diskUsagePct!=null?c.diskUsagePct.toFixed(1)+'% disk':''}</div>
+        </div>
+      </div>
+      <hr class="hr">
       <div style="display:flex;align-items:center;margin-bottom:8px">
         <span class="dot"></span><b>pocketkafka-local</b><span class="tag">KAFKA</span>
-        <span style="margin-left:auto;color:var(--muted)">...</span>
+        ${c.clusterId?'<span style="margin-left:auto" class="badge b-green">ONLINE</span>':'<span style="margin-left:auto">'+skel(52)+'</span>'}
       </div>
-      <div class="row"><span class="k">Status</span><span class="badge b-green">Online</span></div>
-      <div class="row"><span class="k">Host</span><span class="mono">${esc(c.clusterId||'localhost')}</span></div>
       <div class="row"><span class="k">Cluster ID</span><span class="mono">${esc(c.clusterId||'-')}</span></div>
-      <div class="row"><span class="k">Broker</span><span class="mono">localhost:9092</span></div>
+      <div class="row"><span class="k">Endpoint</span><span class="mono">localhost:9092</span></div>
       <div class="row"><span class="k">Security</span><span class="mono">PLAINTEXT</span></div>
-      <div class="row"><span class="k">Topics / Partitions</span><span>${c.topics??0} / ${c.partitions??0}</span></div>
       <div class="actions">
-        <button class="btn ghost" onclick="toast('Cluster details loaded')">View cluster details</button>
-        <button class="btn" onclick="goView('databrowser')">&larr;&rarr; Connect</button>
+        <button class="btn ghost" onclick="goView('databrowser')">Open Data Browser</button>
+        <button class="btn ghost" onclick="goView('topology')">View Topology</button>
       </div>
     </div>
   </div>`;
@@ -435,8 +578,9 @@ function viewDataBrowser(){
     +parts.map(p=>`<button class="pill part" style="${act(state.partition===p.partition)}" onclick="setPart('${p.partition}')">P-${p.partition}</button>`).join('');
   return `
     <div class="toolbar">
-      <div class="group"><button class="pill ${state.tail?'active':''}" id="liveBtn" onclick="toggleTail()">${state.tail?'<span class="live-dot"></span> Pause':'&#9654; Live Tail'}</button></div>
-      <div class="group"><button class="pill" onclick="seek(-2)">&#9198; Beginning</button><button class="pill" onclick="seek(-1)">&#9197; Latest</button><button class="pill" onclick="seekOffset()">&#8505; Offset</button></div>
+      <div class="group"><button class="pill ${state.tail?'active':''}" id="liveBtn" onclick="toggleTail()">${state.tail?'<span class="live-dot"></span> Pause':'Live Tail'}</button></div>
+      <div class="group"><button class="pill" onclick="seek('begin')">Beginning</button><button class="pill" onclick="seek('latest')">Latest</button><input id="offInput" class="mono" placeholder="offset" style="width:92px;padding:4px 8px" onkeydown="if(event.key==='Enter')seekOffsetGo()"><button class="pill" onclick="seekOffsetGo()">Go</button></div>
+      <span class="updatedAgo" id="posInfo"></span>
       <select id="topicSel" onchange="state.topic=this.value;state.partition='all';state.filters=[];loadMsgs()" style="width:180px"><option value="">Select topic</option>${opts}</select>
       <div class="group">${pills}</div>
       <select id="decoder" onchange="state.decoder=this.value;renderMsgRows()">
@@ -447,28 +591,29 @@ function viewDataBrowser(){
       </select>
     </div>
     <div class="toolbar">
-      <input id="searchBox" placeholder="Filter key/value..." value="${esc(state.search)}" style="max-width:180px" onkeydown="if(event.key==='Enter')loadMsgs()">
-      <input id="fromTs" placeholder="From (ms epoch)" value="${esc(state.fromTs)}" style="max-width:120px">
-      <input id="toTs" placeholder="To (ms epoch)" value="${esc(state.toTs)}" style="max-width:120px">
+      <input id="searchBox" placeholder="Filter key/value..." value="${esc(state.search)}" style="max-width:160px" onkeydown="if(event.key==='Enter')loadMsgs()">
+      <input id="fromTs" placeholder="From (ms)" value="${esc(state.fromTs)}" style="max-width:110px">
+      <input id="toTs" placeholder="To (ms)" value="${esc(state.toTs)}" style="max-width:110px">
       <button class="btn ghost" onclick="loadMsgs()">Apply</button>
-      <div class="group"><button class="pill ${state.filterPanel?'active':''}" onclick="toggleFilterPanel()">&#128269; Filter</button></div>
-      <div class="group"><button class="pill ${state.projCols.length?'active':''}" onclick="openProj()">&#128208; Columns</button></div>
-      <div class="group"><button class="pill" onclick="exportMsgs('jsonl')">&#11015; .jsonl</button><button class="pill" onclick="exportMsgs('csv')">&#11015; .csv</button></div>
-      <div class="group"><button class="pill ${state.diffSel.length>=2?'active':''}" onclick="runDiff()">&#8646; Diff</button></div>
-      <button class="btn ghost" onclick="prevPage()">&#9664; Prev</button>
-      <button class="btn ghost" onclick="nextPage()">Next &#9654;</button>
-      <span class="muted" id="pageInfo"></span>
+      <div class="group"><button class="pill ${state.filterPanel?'active':''}" onclick="toggleFilterPanel()">Filter</button></div>
+      <div class="group"><button class="pill ${state.projCols.length?'active':''}" onclick="openProj()">Columns</button></div>
+      <div class="group"><button class="pill" title="Export JSON Lines" onclick="exportMsgs('jsonl')">.jsonl</button><button class="pill" title="Export CSV" onclick="exportMsgs('csv')">.csv</button></div>
+      <div class="group"><button class="pill ${state.diffSel.length>=2?'active':''}" onclick="runDiff()">Diff</button></div>
+      <div class="group"><button class="pill" onclick="prevPage()">Prev</button><button class="pill" onclick="nextPage()">Next</button><span class="muted" id="pageInfo" style="padding:0 8px;font-size:11px"></span></div>
+      <div class="group"><button class="pill" title="Copy curl (REST proxy 8082)" onclick="copyCurl(state.topic)">curl</button><button class="pill" title="Copy Go consumer snippet" onclick="copyConsumer(state.topic)">consumer.go</button></div>
+      <label class="btn ghost" style="padding:6px 11px;font-size:12px" title="Import .jsonl ke topik ini">Import<input type="file" accept=".jsonl,.ndjson" style="display:none" onchange="doImportFile(this)"></label>
     </div>
+    <div id="tailBar"></div>
     ${state.filterPanel?filterPanelHtml():''}
     ${state.projCols.length?projBarHtml():''}
     <div class="card" style="padding:0;overflow:hidden">
       <table><thead><tr><th class="chkCell"></th><th>Timestamp</th><th>Partition</th><th>Offset</th><th>Key</th><th>Headers</th>${state.projCols.map(c=>`<th class="mono">${esc(c)}</th>`).join('')}<th>Value</th><th></th></tr></thead>
-      <tbody id="rows"><tr><td colspan="${8+state.projCols.length}" class="muted" style="padding:20px">${state.topic?'Load...':'Select a topic'}</td></tr></tbody></table>
+      <tbody id="rows"><tr><td colspan="${8+state.projCols.length}" style="padding:20px">${state.topic?'<span class="skel" style="width:120px"></span> <span class="skel" style="width:80px"></span> <span class="skel" style="width:160px"></span>':'<span class="muted">Select a topic</span>'}</td></tr></tbody></table>
     </div>
-    <div class="inspector hidden" id="inspector"><h3>Message Inspector</h3><pre id="insp"></pre><div style="margin-top:8px;display:flex;gap:8px"><button class="btn ghost" onclick="copyInsp()">Copy JSON</button><button class="btn ghost" onclick="replaySelected()">&#8635; Replay / DLQ</button></div></div>
+    <div class="inspector hidden" id="inspector"><h3>Message Inspector</h3><pre id="insp"></pre><div style="margin-top:8px;display:flex;gap:8px"><button class="btn ghost" onclick="copyInsp()">Copy JSON</button><button class="btn ghost" onclick="replaySelected()">Replay / DLQ</button></div></div>
     <div id="diffPanel"></div>`;
 }
-window.setPart=p=>{state.partition=p;loadMsgs();};
+window.setPart=p=>{state.partition=p;state.off=null;loadMsgs();loadPosMeta();};
 async function loadMsgs(){ if(!state.topic)return; try{
   const qs=new URLSearchParams(); qs.set('limit','100');
   if(state.partition!=='all')qs.set('partition',state.partition);
@@ -478,8 +623,11 @@ async function loadMsgs(){ if(!state.topic)return; try{
   if(state.off)qs.set('offset',state.off);
   const res=await api(`/api/v1/topics/${encodeURIComponent(state.topic)}/messages?${qs.toString()}`);
   state.msgs=res.records||res;
+  syncHash();
   refreshFieldHints();
   const pi=$('#pageInfo'); if(pi)pi.textContent=res.count!=null?`${res.count} shown`:'';
+  updatePosInfo();
+  const oi=$('#offInput'); if(oi&&document.activeElement!==oi)oi.value=(state.off!=null&&state.off!=='')?state.off:'';
   renderMsgRows();
 }catch(e){toast(e.message);} }
 window.loadMsgs=loadMsgs;
@@ -488,7 +636,7 @@ window.prevPage=prevPage;
 function nextPage(){ if(!state.msgs.length)return; const last=Math.max(...state.msgs.map(m=>m.offset)); state.off=last+1; loadMsgs(); }
 window.nextPage=nextPage;
 function filteredMsgs(){ if(!state.filters.length)return state.msgs; const o={}; return state.msgs.filter(m=>{ const v=jsonOf(m); return state.filters.every(f=>evalFilter(f,v)); }); }
-function rowHtml(m){const val=fmtValue(m);const sel=state.diffSel.includes(m.offset);return `<td class="chkCell"><input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleDiffSel(${m.offset})"></td><td><div>${rel(m.timestamp)}</div><div class="rel">${new Date(m.timestamp).toISOString()}</div></td><td><span class="chip">P${m.partition}</span></td><td>${m.offset}</td><td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td><td><div class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</div></td>${state.projCols.map(c=>`<td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(getPath(jsonOf(m),c))}</td>`).join('')}<td style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td><td style="white-space:nowrap"><button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();replayOne(${m.offset})">&#8635;</button></td>`;}
+function rowHtml(m){const val=fmtValue(m);const sel=state.diffSel.includes(m.offset);return `<td class="chkCell"><input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleDiffSel(${m.offset})"></td><td>${timeCell(m.timestamp)}</td><td><span class="chip">P${m.partition}</span></td><td>${m.offset}</td><td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td><td><div class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</div></td>${state.projCols.map(c=>`<td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(getPath(jsonOf(m),c))}</td>`).join('')}<td style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td><td style="white-space:nowrap"><button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();replayOne(${m.offset})">Replay</button></td>`;}
 function renderMsgRows(){ const rows=$('#rows'); if(!rows)return; const all=filteredMsgs(); if(!all.length){rows.innerHTML='<tr><td colspan="'+(8+state.projCols.length)+'" class="muted" style="padding:20px">'+(state.filters.length?'No messages match filters.':'No messages.')+'</td></tr>';return;}
 rows.innerHTML=all.slice().reverse().map(m=>'<tr class="rowclick" onclick="insp('+JSON.stringify(m).replace(/"/g,'&quot;')+')">'+rowHtml(m)+'</tr>').join(''); }
 window.renderMsgRows=renderMsgRows;
@@ -499,12 +647,12 @@ function jnode(key,val){tnId++;const id=tnId;
   const open=val&&Object.keys(val).length<=8;
   const body=Object.entries(val||{}).map(function(e){return jnode(e[0],e[1]);}).join('');
   const label=Array.isArray(val)?('['+val.length+']'):('{'+Object.keys(val).length+'}');
-  return '<div><div class="jrow" onclick="toggleNode('+id+')"><span class="jarrow" id="ta-'+id+'">'+(open?'&#9660;':'&#9654;')+'</span><span class="jkey">"'+esc(key)+'"</span>: <span class="jnum">'+label+'</span></div><div class="jnode" id="tn-'+id+'" style="'+(open?'':'display:none')+'">'+(body||'<div class="muted" style="padding-left:14px">(empty)</div>')+'</div></div>';}
-window.toggleNode=function(id){const b=document.getElementById('tn-'+id),a=document.getElementById('ta-'+id);if(b){const o=b.style.display!=='none';b.style.display=o?'none':'block';a.innerHTML=o?'&#9654;':'&#9660;';}};
+  return '<div><div class="jrow" onclick="toggleNode('+id+')"><span class="jarrow" id="ta-'+id+'">'+(open?'v':'>')+'</span><span class="jkey">"'+esc(key)+'"</span>: <span class="jnum">'+label+'</span></div><div class="jnode" id="tn-'+id+'" style="'+(open?'':'display:none')+'">'+(body||'<div class="muted" style="padding-left:14px">(empty)</div>')+'</div></div>';}
+window.toggleNode=function(id){const b=document.getElementById('tn-'+id),a=document.getElementById('ta-'+id);if(b){const o=b.style.display!=='none';b.style.display=o?'none':'block';a.innerHTML=o?'>':'v';}};
 window.insp=function(m){$('#inspector').classList.remove('hidden');const obj={topic:m.topic,partition:m.partition,offset:m.offset,timestamp:new Date(m.timestamp).toISOString(),key:m.key,headers:m.headers,valueSize:m.valueSize,value:fmtValue(m)};let body='';for(const k in obj)body+=jnode(k,obj[k]);$('#insp').innerHTML='<div class="jnode" style="border:none;margin:0;padding-left:0">'+body+'</div>';};
 function fmtValue(m){ if(state.decoder==='hex')return hex(m.valueB64); if(m.isJSON)return JSON.stringify(JSON.parse(m.value||'null'),null,2); return m.value; }
 function hex(b64){let s='',bin=atob(b64||'');for(let i=0;i<bin.length;i++)s+=bin.charCodeAt(i).toString(16).padStart(2,'0')+' ';return s.trim();}
-function copyInsp(){const p=$('#insp');navigator.clipboard.writeText(p.textContent).then(()=>{const b=document.querySelector('.inspector .btn');if(b){const old=b.textContent;b.textContent='✓ Copied!';b.style.color='var(--success)';setTimeout(()=>{b.textContent=old;b.style.color='';},1500);}else toast('Copied');});}
+function copyInsp(){const p=$('#insp');navigator.clipboard.writeText(p.textContent).then(()=>{const b=document.querySelector('.inspector .btn');if(b){const old=b.textContent;b.textContent='Copied';b.style.color='var(--success)';setTimeout(()=>{b.textContent=old;b.style.color='';},1500);}else toast('Copied');});}
 window.copyInsp=copyInsp;
 
 /* ================= Fitur 3.2: Filter Builder ================= */
@@ -525,7 +673,7 @@ function filterPanelHtml(){
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
       <b style="font-size:13px">Filter Builder</b>
       <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="addFilter()">+ Add rule</button>
-      <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="savePreset()">&#128190; Save preset</button>
+      <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="savePreset()">Save preset</button>
       <span class="sp" style="flex:1"></span>
       <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="toggleFilterPanel()">Close</button>
     </div>
@@ -582,9 +730,37 @@ window.replaySelected=function(){ const a=state.diffSel; const m=byOff(a[0])||by
 window.closeOverlay=function(){ const o=document.querySelector('.overlay'); if(o)o.remove(); };
 window.doReplay=async function(off){ const m=byOff(off); if(!m)return; const topic=document.getElementById('rpTopic').value||m.topic; const body={key:document.getElementById('rpKey').value,value:document.getElementById('rpValue').value}; try{ const r=await api('/api/v1/topics/'+encodeURIComponent(topic)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('Replayed to '+topic+' @ offset '+r.offset); closeOverlay(); }catch(e){toast(e.message);} };
 
-async function seek(ts){ if(!state.topic)return; if(ts===-2){state.off=0;}else if(ts===-1){state.off=999999999;} await loadMsgs(); }
-window.seek=seek; function seekOffset(){const o=prompt('Offset:');if(o!==null){state.off=o;loadMsgs();}} window.seekOffset=seekOffset;
-function toggleTail(){ state.tail=!state.tail; const b=$('#liveBtn'); if(b)b.innerHTML=state.tail?'&#9208; Pause':'&#9654; Live Tail'; if(!state.topic){state.tail=false;return;}
+async function seek(w){ if(!state.topic)return;
+  if(w==='begin'){state.off=0;}
+  else if(w==='latest'){ const leo=(state.leo!=null)?state.leo:0; state.off=Math.max(state.earliest||0,leo-100); }
+  await loadMsgs(); }
+window.seek=seek;
+window.seekOffsetGo=function(){ const inp=$('#offInput'); if(!inp)return; const v=inp.value.trim();
+  if(v===''){toast('Isi offset dulu');inp.focus();return;}
+  const n=parseInt(v,10);
+  if(isNaN(n)||n<0){toast('Offset harus angka >= 0');inp.focus();return;}
+  if(state.leo!=null&&n>=state.leo){toast('Offset melebihi LEO ('+state.leo+')');inp.focus();return;}
+  state.off=n; loadMsgs(); };
+// meta partisi untuk posInfo + tombol Latest (LEO & earliest)
+function loadPosMeta(){
+  api(`/api/v1/topics/${encodeURIComponent(state.topic)}/partitions`).then(ps=>{
+    const pno=state.partition==='all'?0:parseInt(state.partition,10)||0;
+    const p=(ps||[]).find(x=>x.partition===pno)||ps[0];
+    state.leo=p?p.logEndOffset:null; state.earliest=p?p.earliestOffset:null;
+    updatePosInfo();
+  }).catch(()=>{});
+}
+function updatePosInfo(){
+  const el=document.getElementById('posInfo'); if(!el)return;
+  const pno=state.partition==='all'?0:parseInt(state.partition,10)||0;
+  let txt='P'+pno;
+  if(state.leo!=null)txt+=' \u00b7 LEO '+state.leo+' \u00b7 earliest '+(state.earliest??0);
+  const first=state.msgs.length?Math.min(...state.msgs.map(m=>m.offset)):null;
+  const last=state.msgs.length?Math.max(...state.msgs.map(m=>m.offset)):null;
+  if(first!=null)txt+=' \u00b7 window '+first+'-'+last;
+  el.textContent=txt;
+}
+function toggleTail(){ state.tail=!state.tail; const b=$('#liveBtn'); if(b)b.innerHTML=state.tail?'<span class="live-dot"></span> Pause':'Live Tail'; if(!state.topic){state.tail=false;return;}
   if(state.ws)state.ws.close();
   if(!state.tail)return;
   connectTail(); }
@@ -594,19 +770,25 @@ window.toggleTail=toggleTail;
 function connectTail(){
   if(!state.tail)return;
   const proto=location.protocol==='https:'?'wss':'ws';
-  const ws=new WebSocket(`${proto}://${location.host}/api/v1/topics/${encodeURIComponent(state.topic)}/tail`);
+  const part=state.partition&&state.partition!=='all'?state.partition:0;
+  const ws=new WebSocket(`${proto}://${location.host}/api/v1/topics/${encodeURIComponent(state.topic)}/tail?partition=${encodeURIComponent(part)}`);
   state.ws=ws; state.retryCount=state.retryCount||0;
   ws.onopen=()=>{state.retryCount=0;};
-  ws.onmessage=e=>{ const recs=JSON.parse(e.data); if(!recs.length)return; state.msgs=[...recs.slice().reverse(),...state.msgs]; if(state.msgs.length>200)state.msgs=state.msgs.slice(0,200); recs.slice().reverse().forEach(prependMsgRow); };
+  ws.onmessage=e=>{ const recs=JSON.parse(e.data); if(!recs.length)return;
+    if(state.tailPaused){ state.pendingTail+=recs.length; updateTailBar(); return; }
+    state.msgs=[...recs.slice().reverse(),...state.msgs]; if(state.msgs.length>200)state.msgs=state.msgs.slice(0,200); recs.slice().reverse().forEach(prependMsgRow); };
   ws.onclose=()=>{ if(!state.tail)return; const delay=Math.min(1000*Math.pow(1.5,state.retryCount++),10000); state.wsRetry=setTimeout(connectTail,delay); };
   ws.onerror=()=>{ ws.close(); };
 }
 function prependMsgRow(m){const rows=$('#rows');if(!rows)return;const tr=document.createElement('tr');tr.className='rowclick animate-row-entry';tr.innerHTML=rowHtml(m);tr.onclick=()=>insp(m);rows.prepend(tr);}
 
 /* ---- Topics ---- */
-function viewTopics(){ return `<div class="card"><div style="display:flex;gap:8px;margin-bottom:14px"><input id="newT" placeholder="new topic name" style="max-width:240px"><button class="btn" onclick="createTopic()">Create</button></div>
-  <table><thead><tr><th>Topic</th><th>Partitions</th><th>Log End</th><th>Size</th><th></th></tr></thead><tbody>
-  ${state.topics.map(t=>{const ps=t.partitions||[];const max=Math.max(1,...ps.map(p=>p.logEndOffset||0));const bars=ps.map(p=>`<div class="pbar" title="P${p.partition}: LEO ${p.logEndOffset||0}"><span style="width:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"></span></div>`).join('')||'<span class="muted">-</span>';const p=ps[0]||{};return `<tr><td class="mono"><a style="color:var(--primary-text);cursor:pointer" onclick="openTopicDetail('${esc(t.name)}')">${esc(t.name)}</a></td><td style="min-width:90px">${bars}</td><td>${p.logEndOffset??0}</td><td>${fmtBytes(t.totalBytes||0)}</td><td style="white-space:nowrap"><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="openTopicDetail('${esc(t.name)}')">Detail</button> <button class="btn danger" style="padding:4px 10px;font-size:11px" onclick="delTopic('${esc(t.name)}')">Delete</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="muted">No topics</td></tr>'}
+function viewTopics(){ return `<div class="card"><div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;flex-wrap:wrap">
+  <div><div class="kicker">Namespace</div><div class="statXL">${state.topics.length}<small>topics</small></div></div>
+  <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input id="newT" placeholder="new topic name" style="max-width:220px"><input id="newP" type="number" min="1" max="64" value="1" title="Partitions" style="max-width:70px"><button class="btn" onclick="createTopic()">Create</button></div>
+  </div>
+  <table><thead><tr><th class="sortable" onclick="sortRows('topics','name')">Topic<span class="sortInd">${sortInd('topics','name')}</span></th><th class="sortable" onclick="sortRows('topics','leo')">Log End<span class="sortInd">${sortInd('topics','leo')}</span></th><th class="sortable" onclick="sortRows('topics','size')">Size<span class="sortInd">${sortInd('topics','size')}</span></th><th>Partitions</th><th></th></tr></thead><tbody>
+  ${sortedTopics().map(t=>{const ps=t.partitions||[];const max=Math.max(1,...ps.map(p=>p.logEndOffset||0));const bars=ps.map(p=>`<div class="pbar" title="P${p.partition}: LEO ${p.logEndOffset||0}"><span style="width:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"></span></div>`).join('')||'<span class="muted">-</span>';const p=ps[0]||{};return `<tr><td class="mono"><a style="color:var(--primary-text);cursor:pointer" onclick="openTopicDetail('${esc(t.name)}')">${esc(t.name)}</a></td><td>${p.logEndOffset??0}</td><td>${fmtBytes(t.totalBytes||0)}</td><td style="min-width:90px">${bars}</td><td style="white-space:nowrap"><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="openTopicDetail('${esc(t.name)}')">Detail</button> <button class="btn danger" style="padding:4px 10px;font-size:11px" onclick="delTopic('${esc(t.name)}')">Delete</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="muted" style="padding:20px">No topics yet. <button class="btn" style="padding:4px 12px;font-size:12px" onclick="document.getElementById(\'newT\').focus()">Create the first one</button></td></tr>'}
   </tbody></table></div>`; }
 window.openTopic=async n=>{state.topic=n;state.partition='all';await goView('databrowser');loadMsgs();};
 window.openTopicDetail=async n=>{state.view='topics';state.topicDetail=n;render();loadTopicDetail();};
@@ -621,16 +803,18 @@ function viewTopicDetail(){ const t=state.topicDetail; if(!t)return '';
   const bars=ps.map(p=>{const leo=((p.logEndOffset||0)/max)*100;const hwm=((p.highWatermark||0)/max)*100;
     return `<div style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;margin-bottom:4px"><span>P${p.partition}</span><span class="muted">LEO ${p.logEndOffset} / HWM ${p.highWatermark} / earliest ${p.earliestOffset}</span></div>
-      <div class="pbar" style="height:14px"><span style="width:${leo}%;background:linear-gradient(90deg,var(--primary),var(--accent))"></span></div>
+      <div class="pbar" style="height:14px"><span style="width:${leo}%"></span></div>
       <div class="pbar" style="height:6px;margin-top:2px"><span style="width:${hwm}%;background:var(--live)"></span></div>
       <div class="muted" style="font-size:10px;margin-top:4px">${fmtBytes(p.bytes)} &middot; ${(p.segments||[]).length} segment(s)</div>
       <div style="margin-top:6px;display:flex;gap:6px">
         <button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="truncateTopic(${p.partition})">Truncate</button>
       </div>
     </div>`;}).join('');
-  return `<div class="grid"><div class="card">
+  return `<div><div class="card">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
       <h3 style="font-size:15px">${esc(t)}</h3>
+      <span class="badge ${state.topicCfg&&state.topicCfg.compacted?'b-purple':'b-amber'}">${state.topicCfg&&state.topicCfg.compacted?'cleanup.policy=compact':'cleanup.policy=delete'}</span>
+      <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="toggleTopicCompact()">${state.topicCfg&&state.topicCfg.compacted?'Disable compaction':'Enable compaction'}</button>
       <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="compactTopic()">Compact now</button>
       <button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.topicDetail=null;render()">Back</button>
     </div>
@@ -639,15 +823,15 @@ function viewTopicDetail(){ const t=state.topicDetail; if(!t)return '';
   </div></div>`; }
 window.truncateTopic=async function(p){const o=prompt('Truncate partition '+p+' to offset:');if(o===null)return;try{await api(`/api/v1/topics/${encodeURIComponent(state.topicDetail)}/truncate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({partition:p,offset:parseInt(o,10)})});toast('Truncated');loadTopicDetail();}catch(e){toast(e.message);}};
 window.compactTopic=async function(){try{await api(`/api/v1/topics/${encodeURIComponent(state.topicDetail)}/compact`,{method:'POST'});toast('Compaction triggered');}catch(e){toast(e.message);}};
-async function createTopic(){const n=$('#newT').value;if(!n)return;try{await api('/api/v1/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,partitions:1})});toast('Created '+n);await refresh();render();}catch(e){toast(e.message);}}
+async function createTopic(){const n=$('#newT').value;if(!n)return;const parts=Math.max(1,Math.min(64,parseInt($('#newP')?.value||'1',10)||1));try{await api('/api/v1/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,partitions:parts})});toast('Created '+n+' ('+parts+'p)');await refresh();render();}catch(e){toast(e.message);}}
 window.createTopic=createTopic;
 async function delTopic(n){if(!confirm('Delete topic '+n+'?'))return;try{await api('/api/v1/topics/'+encodeURIComponent(n),{method:'DELETE'});toast('Deleted '+n);await refresh();render();}catch(e){toast(e.message);}}
 window.delTopic=delTopic;
 
 /* ---- Groups ---- */
-function viewGroups(){ if(!state.groups.length)return '<div class="card muted">No consumer groups.</div>';
-  return `<div class="card"><table><thead><tr><th>Group</th><th>State</th><th>Members</th><th>Lag</th><th></th></tr></thead><tbody>
-  ${state.groups.map(g=>{const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0);return `<tr class="rowclick" onclick="openGroup('${esc(g.name)}')"><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span></td><td class="mono">${g.members.join(', ')||'-'}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td><td><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();delGroup('${esc(g.name)}')">Delete</button></td></tr>`;}).join('')}
+function viewGroups(){ if(!state.groups.length)return '<div class="card" style="padding:32px;text-align:center"><div class="muted" style="margin-bottom:12px">No consumer groups yet.</div><button class="btn" onclick="goView(\'databrowser\')">Browse data to create one</button></div>';
+  return `<div class="card"><table><thead><tr><th class="sortable" onclick="sortRows('groups','name')">Group<span class="sortInd">${sortInd('groups','name')}</span></th><th>State</th><th class="sortable" onclick="sortRows('groups','members')">Members<span class="sortInd">${sortInd('groups','members')}</span></th><th class="sortable" onclick="sortRows('groups','lag')">Lag<span class="sortInd">${sortInd('groups','lag')}</span></th><th></th></tr></thead><tbody>
+  ${sortedGroups().map(g=>{const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0);return `<tr class="rowclick" onclick="openGroup('${esc(g.name)}')"><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span></td><td class="mono">${g.members.join(', ')||'-'}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td><td style="white-space:nowrap"><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();exportGroupOffsets('${esc(g.name)}')" title="Export offset snapshot">Export</button> <button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();importGroupOffsets('${esc(g.name)}')" title="Import offset snapshot">Import</button> <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();delGroup('${esc(g.name)}')">Delete</button></td></tr>`;}).join('')}
   </tbody></table></div>`; }
 window.openGroup=async g=>{state.group=g;location.hash='#/groups/'+encodeURIComponent(g);render();loadGroupDetail();};
 async function loadGroupDetail(){ if(!state.group)return; try{
@@ -655,7 +839,7 @@ async function loadGroupDetail(){ if(!state.group)return; try{
   render();
 }catch(e){toast(e.message);} }
 window.loadGroupDetail=loadGroupDetail;
-function viewGroupDetail(){ const g=state.groupDetail; if(!g)return '<div class="card muted">Loading...</div>';
+function viewGroupDetail(){ const g=state.groupDetail; if(!g)return '<div class="card">'+skel(140)+' '+skel(90)+' '+skel(60)+'</div>';
   const lagRows=g.offsets.map(o=>`<tr><td class="mono">${esc(o.topic)}</td><td>${o.partition}</td><td>${o.current_offset}</td><td>${o.log_end_offset}</td><td><span class="badge ${o.lag>0?'b-amber':'b-green'}">${o.lag}</span></td>
     <td><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="resetGroupOffset('${esc(o.topic)}',${o.partition})">Reset</button></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No committed offsets</td></tr>';
   const members=g.members.map(m=>`<div class="chip" style="padding:3px 10px;margin:2px">${esc(m.member_id)}${m.client_host?' @ '+esc(m.client_host):''}</div>`).join('')||'<span class="muted">-</span>';
@@ -680,14 +864,15 @@ window.delGroup=async function(g){if(!confirm('Delete group '+g+'?'))return;try{
 
 /* ---- Producer Studio ---- */
 function viewProducer(){ const opts=state.topics.map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
-  return `<div class="grid"><div class="card" style="max-width:640px">
+  return `<div class="card">
+    <h3 style="margin-bottom:12px">Producer Studio</h3>
     <label>Topic</label><input list="tl" id="pTopic" placeholder="my-topic (auto-created)" value="${esc(state.topic||'')}"><datalist id="tl">${opts}</datalist>
-    <label>Partition</label><select id="pPart"><option value="-1">Auto</option><option value="0">0</option></select>
+    <label>Partition</label><select id="pPart" style="width:auto"><option value="-1">Auto</option><option value="0">0</option></select>
     <label>Key</label><input id="pKey" placeholder="optional key">
     <label>Headers (key=value, one per line)</label><textarea id="pHeaders" rows="2" placeholder="traceId=abc"></textarea>
     <label>Payload (JSON / text)</label><textarea id="pValue" rows="8">{"event":"hello","ts":1700000000}</textarea>
     <div style="margin-top:12px"><button class="btn" onclick="sendMsg()">Send Message</button></div>
-  </div></div>`; }
+  </div>`; }
 async function sendMsg(){ const body={value:$('#pValue').value,key:$('#pKey').value}; const h={}; $('#pHeaders').value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0)h[l.slice(0,i).trim()]=l.slice(i+1).trim();}); if(Object.keys(h).length)body.headers=h;
   const topic=$('#pTopic').value||'demo'; const btn=document.querySelector('#view .card .btn'); if(btn){btn.disabled=true;const o=btn.textContent;btn.textContent='Publishing...';}
   try{const r=await api('/api/v1/topics/'+encodeURIComponent(topic)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast(`Published to offset ${r.offset}`);await refresh();}catch(e){toast(e.message);}
@@ -700,7 +885,7 @@ function clusterSwitcherHtml(){
   const cl=clusterList();
   const current=state.cluster?.clusterId||'current';
   const opts=cl.map(c=>`<option value="${esc(JSON.stringify(c))}">${esc(c.name)} (${esc(c.broker)})</option>`).join('');
-  return `<span class="muted" style="font-size:11px">Cluster</span><select id="clusterSel" style="width:190px;font-size:11px" onchange="switchCluster(this.value)"><option value="">${esc(current)}</option>${opts}</select>`;
+  return `<select id="clusterSel" style="width:150px;font-size:11px;border:none;background:transparent;padding:3px 4px" title="Cluster" onchange="switchCluster(this.value)"><option value="">${esc(current)}</option>${opts}</select>`;
 }
 window.switchCluster=function(json){ if(!json)return; const c=JSON.parse(json); toast('Switching to '+c.name+' (demo: single-broker build)'); };
 window.addCluster=function(){ const nm=prompt('Cluster name:','Local Docker'); const bk=prompt('Broker address:','localhost:9092'); if(!nm)return; const cl=clusterList(); cl.push({name:nm,broker:bk}); localStorage.setItem('pk_clusters',JSON.stringify(cl)); render(); };
@@ -719,18 +904,18 @@ function viewDevStudio(){
       <div style="margin-top:12px"><button class="btn" onclick="mockGenStart()">Start</button> <button class="btn danger" onclick="mockGenStop()">Stop</button>
       <span class="muted" style="font-size:11px" id="mockStat"></span></div>
     </div>
-    <div class="card"><h3 style="margin-bottom:12px">Payload → Code Generator</h3>
+    <div class="card"><h3 style="margin-bottom:12px">Payload to Code Generator</h3>
       <label>Paste a JSON payload</label><textarea id="pgInput" rows="6">${esc('{"user":{"id":"u1","name":"Alice","email":"a@x.com","active":true,"price":1200.5}}')}</textarea>
       <label>Language</label><select id="pgLang" onchange="genCode()"><option value="go">Go struct</option><option value="ts">TypeScript interface</option><option value="py">Python Pydantic</option></select>
       <div style="margin-top:8px"><button class="btn" onclick="genCode()">Generate</button></div>
       <div class="codeOut" id="pgOut" style="margin-top:10px"></div>
     </div>
-    <div class="card" style="grid-column:1/-1"><h3 style="margin-bottom:12px">RPC Request / Reply Tester</h3>
+    <div class="card"><h3 style="margin-bottom:12px">RPC Request / Reply Tester</h3>
       <div class="row">
-        <label>Request topic</label><input id="rpcReq" list="tl" value="rpc-req" style="width:180px">
-        <label>Reply topic</label><input id="rpcReply" value="rpc-reply" style="width:180px">
-        <label>Method</label><input id="rpcMethod" value="getUser" style="width:160px">
-        <label>Payload</label><input id="rpcPayload" value='{"id":1}' style="width:220px">
+        <label style="margin:0">Request topic</label><input id="rpcReq" list="tl" value="rpc-req" style="width:170px">
+        <label style="margin:0">Reply topic</label><input id="rpcReply" value="rpc-reply" style="width:170px">
+        <label style="margin:0">Method</label><input id="rpcMethod" value="getUser" style="width:150px">
+        <label style="margin:0">Payload</label><input id="rpcPayload" value='{"id":1}' style="width:220px">
         <button class="btn" onclick="rpcSend()">Send</button>
       </div>
       <div class="muted" style="font-size:11px;margin-top:6px">Sends a message with <code>correlation_id</code> + <code>reply_to_topic</code> headers. A consumer on the reply topic echoes a response for demo.</div>
@@ -758,63 +943,66 @@ window.mockGenStop=function(){ if(mockTimer){clearInterval(mockTimer);mockTimer=
 window.rpcSend=function(){ const req=document.getElementById('rpcReq').value,reply=document.getElementById('rpcReply').value,method=document.getElementById('rpcMethod').value,payload=document.getElementById('rpcPayload').value; const corr=Math.random().toString(36).slice(2,10); const body={key:corr,value:JSON.stringify({method,request:JSON.parse(payload||'{}'),reply_to:reply}),headers:{correlation_id:corr,reply_to_topic:reply,type:'request'}}; api('/api/v1/topics/'+encodeURIComponent(req)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>toast('RPC request sent @ offset '+r.offset+' (corr '+corr+')')).catch(e=>toast(e.message)); };
 
 /* ================= Fitur 4.2: Stream Topology & Data Flow ================= */
+function topoLayer(label,nodesHtml){ return `<div class="topoLayer"><div class="topoLabel">${label}</div><div class="topoNodes">${nodesHtml}</div></div>`; }
 function viewTopology(){
   const tops=state.topics||[]; const grps=state.groups||[];
   let skew='';
-  if(tops.length){ const sel=tops[0]; const ps=sel.partitions||[]; const max=Math.max(1,...ps.map(p=>p.logEndOffset||0)); skew=`<div class="card" style="margin-top:16px"><h3 style="margin-bottom:4px">Partition Skew — ${esc(sel.name)}</h3><div class="muted" style="font-size:11px;margin-bottom:4px">Log end offset per partition (hot partition = uneven)</div><div class="skewBar">${ps.map(p=>`<div style="height:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"><span>P${p.partition}</span></div>`).join('')||'<span class="muted">no partitions</span>'}</div></div>`; }
-  return `<div class="graph" id="topoGraph" style="height:${Math.max(260,140+tops.length*20+grps.length*16)}px">
-    <div class="muted" style="font-size:11px">Producer Apps &#8594; Topics &#8594; Partitions &#8594; Consumer Groups</div>
-    <div id="topoNodes"></div>
-  </div>${skew}<div class="card" style="margin-top:16px"><h3>Data Flow Legend</h3><div class="row" style="font-size:12px"><span class="badge b-purple">Producer</span><span>&#8594;</span><span class="badge b-green">Topic</span><span>&#8594;</span><span class="badge b-amber">Partition</span><span>&#8594;</span><span class="badge">Group</span></div></div>`; }
-function renderTopo(){
-  const el=document.getElementById('topoNodes'); if(!el)return;
-  const g=document.getElementById('topoGraph'); if(!g)return;
-  const W=g.clientWidth||900; const H=g.clientHeight||300;
-  const tops=state.topics||[]; const grps=state.groups||[];
-  let nodes='';
-  const producers=['producer-app-1','producer-app-2'];
-  const pY=(i)=>40+i*22;
-  producers.forEach((p,i)=>{ nodes+=`<div class="gNode" style="left:10px;top:${pY(i)}px"><div class="glabel">Producer</div>${p}</div>`; });
-  const tX=W*0.38, gX=W*0.75;
-  tops.forEach((t,i)=>{ const tY=60+i*46; nodes+=`<div class="gNode" style="left:${tX}px;top:${tY}px"><div class="glabel">Topic</div>${esc(t.name)}</div>`; (t.partitions||[]).forEach((p,j)=>{ nodes+=`<div class="gNode" style="left:${tX+120}px;top:${tY+16+j*20}px"><div class="glabel">Part</div>P${p.partition}</div>`; }); });
-  grps.forEach((gr,i)=>{ const gY=80+i*26; nodes+=`<div class="gNode" style="left:${gX}px;top:${gY}px"><div class="glabel">Group</div>${esc(gr.name)}</div>`; });
-  el.innerHTML=nodes;
-}
-window.refreshTopo=function(){renderTopo();};
+  if(tops.length){ const sel=tops[0]; const ps=sel.partitions||[]; const max=Math.max(1,...ps.map(p=>p.logEndOffset||0)); skew=`<div class="card"><h3 style="margin-bottom:4px">Partition Skew - ${esc(sel.name)}</h3><div class="muted" style="font-size:11px;margin-bottom:4px">Log end offset per partition (hot partition = uneven)</div><div class="skewBar">${ps.map(p=>`<div style="height:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"><span>P${p.partition}</span></div>`).join('')||'<span class="muted">no partitions</span>'}</div></div>`; }
+  return `<div class="card">
+    <h3 style="margin-bottom:10px">Stream Topology</h3>
+    ${topoLayer('Producer Apps','<span class="gNode">producer-app-1</span><span class="gNode">producer-app-2</span>')}
+    <div class="topoArrow">| v</div>
+    ${topoLayer('Topics',tops.map(t=>`<span class="gNode">${esc(t.name)}</span>`).join('')||'<span class="muted" style="font-size:12px">no topics</span>')}
+    <div class="topoArrow">| v</div>
+    ${topoLayer('Partitions',tops.flatMap(t=>(t.partitions||[]).map(p=>`<span class="gNode">${esc(t.name)} P${p.partition}</span>`)).join('')||'<span class="muted" style="font-size:12px">none</span>')}
+    <div class="topoArrow">| v</div>
+    ${topoLayer('Consumer Groups',grps.map(g=>`<span class="gNode">${esc(g.name)}</span>`).join('')||'<span class="muted" style="font-size:12px">no groups</span>')}
+  </div>${skew}<div class="card"><h3>Data Flow Legend</h3><div class="row" style="font-size:12px"><span class="badge b-purple">Producer</span><span>-&gt;</span><span class="badge b-green">Topic</span><span>-&gt;</span><span class="badge b-amber">Partition</span><span>-&gt;</span><span class="badge">Group</span></div></div>`; }
+window.refreshTopo=function(){render();};
 
 /* ================= Fitur 4.3: Storage & Segment Inspector ================= */
 function viewStorage(){
   const tsel=state.topics.map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
-  return `<div class="grid">
-    <div class="card" style="grid-column:1/-1"><div class="row"><h3 style="margin-right:10px">Segment Inspector</h3><select id="stTopic" onchange="loadSegments()" style="width:200px"><option value="">Select topic</option>${tsel}</select></div>
+  return `<div>
+    <div class="card"><div class="row"><h3 style="margin-right:10px">Segment Inspector</h3><select id="stTopic" onchange="loadSegments()" style="width:auto"><option value="">Select topic</option>${tsel}</select></div>
       <div id="segOut" class="muted" style="margin-top:10px;font-size:12px">Select a topic to view segment blocks.</div></div>
-    <div class="card" style="grid-column:1/-1"><h3>Time-Travel Replay</h3>
-      <div class="row"><label>Offset</label><input id="ttOff" type="number" value="0" style="width:120px"><label>Partition</label><input id="ttPart" type="number" value="0" style="width:100px"><button class="btn ghost" onclick="ttJump()">Jump &amp; View</button></div>
+    <div class="card"><h3>Time-Travel Replay</h3>
+      <div class="row"><label style="margin:0">Offset</label><input id="ttOff" type="number" value="0" style="width:120px"><label style="margin:0">Partition</label><input id="ttPart" type="number" value="0" style="width:100px"><button class="btn ghost" onclick="ttJump()">Jump &amp; View</button></div>
       <div class="muted" style="font-size:11px;margin-top:6px">Loads messages from a chosen offset as a time-travel point in the Data Browser.</div></div>
   </div>`; }
-window.loadSegments=async function(){ const t=document.getElementById('stTopic').value; if(!t)return; const out=document.getElementById('segOut'); try{ const ps=await api('/api/v1/topics/'+encodeURIComponent(t)+'/partitions'); let html=''; ps.forEach(p=>{ const segs=p.segments||[]; const total=segs.reduce((a,s)=>a+s.sizeBytes,0); const remote=segs.filter(s=>s.remote).length; html+=`<div style="margin-top:10px"><div style="display:flex;justify-content:space-between;font-size:11px;font-family:var(--font-mono)"><span>P${p.partition}</span><span class="muted">${segs.length} segments &middot; ${fmtBytes(p.bytes)} &middot; ${remote} tiered</span></div>`; segs.forEach(s=>{ html+=`<div class="segBlock ${s.remote?'remote':(s.sizeBytes===segs[segs.length-1].sizeBytes?'act':'closed')}" title="base ${s.baseOffset} &middot; ${fmtBytes(s.sizeBytes)}">${s.baseOffset} ${s.remote?'&#8679;':''}</div>`; }); html+='</div>'; }); out.innerHTML=html||'<div class="muted">no segments</div>'; }catch(e){out.textContent='error: '+e.message;} };
+window.loadSegments=async function(){ const t=document.getElementById('stTopic').value; if(!t)return; const out=document.getElementById('segOut'); try{ const ps=await api('/api/v1/topics/'+encodeURIComponent(t)+'/partitions'); let html=''; ps.forEach(p=>{ const segs=p.segments||[]; const total=segs.reduce((a,s)=>a+s.sizeBytes,0); const remote=segs.filter(s=>s.remote).length; html+=`<div style="margin-top:10px"><div style="display:flex;justify-content:space-between;font-size:11px;font-family:var(--font-mono)"><span>P${p.partition}</span><span class="muted">${segs.length} segments &middot; ${fmtBytes(p.bytes)} &middot; ${remote} tiered</span></div>`; segs.forEach(s=>{ html+=`<div class="segBlock ${s.remote?'remote':(s.sizeBytes===segs[segs.length-1].sizeBytes?'act':'closed')}" title="base ${s.baseOffset} &middot; ${fmtBytes(s.sizeBytes)}">${s.baseOffset}${s.remote?' T':''}</div>`; }); html+='</div>'; }); out.innerHTML=html||'<div class="muted">no segments</div>'; }catch(e){out.textContent='error: '+e.message;} };
 window.ttJump=function(){ const off=document.getElementById('ttOff').value, part=document.getElementById('ttPart').value; state.off=off; state.partition=part; state.topic=document.getElementById('stTopic').value; if(!state.topic){toast('Select topic first');return;} goView('databrowser').then(()=>loadMsgs()); };
 
 /* ================= Fitur 4.4: Schema Studio ================= */
 function viewSchemas(){
-  if(!state.schemas.length)return '<div class="card muted">No schemas registered.</div>';
+  if(!state.schemas.length)return `<div class="card"><h3 style="margin-bottom:10px">Schema Registry Studio</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:14px">No schemas registered. Register the first one:</div>
+    <label>Subject</label><input id="nsSub" placeholder="my-topic-value" style="max-width:280px">
+    <label>Type</label><select id="nsType" style="width:auto"><option>AVRO</option><option>JSON</option></select>
+    <label>Schema (JSON)</label><textarea id="nsSchema" rows="6">{"type":"record","name":"Payload","fields":[{"name":"id","type":"string"}]}</textarea>
+    <div style="margin-top:10px"><button class="btn" onclick="registerSchema()">Register Schema</button></div></div>`;
   return `<div class="card"><h3 style="margin-bottom:10px">Schema Registry Studio</h3>
-    <div class="row" style="margin-bottom:12px"><select id="schSubject" onchange="loadSchemaDetail()" style="width:220px">${state.schemas.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}</select>
-    <button class="btn ghost" onclick="loadSchemaDetail()">Load versions</button></div>
+    <div class="row" style="margin-bottom:12px"><select id="schSubject" onchange="loadSchemaDetail()" style="width:auto">${state.schemas.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}</select>
+    <button class="btn ghost" onclick="loadSchemaDetail()">Load versions</button>
+    <span style="flex:1"></span>
+    <select id="nsType" style="width:auto"><option>AVRO</option><option>JSON</option></select>
+    <input id="nsSub" placeholder="new subject" style="max-width:160px">
+    <button class="btn" title="Register schema version baru" onclick="registerSchema()">+ Register</button></div>
+    <textarea id="nsSchema" rows="4" placeholder='{"type":"record","name":"Payload","fields":[...]}' style="margin-bottom:10px"></textarea>
     <div id="schVersions"></div></div>`; }
 async function loadSchemaDetail(){ const subj=document.getElementById('schSubject')?.value; if(!subj)return; try{ const vers=await api('/api/v1/schemas/'+encodeURIComponent(subj)); const out=document.getElementById('schVersions'); out.innerHTML=`<table><thead><tr><th>Version</th><th>Type</th><th>Schema</th><th>Compat</th></tr></thead><tbody>${vers.slice().reverse().map(v=>`<tr><td>${v.version}</td><td class="badge b-purple">${esc(v.schemaType||'AVRO')}</td><td style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(v.schema)}</td><td><button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="schemaDiff('${esc(subj)}',${v.version})">Diff prev</button></td></tr>`).join('')||'<tr><td colspan="4" class="muted">no versions</td></tr>'}</tbody></table>`; }catch(e){toast(e.message);} }
-window.schemaDiff=function(subj,ver){ const el=document.getElementById('schVersions'); if(!el)return; api('/api/v1/schemas/'+encodeURIComponent(subj)).then(vers=>{ const cur=vers.find(v=>v.version===ver); const prev=vers.find(v=>v.version===ver-1); if(!cur||!prev){toast('No previous version to diff');return;} const a=fmtSchema(prev.schema), b=fmtSchema(cur.schema); const la=a.split('\n'), lb=b.split('\n'); const max=Math.max(la.length,lb.length); let html='<div class="diffWrap" style="margin-top:8px">'; for(let i=0;i<max;i++){ const x=la[i]||'',y=lb[i]||''; const same=x.trim()===y.trim(); html+=`<div style="flex:1;font-family:var(--font-mono);font-size:11px"><div class="${same?'d-ctx':'d-rem'}">${esc(x||' ')}</div></div>`; html+=`<div style="flex:1;font-family:var(--font-mono);font-size:11px"><div class="${same?'d-ctx':'d-add'}">${esc(y||' ')}</div></div>`; } html+='</div>'; el.innerHTML+=`<div style="margin-top:14px"><b style="font-size:12px">Diff v${prev.version} &#8594; v${cur.version}</b>${html}</div>`; }).catch(e=>toast(e.message)); };
+window.schemaDiff=function(subj,ver){ const el=document.getElementById('schVersions'); if(!el)return; api('/api/v1/schemas/'+encodeURIComponent(subj)).then(vers=>{ const cur=vers.find(v=>v.version===ver); const prev=vers.find(v=>v.version===ver-1); if(!cur||!prev){toast('No previous version to diff');return;} const a=fmtSchema(prev.schema), b=fmtSchema(cur.schema); const la=a.split('\n'), lb=b.split('\n'); const max=Math.max(la.length,lb.length); let html='<div class="diffWrap" style="margin-top:8px">'; for(let i=0;i<max;i++){ const x=la[i]||'',y=lb[i]||''; const same=x.trim()===y.trim(); html+=`<div style="flex:1;font-family:var(--font-mono);font-size:11px"><div class="${same?'d-ctx':'d-rem'}">${esc(x||' ')}</div></div>`; html+=`<div style="flex:1;font-family:var(--font-mono);font-size:11px"><div class="${same?'d-ctx':'d-add'}">${esc(y||' ')}</div></div>`; } html+='</div>'; el.innerHTML+=`<div style="margin-top:14px"><b style="font-size:12px">Diff v${prev.version} -&gt; v${cur.version}</b>${html}</div>`; }).catch(e=>toast(e.message)); };
 function fmtSchema(s){ try{return JSON.stringify(JSON.parse(s),null,2);}catch(e){return s;} }
 
 /* ================= Fitur 4.5: Security & ACL + Audit ================= */
 function viewSecurity(){
-  return `<div class="grid">
-    <div class="card" style="grid-column:1/-1"><div class="row"><h3 style="margin-right:10px">Visual ACL Manager</h3>
+  return `<div>
+    <div class="card"><div class="row"><h3 style="margin-right:10px">Visual ACL Manager</h3>
       <button class="btn" onclick="addACLRow()">+ Add ACL</button>
       <button class="btn ghost" onclick="loadACLs()">Refresh</button></div>
       <div class="muted" style="font-size:11px;margin:6px 0 10px">Grant Read / Write / Admin per topic or group. Changes are stored in-memory on the broker.</div>
       <div id="aclOut" class="muted">Loading...</div></div>
-    <div class="card" style="grid-column:1/-1"><h3>Audit Trail</h3>
+    <div class="card"><h3>Audit Trail</h3>
       <button class="btn ghost" style="margin-bottom:10px" onclick="loadAudit()">Refresh audit log</button>
       <table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Detail</th></tr></thead><tbody id="auditBody"><tr><td colspan="5" class="muted">No activity yet.</td></tr></tbody></table></div>
   </div>`; }
@@ -827,7 +1015,7 @@ async function loadAudit(){ const b=document.getElementById('auditBody'); if(!b)
 window.refreshSecurity=function(){loadACLs();loadAudit();};
 
 /* ================= Fitur 4.6: In-App Health Alarms ================= */
-function checkAlarms(){
+function activeAlerts(){
   const alerts=[];
   // Consumer lag > 1000
   const gs=Array.isArray(state.groups)?state.groups:[];
@@ -835,13 +1023,179 @@ function checkAlarms(){
   // Disk usage > 85% (uses the broker's data dir; cluster reports totalBytes as a proxy)
   const c=state.cluster||{};
   if(c.diskUsagePct && c.diskUsagePct>85){ alerts.push('Disk usage '+c.diskUsagePct+'% (>85%)'); }
-  // DLQ error: any topic ending in -dlq/-dead with messages
-  for(const t of (Array.isArray(state.topics)?state.topics:[])){ if(/-(dlq|dead)$/i.test(t.name)){ alerts.push('DLQ topic '+t.name+' has messages'); } }
+  // DLQ: only topics that actually hold messages (LEO > 0 or non-empty bytes)
+  for(const t of (Array.isArray(state.topics)?state.topics:[])){
+    if(/-(dlq|dead)$/i.test(t.name)){
+      const hasMsgs=(t.totalBytes||0)>0||(t.partitions||[]).some(p=>(p.logEndOffset||0)>0);
+      if(hasMsgs){ alerts.push('DLQ topic '+t.name+' has messages'); }
+    }
+  }
+  return alerts;
+}
+function checkAlarms(){
+  const alerts=activeAlerts();
+  // Forget dismissals for alerts that no longer fire, so a recurring
+  // condition re-alarms when it comes back later.
+  for(const k of [...state.alarmsDismissed]) if(!alerts.includes(k)) state.alarmsDismissed.delete(k);
+  const shown=alerts.filter(a=>!state.alarmsDismissed.has(a));
   const existing=document.getElementById('alarmBanner');
-  if(alerts.length){ if(!existing){ const b=document.createElement('div'); b.id='alarmBanner'; b.className='alarmBanner'; document.body.prepend(b); } const b=document.getElementById('alarmBanner'); b.innerHTML='&#9888; '+alerts.map(esc).join(' &middot; ')+' <button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="this.closest(\'#alarmBanner\').remove()">Dismiss</button>'; }
+  if(shown.length){
+    if(!existing){ const b=document.createElement('div'); b.id='alarmBanner'; b.className='alarmBanner'; document.body.prepend(b); }
+    const b=document.getElementById('alarmBanner');
+    b.innerHTML='<b>ALERT</b> '+shown.map(esc).join(' &middot; ')+' <button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="dismissAlarms()">Dismiss</button>';
+  }
   else if(existing){ existing.remove(); }
 }
-function bindView(){ if(state.view==='databrowser'&&state.topic)loadMsgs(); if(state.view==='groups'&&state.group)loadGroupDetail(); if(state.view==='topology')renderTopo(); if(state.view==='security'){loadACLs();loadAudit();} if(state.view==='storage'){ } }
+// Dismiss remembers the decision for this session so the 5s auto-refresh
+// does not resurrect the banner.
+window.dismissAlarms=function(){
+  for(const a of activeAlerts()) state.alarmsDismissed.add(a);
+  try{ sessionStorage.setItem('pk_dismissed',JSON.stringify([...state.alarmsDismissed])); }catch(e){}
+  const b=document.getElementById('alarmBanner'); if(b)b.remove();
+};
+/* ================= Batch 1-3: fitur frontend ================= */
+/* ---- URL sync + sorting helpers ---- */
+function timeCell(ts){ return state.timeAbs
+  ? '<div>'+new Date(ts).toISOString()+'</div><div class="rel">'+rel(ts)+'</div>'
+  : '<div>'+rel(ts)+'</div><div class="rel">'+new Date(ts).toISOString()+'</div>'; }
+window.sortInd=function(k,f){const s=state.sort[k];return s&&s.f===f?(s.dir==='asc'?'^':'v'):''};
+window.sortRows=function(k,f){const s=state.sort[k]||{};s.dir=(s.f===f&&s.dir==='asc')?'desc':'asc';s.f=f;state.sort[k]=s;render();};
+function sortedTopics(){ const s=state.sort.topics; if(!s)return state.topics; const mul=s.dir==='asc'?1:-1;
+  return state.topics.slice().sort((a,b)=>{ let va,vb;
+    if(s.f==='name'){va=a.name;vb=b.name;}
+    else if(s.f==='size'){va=a.totalBytes||0;vb=b.totalBytes||0;}
+    else {va=((a.partitions||[])[0]||{}).logEndOffset||0;vb=((b.partitions||[])[0]||{}).logEndOffset||0;}
+    return (va>vb?1:va<vb?-1:0)*mul; }); }
+function sortedGroups(){ const s=state.sort.groups; const arr=state.groups.slice(); if(!s)return arr; const mul=s.dir==='asc'?1:-1;
+  return arr.sort((a,b)=>{ let va,vb;
+    if(s.f==='name'){va=a.name;vb=b.name;}
+    else if(s.f==='members'){va=(a.members||[]).length;vb=(b.members||[]).length;}
+    else {va=Object.values(a.lag||{}).reduce((x,y)=>x+y,0);vb=Object.values(b.lag||{}).reduce((x,y)=>x+y,0);}
+    return (va>vb?1:va<vb?-1:0)*mul; }); }
+
+/* ---- Metrics view: throughput sparkline + MQTT status ---- */
+function viewMetrics(){ return `<div>
+  <div class="card"><div class="kicker">Ingest</div><h3>Throughput</h3>
+    <div class="statXL" id="tpRate">--<small>msg/s</small></div><div class="statSub" id="tpTotal"></div>
+    <div class="spark" id="tpSpark"></div>
+    <div class="muted" style="font-size:11px;margin-top:8px">Dihitung dari delta total pesan antar polling (${state.refreshMs/1000}s). 60 sampel terakhir.</div></div>
+  <div class="card"><div class="kicker">Edge</div><h3>MQTT Bridge</h3><div id="mqttBody" class="muted" style="font-size:12px">${skel(80)}</div></div>
+</div>`; }
+async function loadThroughput(){
+  try{ const d=await api('/api/v1/throughput'); state.tpSamples=d.samples||[]; state.tpTotal=d.totalMessages||0;
+    const rate=state.tpSamples.length?state.tpSamples[state.tpSamples.length-1]:0;
+    const rEl=document.getElementById('tpRate'); if(rEl)rEl.innerHTML=rate.toFixed(1)+'<small>msg/s</small>';
+    const tEl=document.getElementById('tpTotal'); if(tEl)tEl.textContent='total '+state.tpTotal+' messages';
+    const sp=document.getElementById('tpSpark');
+    if(sp){ const win=state.tpSamples.slice(-60); const max=Math.max(1,...win);
+      sp.innerHTML=win.map(v=>`<span style="height:${Math.max(3,v/max*100)}%"></span>`).join(''); }
+  }catch(e){}
+  const m=document.getElementById('mqttBody');
+  if(m){ try{ const st=await api('/api/v1/mqtt');
+      m.innerHTML=st.enabled?`<div class="row"><span class="badge b-green">LISTENING</span><span class="mono">${esc(st.listen||'')}</span></div><div class="row" style="margin-top:8px"><span class="statSub">${st.connections} client(s) aktif</span><span class="statSub">${st.bridged} pesan di-bridge</span></div>`:'<span class="muted">Bridge tidak aktif</span>';
+    }catch(e){ m.textContent='error: '+e.message; } }
+}
+window.loadThroughput=loadThroughput;
+
+/* ---- Broker logs viewer ---- */
+function viewLogs(){ return `<div class="card"><div class="kicker">Diagnostics</div><h3 style="margin-bottom:10px">Broker Logs</h3>
+  <div class="row" style="margin-bottom:10px"><select id="logLvl" style="width:auto" onchange="loadLogs()"><option value="">Semua level</option><option value="warn">Warn ke atas</option><option value="err">Error saja</option></select><button class="btn ghost" onclick="loadLogs()">Refresh</button><span class="updatedAgo">ring 500 baris terakhir</span></div>
+  <div class="logView" id="logOut">${skel(120)}</div></div>`; }
+async function loadLogs(){ const out=document.getElementById('logOut'); if(!out)return;
+  try{ const lines=await api('/api/v1/logs'); const lvl=document.getElementById('logLvl')?.value||'';
+    const filt=(lines||[]).filter(l=>lvl==='err'?/error|fatal|panic/i.test(l):lvl==='warn'?/warn|error|fatal|panic/i.test(l):true);
+    out.innerHTML=filt.slice(-300).map(l=>{const cls=/error|fatal|panic/i.test(l)?'lerr':/warn/i.test(l)?'lwarn':'';return `<div class="${cls}">${esc(l)}</div>`;}).join('')||'<span class="muted">Log kosong.</span>';
+    out.scrollTop=out.scrollHeight;
+  }catch(e){ out.textContent='error: '+e.message; } }
+window.loadLogs=loadLogs;
+
+/* ---- Command palette (Ctrl+K / '/') ---- */
+function palItems(){
+  const items=navItems.map(([k,label])=>({label,run:()=>goView(k),hint:'view'}));
+  (state.topics||[]).forEach(t=>items.push({label:t.name,run:()=>{state.topic=t.name;goView('databrowser').then(()=>loadMsgs());},hint:'topic'}));
+  (state.groups||[]).forEach(g=>items.push({label:g.name,run:()=>{goView('groups').then(()=>openGroup(g.name));},hint:'group'}));
+  return items;
+}
+window.openPalette=function(){
+  if(document.querySelector('.overlay.palette'))return;
+  const el=document.createElement('div'); el.className='overlay palette';
+  el.innerHTML='<div class="paletteBox"><input id="palQ" placeholder="Ketik view, topic, atau group..." autocomplete="off"></div>';
+  document.body.appendChild(el);
+  el.addEventListener('mousedown',e=>{if(e.target===el)closeOverlay();});
+  const inp=el.querySelector('#palQ'); let sel=0;
+  const renderList=()=>{ const q=inp.value.toLowerCase(); const items=palItems().filter(i=>i.label.toLowerCase().includes(q)).slice(0,12);
+    el._items=items; el.querySelector('.palList')?.remove();
+    const list=document.createElement('div'); list.className='palList';
+    items.forEach((it,idx)=>{ const d=document.createElement('div'); d.className='palItem'+(idx===sel?' sel':'');
+      d.innerHTML='<span>'+esc(it.label)+'</span><span class="palHint">'+it.hint+'</span>';
+      d.onclick=()=>{closeOverlay();it.run();}; list.appendChild(d); });
+    el.querySelector('.paletteBox').appendChild(list); };
+  inp.oninput=()=>{sel=0;renderList();};
+  inp.onkeydown=e=>{ const items=el._items||[];
+    if(e.key==='ArrowDown'){sel=Math.min(sel+1,items.length-1);renderList();e.preventDefault();}
+    else if(e.key==='ArrowUp'){sel=Math.max(sel-1,0);renderList();e.preventDefault();}
+    else if(e.key==='Enter'){if(items[sel]){closeOverlay();items[sel].run();}}
+    else if(e.key==='Escape'){closeOverlay();} };
+  renderList(); inp.focus();
+};
+if(!window._palBound){ window._palBound=1;
+  document.addEventListener('keydown',e=>{
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openPalette();}
+    else if(e.key==='/'&&!/input|textarea|select/i.test(document.activeElement?.tagName||'')){e.preventDefault();openPalette();}
+    else if(e.key==='Escape'){closeDrawer();}
+  });
+}
+
+/* ---- Snippet generators (curl via REST proxy + sarama consumer) ---- */
+window.copyCurl=function(topic){ if(!topic){toast('Select a topic first');return;}
+  const cmd='curl -X POST http://localhost:8082/topics/'+encodeURIComponent(topic)+'/messages -H "Content-Type: application/json" -d \'{"key":"k1","value":"hello"}\'';
+  navigator.clipboard.writeText(cmd).then(()=>toast('curl copied')); };
+window.copyConsumer=function(topic){ if(!topic){toast('Select a topic first');return;}
+  const code='// Go + sarama (protocol 0.11)\nconfig := sarama.NewConfig()\nconfig.Version = sarama.V0_11_0_0\ncg, err := sarama.NewConsumerGroup([]string{"localhost:9092"}, "my-group", config)\nif err != nil { panic(err) }\n// consume topic: '+topic+'\nfor {\n\tif err := cg.Consume(ctx, []string{"'+topic+'"}, handler); err != nil { break }\n}';
+  navigator.clipboard.writeText(code).then(()=>toast('consumer snippet copied')); };
+
+/* ---- JSONL import (kebalikan export) ---- */
+window.doImportFile=async function(inp){ const f=inp.files&&inp.files[0]; inp.value='';
+  if(!f)return; if(!state.topic){toast('Select a topic first');return;}
+  try{ const text=await f.text();
+    const r=await api('/api/v1/topics/'+encodeURIComponent(state.topic)+'/import',{method:'POST',headers:{'Content-Type':'application/x-ndjson'},body:text});
+    toast('Imported '+r.imported+' messages'); loadMsgs();
+  }catch(e){toast(e.message);} };
+
+/* ---- Group offset snapshot ---- */
+window.exportGroupOffsets=async function(g){ try{ const d=await api('/api/v1/groups/'+encodeURIComponent(g)+'/offsets/export');
+    const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'}); const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=g+'-offsets.json'; a.click(); toast('Snapshot diunduh');
+  }catch(e){toast(e.message);} };
+window.importGroupOffsets=async function(g){ const inp=document.createElement('input'); inp.type='file'; inp.accept='.json';
+  inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return;
+    try{ const j=JSON.parse(await f.text());
+      const r=await api('/api/v1/groups/'+encodeURIComponent(g)+'/offsets/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({offsets:j.offsets||j})});
+      toast('Applied '+r.applied+' offsets'); loadGroupDetail();
+    }catch(e){toast(e.message);} };
+  inp.click(); };
+
+/* ---- Schema register ---- */
+window.registerSchema=async function(){ const s=document.getElementById('nsSub').value, sc=document.getElementById('nsSchema').value, t=document.getElementById('nsType').value;
+  if(!s||!sc){toast('subject and schema required');return;}
+  try{ await api('/api/v1/schemas/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subject:s,schema:sc,schemaType:t})});
+    toast('Schema registered'); await refresh(); render();
+  }catch(e){toast(e.message);} };
+
+/* ---- Topic config (cleanup.policy) ---- */
+window.toggleTopicCompact=async function(){ const next=!(state.topicCfg&&state.topicCfg.compacted);
+  try{ await api(`/api/v1/topics/${encodeURIComponent(state.topicDetail)}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({compacted:next})});
+    state.topicCfg={compacted:next}; render();
+  }catch(e){toast(e.message);} };
+
+/* ---- Live tail: pause on scroll-up ---- */
+function updateTailBar(){ const bar=document.getElementById('tailBar'); if(!bar)return;
+  bar.innerHTML=state.tailPaused?`<div class="tailPausedBar" onclick="resumeTail()"><b>${state.pendingTail}</b> pesan baru ditahan - klik untuk ikut lagi</div>`:''; }
+window.resumeTail=function(){ state.tailPaused=false; state.pendingTail=0; updateTailBar(); renderMsgRows(); const mainEl=$('main'); if(mainEl)mainEl.scrollTop=0; };
+function bindTailPause(){ const mainEl=$('main'); if(!mainEl||mainEl._tailBind)return; mainEl._tailBind=1;
+  mainEl.addEventListener('scroll',()=>{ if(state.view==='databrowser'&&state.tail&&!state.tailPaused&&mainEl.scrollTop>40){ state.tailPaused=true; updateTailBar(); } }); }
+
+function bindView(){ if(state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();} if(state.view==='groups'&&state.group)loadGroupDetail(); if(state.view==='security'){loadACLs();loadAudit();} if(state.view==='metrics')loadThroughput(); if(state.view==='logs')loadLogs(); if(state.view==='databrowser')bindTailPause(); }
 initTheme();
 (async function(){await refresh();applyHash();})();
 </script>
