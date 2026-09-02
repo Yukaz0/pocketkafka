@@ -559,8 +559,9 @@ function viewConnections(){
         ${c.clusterId?'<span style="margin-left:auto" class="badge b-green">ONLINE</span>':'<span style="margin-left:auto">'+skel(52)+'</span>'}
       </div>
       <div class="row"><span class="k">Cluster ID</span><span class="mono">${esc(c.clusterId||'-')}</span></div>
-      <div class="row"><span class="k">Endpoint</span><span class="mono">localhost:9092</span></div>
-      <div class="row"><span class="k">Security</span><span class="mono">PLAINTEXT</span></div>
+      <div class="row"><span class="k">Endpoint</span><span class="mono">${esc(c.advertised||'localhost:9092')}</span></div>
+      <div class="row"><span class="k">Listeners</span><span class="mono">${(c.listeners||['-']).map(esc).join(', ')}</span></div>
+      <div class="row"><span class="k">Security</span><span class="mono">${esc(c.security||'PLAINTEXT')}</span></div>
       <div class="actions">
         <button class="btn ghost" onclick="goView('databrowser')">Open Data Browser</button>
         <button class="btn ghost" onclick="goView('topology')">View Topology</button>
@@ -770,7 +771,7 @@ window.toggleTail=toggleTail;
 function connectTail(){
   if(!state.tail)return;
   const proto=location.protocol==='https:'?'wss':'ws';
-  const part=state.partition&&state.partition!=='all'?state.partition:0;
+  const part=(!state.partition||state.partition==='all')?'all':state.partition;
   const ws=new WebSocket(`${proto}://${location.host}/api/v1/topics/${encodeURIComponent(state.topic)}/tail?partition=${encodeURIComponent(part)}`);
   state.ws=ws; state.retryCount=state.retryCount||0;
   ws.onopen=()=>{state.retryCount=0;};
@@ -836,6 +837,10 @@ function viewGroups(){ if(!state.groups.length)return '<div class="card" style="
 window.openGroup=async g=>{state.group=g;location.hash='#/groups/'+encodeURIComponent(g);render();loadGroupDetail();};
 async function loadGroupDetail(){ if(!state.group)return; try{
   state.groupDetail=await api(`/api/v1/groups/${encodeURIComponent(state.group)}`);
+  // lag history sampling untuk sparkline
+  const lag=state.groupDetail.offsets.reduce((a,o)=>a+(o.lag||0),0);
+  state.lagHist=state.lagHist||{}; const h=(state.lagHist[state.group]=state.lagHist[state.group]||[]);
+  h.push(lag); if(h.length>60)h.shift();
   render();
 }catch(e){toast(e.message);} }
 window.loadGroupDetail=loadGroupDetail;
@@ -843,7 +848,10 @@ function viewGroupDetail(){ const g=state.groupDetail; if(!g)return '<div class=
   const lagRows=g.offsets.map(o=>`<tr><td class="mono">${esc(o.topic)}</td><td>${o.partition}</td><td>${o.current_offset}</td><td>${o.log_end_offset}</td><td><span class="badge ${o.lag>0?'b-amber':'b-green'}">${o.lag}</span></td>
     <td><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="resetGroupOffset('${esc(o.topic)}',${o.partition})">Reset</button></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No committed offsets</td></tr>';
   const members=g.members.map(m=>`<div class="chip" style="padding:3px 10px;margin:2px">${esc(m.member_id)}${m.client_host?' @ '+esc(m.client_host):''}</div>`).join('')||'<span class="muted">-</span>';
-  return `<div class="grid"><div class="card">
+  const lh=(state.lagHist||{})[g.group_id]||[];
+  const maxLag=Math.max(1,...lh);
+  const spark=lh.length>1?`<div class="spark" title="Lag history (last ${lh.length} polls)">${lh.map(v=>`<span style="height:${Math.max(3,v/maxLag*100)}%"></span>`).join('')}</div>`:'';
+  return `<div><div class="card">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
       <h3 style="font-size:15px">${esc(g.group_id)}</h3>
       <span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span>
@@ -851,6 +859,7 @@ function viewGroupDetail(){ const g=state.groupDetail; if(!g)return '<div class=
     </div>
     <div class="muted" style="margin-bottom:14px">Protocol: ${esc(g.protocol||'range')} &middot; ${g.members.length} member(s)</div>
     <div style="margin-bottom:16px">${members}</div>
+    ${spark}
     <table><thead><tr><th>Topic</th><th>Partition</th><th>Current</th><th>Log End</th><th>Lag</th><th></th></tr></thead><tbody>${lagRows}</tbody></table>
   </div></div>`; }
 window.resetGroupOffset=async function(topic,part){
@@ -873,9 +882,11 @@ function viewProducer(){ const opts=state.topics.map(t=>`<option value="${esc(t.
     <label>Payload (JSON / text)</label><textarea id="pValue" rows="8">{"event":"hello","ts":1700000000}</textarea>
     <div style="margin-top:12px"><button class="btn" onclick="sendMsg()">Send Message</button></div>
   </div>`; }
-async function sendMsg(){ const body={value:$('#pValue').value,key:$('#pKey').value}; const h={}; $('#pHeaders').value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0)h[l.slice(0,i).trim()]=l.slice(i+1).trim();}); if(Object.keys(h).length)body.headers=h;
+async function sendMsg(){ const body={value:$('#pValue').value,key:$('#pKey').value}; const pv=$('#pPart')?$('#pPart').value:'-1';
+  if(pv&&pv!=='-1')body.partition=parseInt(pv,10);
+  const h={}; $('#pHeaders').value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0)h[l.slice(0,i).trim()]=l.slice(i+1).trim();}); if(Object.keys(h).length)body.headers=h;
   const topic=$('#pTopic').value||'demo'; const btn=document.querySelector('#view .card .btn'); if(btn){btn.disabled=true;const o=btn.textContent;btn.textContent='Publishing...';}
-  try{const r=await api('/api/v1/topics/'+encodeURIComponent(topic)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast(`Published to offset ${r.offset}`);await refresh();}catch(e){toast(e.message);}
+  try{const r=await api('/api/v1/topics/'+encodeURIComponent(topic)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast(`Published to P${r.partition} @ offset ${r.offset}`);await refresh();}catch(e){toast(e.message);}
   if(btn){btn.disabled=false;btn.textContent='Publish Message';} }
 window.sendMsg=sendMsg;
 

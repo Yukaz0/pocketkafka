@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -76,7 +77,8 @@ func main() {
 
 	// Embedded Web UI dashboard (port 8080). The MQTT bridge handle is wired
 	// after this block, so the server exposes it through WithMQTT below.
-	ws := web.New(store, gm, sr, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).WithAuth(cfg).WithDataDir(cfg.Storage.DataDir)
+	ws := web.New(store, gm, sr, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).WithAuth(cfg).WithDataDir(cfg.Storage.DataDir).
+		WithBrokerInfo(listenerAddrs(cfg), advertisedString(cfg), securityModeOf(cfg))
 	ws.InstallLogSink()
 	webSrv := &http.Server{
 		Addr:    cfg.Web.Listen,
@@ -141,6 +143,36 @@ func main() {
 	stopRetention()
 	stopCompaction()
 	srv.Close()
+}
+
+// listenerAddrs returns the sorted listener addresses from config.
+func listenerAddrs(cfg config.Config) []string {
+	out := make([]string, 0, len(cfg.Listeners))
+	for _, v := range cfg.Listeners {
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// advertisedString returns the primary advertised address (host:port).
+func advertisedString(cfg config.Config) string {
+	addr := cfg.AdvertisedListeners["plain"]
+	if addr == "" {
+		for _, v := range cfg.AdvertisedListeners {
+			addr = v
+			break
+		}
+	}
+	return addr
+}
+
+// securityModeOf reports the auth mode: SASL/PLAIN, SASL/SCRAM, or PLAINTEXT.
+func securityModeOf(cfg config.Config) string {
+	if !cfg.Security.Enabled {
+		return "PLAINTEXT"
+	}
+	return "SASL"
 }
 
 // advertised extracts the host and port of the primary advertised listener.

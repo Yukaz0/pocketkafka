@@ -315,6 +315,9 @@ func (p *Partition) earliestOffsetLocked() int64 {
 	return p.nextOffset
 }
 
+// PartitionID returns the partition's numeric ID.
+func (p *Partition) PartitionID() int32 { return p.partitionID }
+
 // LogEndOffset returns the LEO of the partition.
 func (p *Partition) LogEndOffset() int64 {
 	p.mu.RLock()

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Yukaz0/pocketkafka/internal/storage"
@@ -16,11 +17,15 @@ import (
 // RESTProxy is the HTTP REST proxy gateway.
 type RESTProxy struct {
 	store *storage.Store
+
+	// Partition round-robin counters for keyless produce.
+	rrMu      sync.Mutex
+	rrCounter map[string]uint64
 }
 
 // NewRESTProxy builds a REST proxy bound to the storage engine.
 func NewRESTProxy(store *storage.Store) *RESTProxy {
-	return &RESTProxy{store: store}
+	return &RESTProxy{store: store, rrCounter: make(map[string]uint64)}
 }
 
 // Handler returns the HTTP handler for the REST proxy.
@@ -67,16 +72,41 @@ func (p *RESTProxy) publish(w http.ResponseWriter, r *http.Request) {
 		}
 		p.store.EnsureTopic(topic, 1)
 	}
-	part := p.store.GetPartition(topic, 0)
-	if part == nil {
-		writeJSON(w, 500, map[string]string{"error": "partition unavailable"})
-		return
-	}
 	now := time.Now().UnixMilli()
 	var headers []protocol.RecordHeader
 	for k, v := range req.Headers {
 		headers = append(headers, protocol.RecordHeader{Key: k, Value: []byte(v)})
 	}
+	// Partition selection: explicit ?partition= wins, else key hash
+	// (FNV-1a), else round-robin across the topic's partitions.
+	t := p.store.GetTopic(topic)
+	if t == nil || len(t.Partitions) == 0 {
+		writeJSON(w, 500, map[string]string{"error": "partition unavailable"})
+		return
+	}
+	part := t.Partitions[0]
+	if n := int32(len(t.Partitions)); n > 1 {
+		if qs := r.URL.Query().Get("partition"); qs != "" {
+			want, werr := strconv.Atoi(qs)
+			if werr == nil && want >= 0 && int32(want) < n {
+				part = t.Partitions[int32(want)]
+			}
+		} else if req.Key != "" {
+			var h uint64 = 14695981039346656037
+			for i := 0; i < len(req.Key); i++ {
+				h ^= uint64(req.Key[i])
+				h *= 1099511628211
+			}
+			part = t.Partitions[int32(h%uint64(n))]
+		} else {
+			p.rrMu.Lock()
+			p.rrCounter[topic]++
+			idx := p.rrCounter[topic] % uint64(n)
+			p.rrMu.Unlock()
+			part = t.Partitions[int32(idx)]
+		}
+	}
+
 	batch := &protocol.RecordBatch{
 		BaseTimestamp: now,
 		MaxTimestamp:  now,
@@ -99,7 +129,7 @@ func (p *RESTProxy) publish(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, 201, map[string]interface{}{"topic": topic, "partition": 0, "offset": off})
+	writeJSON(w, 201, map[string]interface{}{"topic": topic, "partition": part.PartitionID(), "offset": off})
 }
 
 // consume fetches messages from a topic with optional offset/limit pagination.

@@ -39,6 +39,11 @@ type Server struct {
 	// Data dir for persisted UI state (ACLs, etc.).
 	dataDir string
 
+	// Broker identity info for the cluster endpoint.
+	listeners    []string
+	advertised   string
+	securityMode string
+
 	// MQTT bridge status (nil when the bridge is disabled).
 	mqtt       *gateway.MQTTBridge
 	mqttListen string
@@ -48,6 +53,10 @@ type Server struct {
 	acls     map[string]ACLRule // key "principal|resourceType|resourceName"
 	auditMu  sync.Mutex
 	auditLog []AuditEntry
+
+	// Partition round-robin counters for keyless UI/REST produce.
+	rrMu      sync.Mutex
+	rrCounter map[string]uint64
 }
 
 // WithDataDir records the broker data dir for ACL persistence.
@@ -64,6 +73,15 @@ func (s *Server) WithMQTT(b *gateway.MQTTBridge, listen string) *Server {
 	return s
 }
 
+// WithBrokerInfo records listener/advertised/security info for the cluster
+// endpoint so the UI does not have to hardcode connection details.
+func (s *Server) WithBrokerInfo(listeners []string, advertised, securityMode string) *Server {
+	s.listeners = listeners
+	s.advertised = advertised
+	s.securityMode = securityMode
+	return s
+}
+
 // New builds a web server bound to the given storage and coordinator.
 func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.Registry, brokerID int32, clusterID string, version string) *Server {
 	return &Server{
@@ -76,6 +94,7 @@ func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.
 		startTime: time.Now(),
 		metrics:   metrics.NewRegistry(),
 		acls:      make(map[string]ACLRule),
+		rrCounter: make(map[string]uint64),
 	}
 }
 
@@ -182,6 +201,9 @@ func (s *Server) handleCluster(w http.ResponseWriter, r *http.Request) {
 		"totalBytes":   totalBytes,
 		"diskUsagePct": s.store.DiskUsagePct(),
 		"groups":       len(s.gm.ListGroups()),
+		"listeners":    s.listeners,
+		"advertised":   s.advertised,
+		"security":     s.securityMode,
 	})
 }
 
@@ -288,12 +310,46 @@ type messageRecord struct {
 	Headers   map[string]string `json:"headers"`
 }
 
+// pickPartition resolves the target partition for a UI/REST produce:
+// explicit partition >= 0 wins; otherwise key hash (FNV-1a) for keyed
+// messages; nil key round-robins per topic.
+func (s *Server) pickPartition(topic, key string, want int32) *storage.Partition {
+	t := s.store.GetTopic(topic)
+	if t == nil {
+		return nil
+	}
+	n := int32(len(t.Partitions))
+	if n == 0 {
+		return nil
+	}
+	if want >= 0 && want < n {
+		return t.Partitions[want]
+	}
+	if n == 1 {
+		return t.Partitions[0]
+	}
+	if key == "" {
+		s.rrMu.Lock()
+		s.rrCounter[topic]++
+		idx := s.rrCounter[topic] % uint64(n)
+		s.rrMu.Unlock()
+		return t.Partitions[int32(idx)]
+	}
+	var h uint64 = 14695981039346656037 // FNV-1a 64 offset basis
+	for i := 0; i < len(key); i++ {
+		h ^= uint64(key[i])
+		h *= 1099511628211
+	}
+	return t.Partitions[int32(h%uint64(n))]
+}
+
 func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
 	var req struct {
-		Key     string            `json:"key"`
-		Value   string            `json:"value"`
-		Headers map[string]string `json:"headers"`
+		Key       string            `json:"key"`
+		Value     string            `json:"value"`
+		Partition *int32            `json:"partition"`
+		Headers   map[string]string `json:"headers"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, "invalid JSON body")
@@ -302,7 +358,11 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if s.store.GetTopic(topic) == nil {
 		s.store.EnsureTopic(topic, 1)
 	}
-	p := s.store.GetPartition(topic, 0)
+	want := int32(-1)
+	if req.Partition != nil {
+		want = *req.Partition
+	}
+	p := s.pickPartition(topic, req.Key, want)
 	if p == nil {
 		writeErr(w, 500, "partition unavailable")
 		return
@@ -335,7 +395,7 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 201, map[string]interface{}{"topic": topic, "partition": 0, "offset": off})
+	writeJSON(w, 201, map[string]interface{}{"topic": topic, "partition": p.PartitionID(), "offset": off})
 }
 
 func decodeRecords(topic string, partition int32, raw []byte) []messageRecord {
@@ -427,7 +487,14 @@ func (s *Server) handleSchemas(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
-	partID, _ := strconv.Atoi(r.URL.Query().Get("partition"))
+	q := r.URL.Query()
+	qp := q.Get("partition")
+	allPart := qp == "" || qp == "all"
+	var partID int32
+	if !allPart {
+		pid, _ := strconv.Atoi(qp)
+		partID = int32(pid)
+	}
 	conn, err := upgradeWebSocket(w, r)
 	if err != nil {
 		writeErr(w, 400, "websocket upgrade failed: "+err.Error())
@@ -435,14 +502,31 @@ func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Tail the requested partition (default 0).
-	part := s.store.GetPartition(topic, int32(partID))
-	if part == nil {
+	// Collect the partitions to tail: one explicit partition or all.
+	type tailPart struct {
+		id   int32
+		part *storage.Partition
+		next int64
+	}
+	var parts []tailPart
+	if allPart {
+		if t := s.store.GetTopic(topic); t != nil {
+			for id := int32(0); id < int32(len(t.Partitions)); id++ {
+				if p := t.Partitions[id]; p != nil {
+					parts = append(parts, tailPart{id: id, part: p, next: p.HighWatermark()})
+				}
+			}
+		}
+	} else {
+		if p := s.store.GetPartition(topic, partID); p != nil {
+			parts = append(parts, tailPart{id: partID, part: p, next: p.HighWatermark()})
+		}
+	}
+	if len(parts) == 0 {
 		writeWSFrame(conn, []byte(`{"error":"unknown topic"}`))
 		return
 	}
 
-	next := part.HighWatermark()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -450,17 +534,21 @@ func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 		conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		readWSPing(conn)
 
-		if hwm := part.HighWatermark(); hwm > next {
-			raw, _, err := part.Read(next, 1<<20)
-			if err == nil && len(raw) > 0 {
-				records := decodeRecords(topic, 0, raw)
-				data, _ := json.Marshal(records)
-				if err := writeWSFrame(conn, data); err != nil {
-					return
+		var pending []messageRecord
+		for i := range parts {
+			tp := &parts[i]
+			if hwm := tp.part.HighWatermark(); hwm > tp.next {
+				raw, _, err := tp.part.Read(tp.next, 1<<20)
+				if err == nil && len(raw) > 0 {
+					pending = append(pending, decodeRecords(topic, tp.id, raw)...)
 				}
-				next = hwm
-			} else {
-				next = hwm
+				tp.next = hwm
+			}
+		}
+		if len(pending) > 0 {
+			// Oldest first; tag each record with its partition (already set).
+			if err := writeWSFrame(conn, mustJSON(pending)); err != nil {
+				return
 			}
 		}
 		select {
@@ -469,4 +557,13 @@ func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// mustJSON marshals or returns an empty array on failure.
+func mustJSON(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return []byte("[]")
+	}
+	return b
 }
