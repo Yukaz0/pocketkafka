@@ -158,8 +158,18 @@ func EncodeDescribeGroupsResponse(resp *DescribeGroupsResponse) ([]byte, error) 
 			w.WriteString(m.MemberID)
 			w.WriteString(m.ClientID)
 			w.WriteString(m.ClientHost)
-			w.WriteBytes(m.MemberMetadata)
-			w.WriteBytes(m.MemberAssignment)
+			// getBytes-based decoders (e.g. sarama) reject a -1 length; write an
+			// empty byte array instead of null for empty member fields.
+			if len(m.MemberMetadata) == 0 {
+				w.WriteInt32(0)
+			} else {
+				w.WriteBytes(m.MemberMetadata)
+			}
+			if len(m.MemberAssignment) == 0 {
+				w.WriteInt32(0)
+			} else {
+				w.WriteBytes(m.MemberAssignment)
+			}
 		}
 	}
 	return w.Bytes(), nil

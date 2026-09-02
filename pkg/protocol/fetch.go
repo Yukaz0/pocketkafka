@@ -138,7 +138,14 @@ func EncodeFetchResponse(resp *FetchResponse) ([]byte, error) {
 			if resp.Version >= 11 {
 				w.WriteInt32(-1) // preferred_read_replica
 			}
-			w.WriteBytes(p.Records)
+			// Sarama's decoder reads the records field with getRawBytes, which
+			// rejects a -1 (null) length with "invalid byteslice length". Encode
+			// empty/nil records as a zero-length byte array instead.
+			if len(p.Records) == 0 {
+				w.WriteInt32(0)
+			} else {
+				w.WriteBytes(p.Records)
+			}
 		}
 	}
 	return w.Bytes(), nil

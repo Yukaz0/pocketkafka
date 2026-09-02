@@ -91,7 +91,13 @@ func EncodeSaslAuthenticateResponse(resp *SaslAuthenticateResponse) ([]byte, err
 	w := NewWriter(64)
 	w.WriteInt16(resp.ErrorCode)
 	w.WriteNullableString(resp.ErrorMessage)
-	w.WriteBytes(resp.AuthBytes)
+	// getBytes-based decoders (e.g. sarama) reject a -1 length; write an
+	// empty byte array instead of null when there is no auth payload.
+	if len(resp.AuthBytes) == 0 {
+		w.WriteInt32(0)
+	} else {
+		w.WriteBytes(resp.AuthBytes)
+	}
 	if resp.Version >= 1 {
 		w.WriteInt64(resp.SessionLifetimeMs)
 	}

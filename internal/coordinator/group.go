@@ -57,6 +57,10 @@ type Group struct {
 	offsets      *OffsetStore
 }
 
+// syncWaitTimeout bounds how long a follower's SyncGroup blocks waiting for
+// the leader to upload assignments (Kafka uses the rebalance sync timeout).
+const syncWaitTimeout = 10 * time.Second
+
 // GroupManager coordinates all consumer groups.
 type GroupManager struct {
 	mu             sync.RWMutex
@@ -284,6 +288,25 @@ func (gm *GroupManager) SyncGroup(req *protocol.SyncGroupRequest) *protocol.Sync
 	// The leader uploads the assignments; store them for all members.
 	for _, a := range req.Assignments {
 		g.assignments[a.MemberID] = a.Assignment
+	}
+
+	// Followers may reach SyncGroup before the leader uploads assignments.
+	// Blocking here (like Kafka does until the sync timeout) prevents them
+	// from receiving a null assignment, which clients such as sarama reject
+	// with "invalid byteslice length" while decoding the response.
+	if _, ok := g.assignments[req.MemberID]; !ok && req.MemberID != g.LeaderID {
+		deadline := time.Now().Add(syncWaitTimeout)
+		for {
+			g.mu.Unlock()
+			time.Sleep(20 * time.Millisecond)
+			g.mu.Lock()
+			if _, ok := g.assignments[req.MemberID]; ok {
+				break
+			}
+			if time.Now().After(deadline) {
+				break
+			}
+		}
 	}
 	if a, ok := g.assignments[req.MemberID]; ok {
 		resp.Assignment = a
@@ -542,6 +565,12 @@ func (gm *GroupManager) DeleteGroup(name string) error {
 // given value. It is the backend for the admin reset-offset API.
 func (gm *GroupManager) ResetOffsets(group, topic string, partition int32, offset int64) error {
 	return gm.offsets.Commit(group, topic, partition, &CommittedOffset{Offset: offset})
+}
+
+// GroupOffsetsSnapshot returns the committed offsets for one group as
+// topic -> partition -> offset (used by the UI snapshot export).
+func (gm *GroupManager) GroupOffsetsSnapshot(group string) map[string]map[int32]int64 {
+	return gm.offsets.GroupOffsets(group)
 }
 
 var errNonEmptyGroup = fmt.Errorf("group is not empty")

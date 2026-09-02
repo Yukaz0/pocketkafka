@@ -164,7 +164,13 @@ func EncodeJoinGroupResponse(resp *JoinGroupResponse) ([]byte, error) {
 		if resp.Version >= 5 {
 			w.WriteNullableString(m.InstanceID)
 		}
-		w.WriteBytes(m.Metadata)
+		// getBytes-based decoders (e.g. sarama) reject a -1 length; write an
+		// empty byte array instead of null when a member has no metadata.
+		if len(m.Metadata) == 0 {
+			w.WriteInt32(0)
+		} else {
+			w.WriteBytes(m.Metadata)
+		}
 	}
 	return w.Bytes(), nil
 }
@@ -253,7 +259,14 @@ func EncodeSyncGroupResponse(resp *SyncGroupResponse) ([]byte, error) {
 		w.WriteNullableString(nil) // protocol_type
 		w.WriteNullableString(nil) // protocol_name
 	}
-	w.WriteBytes(resp.Assignment)
+	// Sarama's SyncGroupResponse decoder uses getBytes, which rejects a -1
+	// (null) length with "invalid byteslice length". Encode a missing
+	// assignment as a zero-length byte array instead.
+	if len(resp.Assignment) == 0 {
+		w.WriteInt32(0)
+	} else {
+		w.WriteBytes(resp.Assignment)
+	}
 	return w.Bytes(), nil
 }
 
