@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Yukaz0/pocketkafka/internal/storage"
@@ -37,7 +38,16 @@ type MQTTBridge struct {
 	listener net.Listener
 	wg       sync.WaitGroup
 	closeCh  chan struct{}
+
+	active  atomic.Int32 // currently connected MQTT clients
+	bridged atomic.Int64 // messages bridged MQTT -> Kafka since start
 }
+
+// ActiveClients reports the number of live MQTT client connections.
+func (b *MQTTBridge) ActiveClients() int32 { return b.active.Load() }
+
+// BridgedCount reports how many messages were bridged into Kafka.
+func (b *MQTTBridge) BridgedCount() int64 { return b.bridged.Load() }
 
 // NewMQTTBridge builds a bridge bound to the storage engine.
 func NewMQTTBridge(store *storage.Store) *MQTTBridge {
@@ -102,6 +112,8 @@ type mqttClient struct {
 func (b *MQTTBridge) serveClient(conn net.Conn) {
 	defer b.wg.Done()
 	defer conn.Close()
+	b.active.Add(1)
+	defer b.active.Add(-1)
 	c := &mqttClient{conn: conn, br: bufio.NewReader(conn), stop: make(chan struct{})}
 	defer close(c.stop)
 
@@ -196,6 +208,9 @@ func (b *MQTTBridge) bridgePublish(mqttTopic string, data []byte) error {
 		return err
 	}
 	_, err = part.Append(raw)
+	if err == nil {
+		b.bridged.Add(1)
+	}
 	return err
 }
 

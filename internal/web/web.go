@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Yukaz0/pocketkafka/internal/config"
 	"github.com/Yukaz0/pocketkafka/internal/coordinator"
+	"github.com/Yukaz0/pocketkafka/internal/gateway"
 	"github.com/Yukaz0/pocketkafka/internal/metrics"
 	"github.com/Yukaz0/pocketkafka/internal/schemaregistry"
 	"github.com/Yukaz0/pocketkafka/internal/storage"
@@ -34,11 +36,32 @@ type Server struct {
 	authSecret  string
 	authEnabled bool
 
+	// Data dir for persisted UI state (ACLs, etc.).
+	dataDir string
+
+	// MQTT bridge status (nil when the bridge is disabled).
+	mqtt       *gateway.MQTTBridge
+	mqttListen string
+
 	// Enterprise (Fitur 4.5): in-memory visual ACL + audit trail.
 	aclMu    sync.RWMutex
 	acls     map[string]ACLRule // key "principal|resourceType|resourceName"
 	auditMu  sync.Mutex
 	auditLog []AuditEntry
+}
+
+// WithDataDir records the broker data dir for ACL persistence.
+func (s *Server) WithDataDir(dir string) *Server {
+	s.dataDir = dir
+	s.loadACLsFromDisk()
+	return s
+}
+
+// WithMQTT records the MQTT bridge for the status endpoint.
+func (s *Server) WithMQTT(b *gateway.MQTTBridge, listen string) *Server {
+	s.mqtt = b
+	s.mqttListen = listen
+	return s
 }
 
 // New builds a web server bound to the given storage and coordinator.
@@ -83,6 +106,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/groups/{group}", s.handleGroupDetail)
 	mux.HandleFunc("DELETE /api/v1/groups/{group}", s.handleDeleteGroup)
 	mux.HandleFunc("POST /api/v1/groups/{group}/offsets/reset", s.handleResetGroupOffset)
+	mux.HandleFunc("GET /api/v1/groups/{group}/offsets/export", s.handleExportGroupOffsets)
+	mux.HandleFunc("POST /api/v1/groups/{group}/offsets/import", s.handleImportGroupOffsets)
+	mux.HandleFunc("GET /api/v1/topics/{topic}/config", s.handleTopicConfig)
+	mux.HandleFunc("PUT /api/v1/topics/{topic}/config", s.handleTopicConfig)
+	mux.HandleFunc("POST /api/v1/topics/{topic}/import", s.handleImportJSONL)
+	mux.HandleFunc("GET /api/v1/logs", s.handleBrokerLogs)
+	mux.HandleFunc("GET /api/v1/throughput", s.handleThroughput)
+	mux.HandleFunc("POST /api/v1/schemas/register", s.handleRegisterSchema)
+	mux.HandleFunc("GET /api/v1/mqtt", s.handleMQTTStatus)
 	mux.HandleFunc("GET /api/v1/schemas", s.handleSchemas)
 	mux.HandleFunc("GET /api/v1/schemas/{subject}", s.handleSchemaDetail)
 	mux.HandleFunc("GET /api/v1/acls", s.handleListACLs)
@@ -395,6 +427,7 @@ func (s *Server) handleSchemas(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
+	partID, _ := strconv.Atoi(r.URL.Query().Get("partition"))
 	conn, err := upgradeWebSocket(w, r)
 	if err != nil {
 		writeErr(w, 400, "websocket upgrade failed: "+err.Error())
@@ -402,14 +435,8 @@ func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Find a partition (partition 0 for single-partition demo topics).
-	var part *storage.Partition
-	for _, t := range s.store.TopicsSnapshot() {
-		if t.Name == topic {
-			part = t.Partitions[0]
-			break
-		}
-	}
+	// Tail the requested partition (default 0).
+	part := s.store.GetPartition(topic, int32(partID))
 	if part == nil {
 		writeWSFrame(conn, []byte(`{"error":"unknown topic"}`))
 		return

@@ -35,7 +35,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
-	logger.Init(cfg.Logging.Level, cfg.Logging.Format)
+	logger.InitWithSink(cfg.Logging.Level, cfg.Logging.Format, web.LogRing)
 
 	log.Printf("pocketkafka v%s starting (cluster=%s data_dir=%s)",
 		version, cfg.Broker.ClusterID, cfg.Storage.DataDir)
@@ -74,10 +74,13 @@ func main() {
 		}
 	}()
 
-	// Embedded Web UI dashboard (port 8080).
+	// Embedded Web UI dashboard (port 8080). The MQTT bridge handle is wired
+	// after this block, so the server exposes it through WithMQTT below.
+	ws := web.New(store, gm, sr, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).WithAuth(cfg).WithDataDir(cfg.Storage.DataDir)
+	ws.InstallLogSink()
 	webSrv := &http.Server{
 		Addr:    cfg.Web.Listen,
-		Handler: web.New(store, gm, sr, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).WithAuth(cfg).Handler(),
+		Handler: ws.Handler(),
 	}
 	go func() {
 		log.Printf("pocketkafka web UI on http://%s", cfg.Web.Listen)
@@ -100,6 +103,7 @@ func main() {
 	if err := mqttBridge.Start(cfg.MQTT.Listen); err != nil {
 		log.Printf("mqtt bridge error: %v", err)
 	}
+	ws.WithMQTT(mqttBridge, cfg.MQTT.Listen)
 	defer mqttBridge.Close()
 
 	// Background retention cleanup.
