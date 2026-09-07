@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PocketKafka</title>
+<link href="https://fonts.cdnfonts.com/css/sf-pro-display" rel="stylesheet">
+<link href="https://fonts.cdnfonts.com/css/sf-mono" rel="stylesheet">
 <style>
   :root{
     color-scheme:dark;
@@ -13,8 +15,8 @@
     --live:#3ecf8e; --success:#3ecf8e; --warn:#e8b339; --danger:#f16a5c;
     --str:#7ee0a3; --num:#7cb8ff; --bool:#ecc86b; --key:#dfe5ee;
     --text:#e8ecf3; --muted:#98a2b3;
-    --font-ui:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
-    --font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+    --font-ui:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','SF Pro','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --font-mono:'SF Mono',SFMono-Regular,ui-monospace,Menlo,Monaco,Consolas,monospace;
     --rail-w:56px; --radius:4px; --radius-sm:4px;
     --ring:0 0 0 1px var(--primary);
     --shadow:0 8px 24px rgba(0,0,0,.35);
@@ -30,15 +32,73 @@
     --shadow:0 8px 24px rgba(15,20,40,.10);
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
-  .app{display:flex;height:100vh}
+  body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+
+  /* ---- workbench chrome: titlebar / explorer / statusbar ---- */
+  .tb{height:44px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:stretch;flex-shrink:0;padding-right:10px}
+  .wm{display:flex;align-items:center;padding:0 16px;font-weight:600;font-size:13px;gap:8px;cursor:pointer;user-select:none}
+  .wm:hover{color:var(--primary-text)}
+  .wm i{width:8px;height:8px;background:var(--primary);display:inline-block}
+  .tabs{display:flex;align-items:stretch;overflow-x:auto}
+  .tab{display:flex;align-items:center;padding:0 13px;color:var(--muted);cursor:pointer;font-size:12.5px;border:none;background:none;font-family:var(--font-ui);white-space:nowrap}
+  .tab:hover{color:var(--text);background:var(--surface2)}
+  .tab.on{color:var(--text);background:var(--bg);box-shadow:inset 0 2px 0 var(--primary)}
+  .chips{display:flex;align-items:center;gap:6px;font:10.5px var(--font-mono);color:var(--muted)}
+  .chip2{border:1px solid var(--border);padding:2px 8px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .chip2 i{width:6px;height:6px;border-radius:50%;background:var(--live);display:inline-block}
+  .ws{flex:1;display:flex;min-height:0}
+  .content{flex:1;display:flex;flex-direction:column;min-width:0}
+  .plist{width:230px;border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;flex-shrink:0}
+  .plist .ph{padding:9px 12px;border-bottom:1px solid var(--border);font:600 10px var(--font-mono);text-transform:uppercase;letter-spacing:.14em;color:var(--muted)}
+  .plist input{margin:10px;background:var(--bg-canvas);border:1px solid var(--border);color:var(--text);font:11.5px var(--font-mono);padding:6px 9px;outline:none;width:calc(100% - 20px)}
+  .plist input:focus{border-color:var(--primary)}
+  .titem{padding:7px 12px;cursor:pointer;border-left:2px solid transparent}
+  .titem:hover{background:var(--surface2)}
+  .titem.on{background:var(--surface2);border-left-color:var(--primary)}
+  .titem b{display:block;font:500 12px var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .titem span{display:block;font:10px var(--font-mono);color:var(--muted);margin-top:1px}
+  .sbar{height:26px;background:var(--surface);border-top:1px solid var(--border);display:flex;align-items:center;gap:14px;padding:0 14px;font:10.5px var(--font-mono);color:var(--muted);flex-shrink:0;white-space:nowrap;overflow:hidden}
+  .sdot{width:6px;height:6px;border-radius:50%;background:var(--live);display:inline-block;animation:ping 2.4s cubic-bezier(0,0,.2,1) infinite}
+  .slink{cursor:pointer}
+  .slink:hover{color:var(--text)}
+  .hero{display:flex;align-items:flex-end;gap:32px;flex-wrap:wrap;margin-bottom:18px}
+  .heroStats{display:flex;margin-left:auto}
+  .hstat{padding:0 22px;border-left:1px solid var(--border)}
+  .hstat:first-child{border-left:none;padding-left:0}
+  .hstat .v{font:500 22px/1.2 var(--font-mono);font-variant-numeric:tabular-nums}
+  .hstat .v small{font-size:11px;color:var(--muted);margin-left:2px}
+  .hstat .k{font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin-top:3px}
+  .cbtn{background:var(--surface2);border:1px solid var(--border);color:var(--text);font:10.5px var(--font-mono);padding:3px 10px;cursor:pointer;letter-spacing:.04em}
+  .cbtn:hover{border-color:var(--primary);color:var(--primary-text)}
+  .cbtn.ok{border-color:var(--live);color:var(--success)}
+  /* topology svg */
+  .topoSvg{width:100%;display:block}
+  .topoSvg text{font-family:var(--font-mono);fill:var(--text);font-size:12px}
+  .topoSvg text.sub{fill:var(--muted);font-size:9.5px}
+  .topoSvg text.role{fill:var(--muted);font-size:9px;letter-spacing:.16em;text-transform:uppercase}
+  .nrect{fill:var(--surface2);stroke:var(--border);cursor:pointer}
+  .nrect:hover{stroke:var(--primary)}
+  .edge{stroke:var(--border);stroke-width:1.5;fill:none}
+  .edge.hot{stroke:var(--primary);stroke-width:2}
+  .errdot{fill:var(--danger)}
+  /* node detail drawer */
+  .drw{position:fixed;left:230px;right:0;bottom:0;height:300px;background:var(--surface);border-top:1px solid var(--border);transform:translateY(100%);transition:transform .18s ease;z-index:60;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+  .drw.open{transform:none}
+  .drwHd{padding:10px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-family:var(--font-mono)}
+  .drwHd b{font-size:12px}
+  .drwHd .x{margin-left:auto;cursor:pointer;color:var(--muted);border:none;background:none;font:14px var(--font-mono)}
+  .drwHd .x:hover{color:var(--text)}
+  .drwBody{flex:1;overflow:auto;padding:12px 18px}
 
   /* burger + drawer menu */
   .burger{width:36px;height:36px;border:1px solid var(--border);background:transparent;border-radius:4px;cursor:pointer;display:flex;flex-direction:column;gap:4px;align-items:center;justify-content:center;flex-shrink:0;transition:background .12s}
   .burger span{display:block;width:16px;height:2px;background:var(--text)}
   .burger:hover{background:var(--surface2)}
-  .drawer{position:fixed;top:0;left:0;bottom:0;width:240px;background:var(--bg-canvas);border-right:1px solid var(--border);z-index:90;padding:16px 0;display:flex;flex-direction:column;transform:translateX(-100%);transition:transform .16s ease;overflow:auto}
-  .drawer.open{transform:translateX(0)}
+  /* drawer disabled: navigasi via titlebar tabs + topic explorer */
+  .drawer{display:none}
+  .drawer.open{transform:translateX(-100%)}
+  .drawerBackdrop{display:none}
+  .hidden{display:none}
   .drawer .dLogo{padding:0 20px 14px;border-bottom:1px solid var(--border);margin-bottom:10px}
   .drawer .dLogo b{font-size:15px;letter-spacing:.02em}
   .drawer .dLogo span{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.14em;font-family:var(--font-mono);margin-top:2px}
@@ -67,7 +127,7 @@
   .btn.danger{background:transparent;color:var(--danger);border:1px solid rgba(241,106,92,.4)}
   .btn.danger:hover{background:rgba(241,106,92,.08)}
 
-  main{flex:1;overflow:auto;padding:24px;max-width:1008px;width:100%;margin:0 auto}
+  main{flex:1;overflow:auto;padding:20px 24px;width:100%}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:18px;width:100%;margin-bottom:16px}
   .card h3{font-size:14px;font-weight:600}
   .grid{display:flex;flex-direction:column;gap:0}
@@ -133,6 +193,10 @@
 
   /* inspector */
   .inspector{background:var(--surface);border:1px solid var(--border);border-radius:4px;margin-top:16px;padding:18px}
+  /* master-detail: tabel kiri, detail json kanan */
+  .bwrap{display:flex;gap:16px;align-items:flex-start}
+  .bmain{flex:1;min-width:0}
+  .sideIns{width:360px;flex-shrink:0;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:14px;position:sticky;top:8px;max-height:calc(100vh - 160px);overflow:auto}
   .inspector h3{font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;margin-bottom:12px;font-family:var(--font-mono)}
   pre{font-family:var(--font-mono);font-size:12px;font-feature-settings:'tnum' on,'zero' on;white-space:pre-wrap;word-break:break-word;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;overflow:auto;line-height:1.6}
   .jkey{color:var(--key)}.jstr{color:var(--str)}.jnum{color:var(--num)}.jbool{color:var(--bool)}.jnull{color:var(--muted)}
@@ -266,18 +330,37 @@
 </style>
 </head>
 <body>
-<div class="app">
-  <div class="col">
-    <header class="topbar">
-      <button class="burger" id="burgerBtn" title="Menu" aria-label="Menu"><span></span><span></span><span></span></button>
+<div class="tb">
+  <div class="wm" onclick="goView('connections')" title="Overview"><i></i>pocketkafka</div>
+  <div class="tabs" id="tabs"></div>
+  <span style="flex:1"></span>
+  <div class="chips">
+    <span class="chip2" id="chipBroker"><i></i>broker -</span>
+    <span class="chip2" id="chipSec">PLAINTEXT</span>
+    <span class="chip2" id="chipVer">v-</span>
+  </div>
+  <span id="topActions" style="display:flex;align-items:center;gap:8px"></span>
+</div>
+<div class="ws">
+  <aside class="plist" id="plist">
+    <div class="ph">Topics</div>
+    <input id="tfilter" placeholder="filter topics" oninput="renderTList(this.value)">
+    <div id="tlist" style="overflow:auto;flex:1"></div>
+  </aside>
+  <div class="content">
+    <header class="topbar" style="border-radius:0">
+      <button class="burger" id="burgerBtn" title="Menu" aria-label="Menu" onclick="openDrawer()"><span></span><span></span><span></span></button>
       <h1 id="title">Connections</h1>
       <span class="crumb" id="crumb"></span>
       <span class="sp"></span>
       <span class="updatedAgo" id="updAgo"></span>
-      <span id="topActions"></span>
     </header>
     <main id="view"></main>
   </div>
+</div>
+<div class="drw" id="drw">
+  <div class="drwHd" id="drwHd"><b id="drwT"></b><button class="x" onclick="closeDrw()">[x]</button></div>
+  <div class="drwBody" id="drwBody"></div>
 </div>
 <div class="msg" id="msg"></div>
 
@@ -334,6 +417,7 @@ async function refresh(){
   state.lastRefresh=Date.now();
   updAgo();
   checkAlarms();
+  if(state.view==='topology')renderTopoSvg();
 }
 
 /* dinamis: auto-refresh berkala + indikator "updated Xs ago" */
@@ -349,35 +433,212 @@ function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden){ await re
 function skel(w){return '<span class="skel" style="width:'+(w||60)+'px"></span>';}
 scheduleRefresh();
 
-function buildRail(){
-  // Drawer menu: hanya view, hint berisi jumlah data. Topik diakses via
-  // Ctrl+K / select Data Browser agar drawer tetap ramping.
-  const count=k=>({databrowser:(state.topics||[]).length+' topics',
-    groups:(state.groups||[]).length+' groups',
-    schemas:(state.schemas||[]).length+' subs'}[k]||'view');
-  const items=navItems.map(([k,label])=>({k,label,hint:count(k)}));
-  let drawer=document.getElementById('drawer');
-  const theme=state.theme==='dark'?'Theme: Dark':'Theme: Light';
-  const html='<div class="dLogo"><b>PocketKafka</b><span>embedded broker ui</span></div>'
-    +items.map(it=>{
-      const active=state.view===it.k;
-      return `<button class="dItem ${active?'active':''}" onclick="closeDrawer();goView('${it.k}')"><span>${esc(it.label)}</span><span class="dHint">${esc(it.hint)}</span></button>`;}).join('')
-    +'<div class="dSpacer"></div>'
-    +`<button class="dItem" onclick="closeDrawer();cycleTheme()"><span>${theme}</span><span class="dHint">theme</span></button>`
-    +`<button class="dItem" onclick="closeDrawer();goView('settings')"><span>Settings</span><span class="dHint">ctrl+,</span></button>`;
-  if(!drawer){
-    drawer=document.createElement('div'); drawer.id='drawer'; drawer.className='drawer';
-    document.body.appendChild(drawer);
-    const bd=document.createElement('div'); bd.id='drawerBd'; bd.className='drawerBackdrop hidden';
-    bd.onclick=closeDrawer; document.body.appendChild(bd);
-  }
-  drawer.innerHTML=html;
-  document.getElementById('burgerBtn').onclick=()=>openDrawer();
+function buildTabs(){
+  const tb=document.getElementById('tabs'); if(!tb)return;
+  const items=navItems.map(([k,label])=>({k,label}));
+  tb.innerHTML=items.map(it=>
+    `<button class="tab ${state.view===it.k?'on':''}" onclick="goView('${it.k}')">${esc(it.label)}</button>`).join('');
 }
-function openDrawer(){ document.getElementById('drawer').classList.add('open'); const bd=document.getElementById('drawerBd'); if(bd)bd.classList.remove('hidden'); }
-function closeDrawer(){ document.getElementById('drawer').classList.remove('open'); const bd=document.getElementById('drawerBd'); if(bd)bd.classList.add('hidden'); }
+let _tlistQ='';
+function buildTList(){
+  const wrap=document.getElementById('tlist'); if(!wrap)return;
+  const topics=state.topics||[];
+  wrap.innerHTML=(_tlistQ?topics.filter(t=>t.name.toLowerCase().includes(_tlistQ)):topics)
+    .map(t=>{
+      const ps=t.partitions||[];
+      const parts=ps.length, leo=parts?Math.max(...ps.map(p=>p.logEndOffset||0)):0;
+      const sel=state.view==='databrowser'&&state.topic===t.name;
+      const dlq=/-(dlq|dead)$/i.test(t.name);
+      return `<div class="titem ${sel?'on':''}" onclick="pickTopicNav('${esc(t.name)}')" title="${esc(t.name)} - ${parts} partitions - ${fmtBytes(t.totalBytes||0)}">
+        <b>${esc(t.name)}${dlq?' <span style="color:var(--danger)">DLQ</span>':''}</b>
+        <span>${parts} parts - ${fmtBytes(t.totalBytes||0)} - LEO ${leo}</span></div>`;
+    }).join('')||'<div class="muted" style="padding:10px 12px;font-size:11px">No topics yet.</div>';
+}
+function renderTList(q){_tlistQ=(q||'').toLowerCase();buildTList();}
+window.renderTList=renderTList;
+function buildStatusbar(){
+  let sb=document.getElementById('sbar');
+  if(!sb){
+    sb=document.createElement('div'); sb.id='sbar'; sb.className='sbar';
+    document.body.appendChild(sb);
+  }
+  const c=state.cluster||{};
+  const topicChip=state.view==='databrowser'&&state.topic?`<span>p: ${esc(state.partition)}</span>`:'';
+  const posChip=(state.view==='databrowser'&&state.leo!=null)?`<span>LEO ${state.leo}</span>`:'';
+  sb.innerHTML=`<span><span class="sdot"></span>broker-${esc(String(c.brokerId??'-'))}</span>`
+    +`<span class="slink" onclick="goView('security')">${esc(c.security||'PLAINTEXT')}</span>`
+    +topicChip+posChip
+    +`<span style="flex:1"></span>`
+    +`<span class="slink" onclick="goView('storage')">${fmtBytes(c.totalBytes||0)} on disk</span>`
+    +`<span class="slink" onclick="goView('metrics')">throughput</span>`
+    +`<span class="slink" onclick="goView('logs')">logs</span>`
+    +`<span class="slink" onclick="goView('settings')">settings</span>`;
+}
+function updateChips(){
+  const c=state.cluster||{};
+  const b=document.getElementById('chipBroker'); if(b)b.innerHTML=`<i></i>broker-${esc(String(c.brokerId??'-'))}`;
+  const s=document.getElementById('chipSec'); if(s)s.textContent=c.security||'PLAINTEXT';
+  const v=document.getElementById('chipVer'); if(v)v.textContent=c.version?('v'+c.version):'v-';
+}
+window.pickTopicNav=function(name){
+  state.topic=name;state.partition='all';state.off=null;
+  goView('databrowser').then(()=>loadMsgs());
+};
+function openDrawer(){}
+function closeDrawer(){}
 window.closeDrawer=closeDrawer;
-window.cycleTheme=function(){ state.theme=state.theme==='dark'?'light':'dark'; document.documentElement.dataset.theme=state.theme; localStorage.setItem('kadeck_theme',state.theme); render(); };
+window.openDrawer=openDrawer;
+/* ---- node detail drawer (topologi) ---- */
+function openDrw(title,innerHtml){ $('#drwT').textContent=title; $('#drwBody').innerHTML=innerHtml; document.getElementById('drw').classList.add('open'); }
+function closeDrw(){ document.getElementById('drw').classList.remove('open'); }
+window.closeDrw=closeDrw;
+function nodeDrw(title,meta,tableHtml,actions){
+  openDrw(title,`${meta?`<div style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:10px">${meta}</div>`:''}${tableHtml}`);
+  const hd=document.querySelector('.drwHd .x');
+  if(hd&&actions&&actions.length){
+    const btns=actions.map((a,i)=>`<button class="cbtn" onclick="${a.fn}">${esc(a.label)}</button>`).join('');
+    hd.insertAdjacentHTML('beforebegin',btns);
+  }
+}
+function fallbackCopy(t){
+  const ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.select();
+  try{document.execCommand('copy');}catch(e){}
+  document.body.removeChild(ta);
+}
+function copyText2(t,btn){
+  const done=()=>{ if(!btn)return; const old=btn.textContent; btn.textContent='copied'; btn.classList.add('ok');
+    setTimeout(()=>{btn.textContent=old;btn.classList.remove('ok');},1200); };
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(done).catch(()=>{fallbackCopy(t);done();}); }
+  else{ fallbackCopy(t);done(); }
+}
+window.copyText2=copyText2;
+/* ---- topology: peta broker -> topics -> groups dari data asli ---- */
+function topoData(){
+  const topics=(state.topics||[]).map(t=>{
+    const ps=t.partitions||[];
+    return {id:t.name,label:t.name,parts:ps.length,bytes:fmtBytes(t.totalBytes||0),
+      end:ps.length?Math.max(...ps.map(p=>p.logEndOffset||0)):0,dlq:/-(dlq|dead)$/i.test(t.name),subscriptions:[]};
+  });
+  const groups=(state.groups||[]).map(g=>{
+    const subs=[...new Set(Object.keys(g.lag||{}).map(k=>k.split('-').slice(0,-1).join('-')))];
+    const lagTotal=Object.values(g.lag||{}).reduce((a,b)=>a+b,0);
+    return {id:g.name,label:g.name,subs,lag:lagTotal,state:g.state};
+  });
+  groups.forEach(g=>g.subs.forEach(s=>{const t=topics.find(x=>x.id===s); if(t)t.subscriptions.push(g.id);}));
+  return {topics,groups};
+}
+function topoLayout(n){
+  if(n<=8)return {h:56,gap:14,pad:34,rowH:70};
+  if(n<=14)return {h:44,gap:9,pad:28,rowH:53};
+  return {h:34,gap:6,pad:24,rowH:40};
+}
+function renderTopoSvg(){
+  const svg=document.getElementById('topoSvg'); if(!svg)return;
+  const {topics,groups}=topoData();
+  if(!topics.length&&!groups.length){svg.innerHTML='';return;}
+  const L=topoLayout(topics.length);
+  const H=Math.max(240,topics.length*L.rowH+40);
+  const CX=470, GX=820, B={x:40,y:H/2-32,w:170,h:64};
+  const colT=topics.map((t,i)=>({...t,x:CX,y:i*L.rowH+L.pad}));
+  const colG=groups.map(g=>{
+    const anchors=g.subs.map(s=>colT.find(t=>t.id===s)).filter(Boolean);
+    const y=anchors.length?anchors.reduce((a,t)=>a+t.y+L.h/2,0)/anchors.length-L.h/2:H/2-22;
+    return {...g,x:GX,y};
+  });
+  const seen=new Set(); let cy=0;
+  const gc=colG.map(g=>{
+    let y=g.y;
+    while(seen.has(Math.round(y))){y=g.y+(++cy)*12;}
+    seen.add(Math.round(y)); return {...g,y};
+  });
+  const seenT=new Set(); let cyT=0;
+  const T=colT.map(t=>{
+    let y=t.y;
+    while(seenT.has(Math.round(y))){y=t.y+(++cyT)*10;}
+    seenT.add(Math.round(y)); return {...t,y};
+  });
+  let s=`<g>
+    <rect class="nrect" x="${B.x}" y="${B.y}" width="${B.w}" height="${B.h}" rx="2"/>
+    <text x="${B.x+16}" y="${B.y+24}">broker-${esc(String(state.cluster?.brokerId??'-'))}</text>
+    <text class="sub" x="${B.x+16}" y="${B.y+42}">${esc(state.cluster?.security||'PLAINTEXT')} - ${esc(state.cluster?.version||'')}</text>
+    <text class="sub" x="${B.x+16}" y="${B.y+56}">${fmtBytes(state.cluster?.totalBytes||0)} on disk</text>
+  </g>`;
+  T.forEach(t=>{
+    s+=`<g><rect class="nrect" x="${t.x}" y="${t.y}" width="150" height="${L.h}" rx="2" onclick="topoPickTopic('${esc(t.id)}')"/>
+      <text x="${t.x+12}" y="${t.y+(L.h/2)-2}">${esc(t.id)}</text>
+      <text class="sub" x="${t.x+12}" y="${t.y+L.h-6}">${t.parts} parts - ${t.bytes}${t.dlq?' <tspan fill="var(--danger)">DLQ</tspan>':''}</text></g>`;
+  });
+  gc.forEach(g=>{
+    s+=`<g><rect class="nrect" x="${g.x}" y="${g.y}" width="180" height="${L.h}" rx="2" onclick="topoPickGroup('${esc(g.id)}')"/>
+      <text x="${g.x+12}" y="${g.y+(L.h/2)-2}">${esc(g.id)}</text>
+      <text class="sub" x="${g.x+12}" y="${g.y+L.h-6}">lag ${g.lag.toLocaleString()} - ${esc(g.state||'')}</text>
+      ${g.lag>1000?`<circle class="errdot" cx="${g.x+168}" cy="${g.y+10}" r="4"/>`:''}</g>`;
+  });
+  T.forEach(t=>{
+    s+=`<path class="edge" d="M ${B.x+B.w} ${B.y+B.h/2} C ${B.x+B.w+80} ${B.y+B.h/2}, ${t.x-90} ${t.y+L.h/2}, ${t.x} ${t.y+L.h/2}"/>`;
+  });
+  T.forEach(t=>t.subscriptions.forEach(gid=>{
+    const g=gc.find(x=>x.id===gid); if(!g)return;
+    const hot=state.topoSel&&state.topoSel.type==='topic'&&state.topoSel.id===t.id;
+    s+=`<path class="edge ${hot?'hot':''}" d="M ${t.x+150} ${t.y+L.h/2} C ${t.x+220} ${t.y+L.h/2}, ${g.x-110} ${g.y+L.h/2}, ${g.x} ${g.y+L.h/2}"/>`;
+  }));
+  s+=`<text class="role" x="${B.x}" y="${B.y-14}">cluster</text>
+      <text class="role" x="${CX}" y="${L.pad-24}">topics</text>
+      <text class="role" x="${GX}" y="${(gc[0]?gc[0].y:L.pad)-10}">consumer groups</text>`;
+  svg.setAttribute('viewBox','0 0 1100 '+H);
+  svg.innerHTML=s;
+}
+function topoDetailHtml(t){
+  const parts=t.rawPartitions||[];
+  const rows=parts.map(p=>
+    `<tr><td>P${p.partition}</td><td>${(p.logEndOffset||0).toLocaleString()}</td><td>${(p.highWatermark||0).toLocaleString()}</td><td>${fmtBytes(p.bytes||0)}</td><td>${(p.segments||[]).length}</td></tr>`
+  ).join('')||'<tr><td colspan="5" class="muted">no partitions</td></tr>';
+  const subs=(t.subscriptions||[]).map(g=>`<span class="chip">${esc(g)}</span>`).join(' ')||'<span class="muted">(none)</span>';
+  return `<div style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:10px">
+    ${t.parts} partitions &middot; ${t.bytes} &middot; log end ${t.end.toLocaleString()}
+    &middot; subscribers: ${subs}</div>
+    <table><thead><tr><th>Part</th><th>Log End</th><th>High Watermark</th><th>Size</th><th>Segments</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+window.topoPickTopic=function(name){
+  const {topics}=topoData(); const t=topics.find(x=>x.id===name); if(!t)return;
+  state.topoSel={type:'topic',id:name};
+  api(`/api/v1/topics/${encodeURIComponent(name)}/partitions`).then(ps=>{
+    t.rawPartitions=ps||[]; renderTopoSvg();
+    nodeDrw('topic: '+name,'',topoDetailHtml(t),
+      [{label:'Open in Data Browser',fn:`pickTopicNav('${esc(name)}');closeDrw()`},
+       {label:'copy topic name',fn:`copyText2('${esc(name)}',this)`}]);
+  }).catch(e=>toast(e.message));
+};
+window.topoPickGroup=function(name){
+  const {groups}=topoData(); const g=groups.find(x=>x.id===name); if(!g)return;
+  state.topoSel={type:'group',id:name}; renderTopoSvg();
+  api(`/api/v1/groups/${encodeURIComponent(name)}`).then(d=>{
+    const rows=(d.offsets||[]).map(o=>`<tr><td>${esc(o.topic)}</td><td>P${o.partition}</td><td>${(o.current_offset??0).toLocaleString()}</td><td>${(o.log_end_offset??0).toLocaleString()}</td><td><span class="badge ${o.lag>0?'b-amber':'b-green'}">${o.lag??0}</span></td></tr>`).join('')||'<tr><td colspan="5" class="muted">no committed offsets</td></tr>';
+    const meta=`state ${esc(g.state||'-')} &middot; total lag ${g.lag.toLocaleString()} &middot; subscribed: ${g.subs.map(esc).join(', ')||'(none)'}`;
+    nodeDrw('group: '+name,meta,`<table><thead><tr><th>Topic</th><th>Part</th><th>Current</th><th>Log End</th><th>Lag</th></tr></thead><tbody>${rows}</tbody></table>`,
+      [{label:'open group page',fn:`closeDrw();openGroup('${esc(name)}')`}]);
+  }).catch(e=>{toast(e.message);});
+};
+function topoLayer(label,nodesHtml){ return `<div class="topoLayer"><div class="topoLabel">${label}</div><div class="topoNodes">${nodesHtml}</div></div>`; }
+function viewTopology(){
+  const tops=state.topics||[]; const grps=state.groups||[];
+  return `<div class="card" style="padding:0">
+    <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+      <h3>Stream Topology</h3>
+      <span class="muted" style="font-size:11px;font-family:var(--font-mono)">broker &rarr; topics &rarr; groups &middot; klik node untuk detail</span>
+      <span style="flex:1"></span>
+      <span class="chip2"><i style="width:14px;height:2px;border-radius:0;background:var(--border);display:inline-block"></i>produce path</span>
+      <span class="chip2"><i style="width:14px;height:2px;border-radius:0;background:var(--primary);display:inline-block"></i>subscription (selected)</span>
+      <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="render()">Refresh</button>
+    </div>
+    <div style="padding:8px 10px 10px">
+      <svg id="topoSvg" class="topoSvg" viewBox="0 0 1100 300" preserveAspectRatio="xMidYMin meet" style="min-height:${Math.max(240,(tops.length||1)*70+40)}px"></svg>
+      ${!tops.length?'<div class="muted" style="padding:14px 8px;font-size:12px">No topics yet. Create a topic or produce a message first.</div>':''}
+    </div>
+  </div>`;
+}
+window.refreshTopo=function(){renderTopoSvg();render();};
 
 /* ---- Fitur 13: hash router ---- */
 function currentHash(){
@@ -405,12 +666,12 @@ function syncHash(){
 }
 
 function render(){
-  buildRail();
+  buildTabs();buildTList();buildStatusbar();updateChips();
   const item=navItems.find(([k])=>k===state.view);
   const title=item?item[1]:'Settings';
   $('#title').textContent=title;$('#crumb').textContent=state.view==='databrowser'&&state.topic?('/ '+state.topic):(state.view==='groups'&&state.group?('/ '+state.group):'');
-  $('#topActions').innerHTML=`<span class="switchWrap">${clusterSwitcherHtml()}</span>`+(state.view==='connections'?`<button class="btn ghost" onclick="refreshAll()">Refresh</button>`:
-    state.view==='databrowser'?`<button class="btn" onclick="goView('connections')">Connections</button>`:'');
+  $('#topActions').innerHTML=`<span class="switchWrap">${clusterSwitcherHtml()}</span>`+(state.view==='connections'?`<button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="refreshAll()">Refresh</button>`:
+    state.view==='databrowser'?`<button class="btn" style="padding:5px 12px;font-size:12px" onclick="goView('connections')">Connections</button>`:'');
   const v=$('#view');
   if(state.auth&&state.auth.enabled&&!state.auth.authenticated){v.innerHTML=viewLogin();bindLogin();return;}
   if(state.view==='connections')v.innerHTML=viewConnections();
@@ -426,6 +687,7 @@ function render(){
   else if(state.view==='logs')v.innerHTML=viewLogs();
   else if(state.view==='security')v.innerHTML=viewSecurity();
   else if(state.view==='settings')v.innerHTML=viewSettings();
+  else v.innerHTML='<div class="card"><h3>404</h3><div class="muted" style="margin-top:6px">Unknown view. <a href="#/connections" onclick="goView(\'connections\')">Go to overview</a></div></div>';
   bindView();
   applyDensity();
 }
@@ -607,12 +869,23 @@ function viewDataBrowser(){
     <div id="tailBar"></div>
     ${state.filterPanel?filterPanelHtml():''}
     ${state.projCols.length?projBarHtml():''}
-    <div class="card" style="padding:0;overflow:hidden">
-      <table><thead><tr><th class="chkCell"></th><th>Timestamp</th><th>Partition</th><th>Offset</th><th>Key</th><th>Headers</th>${state.projCols.map(c=>`<th class="mono">${esc(c)}</th>`).join('')}<th>Value</th><th></th></tr></thead>
-      <tbody id="rows"><tr><td colspan="${8+state.projCols.length}" style="padding:20px">${state.topic?'<span class="skel" style="width:120px"></span> <span class="skel" style="width:80px"></span> <span class="skel" style="width:160px"></span>':'<span class="muted">Select a topic</span>'}</td></tr></tbody></table>
-    </div>
-    <div class="inspector hidden" id="inspector"><h3>Message Inspector</h3><pre id="insp"></pre><div style="margin-top:8px;display:flex;gap:8px"><button class="btn ghost" onclick="copyInsp()">Copy JSON</button><button class="btn ghost" onclick="replaySelected()">Replay / DLQ</button></div></div>
-    <div id="diffPanel"></div>`;
+    <div class="bwrap">
+      <div class="bmain">
+        <div class="card" style="padding:0;overflow-x:auto;overflow-y:hidden;margin-bottom:0">
+          <table><thead><tr><th class="chkCell"></th><th>Timestamp</th><th>Partition</th><th>Offset</th><th>Key</th><th>Headers</th>${state.projCols.map(c=>`<th class="mono">${esc(c)}</th>`).join('')}<th>Value</th><th></th></tr></thead>
+          <tbody id="rows"><tr><td colspan="${8+state.projCols.length}" style="padding:20px">${state.topic?'<span class="skel" style="width:120px"></span> <span class="skel" style="width:80px"></span> <span class="skel" style="width:160px"></span>':'<span class="muted">Select a topic</span>'}</td></tr></tbody></table>
+        </div>
+        <div id="diffPanel"></div>
+      </div>
+      <aside class="sideIns hidden" id="inspector">
+        <h3 style="display:flex;align-items:center;gap:10px;margin-bottom:12px">Message Inspector<span style="flex:1"></span><button class="cbtn" id="inspCpAll" onclick="copyInspJson(this)">copy json</button><button class="cbtn" id="inspCpVal" onclick="copyInspValue(this)">copy value</button></h3>
+        <pre id="insp" style="max-height:calc(100vh - 280px)"></pre>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="replaySelected()">Replay / DLQ</button>
+          <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="closeInspector()">Close</button>
+        </div>
+      </aside>
+    </div>`;
 }
 window.setPart=p=>{state.partition=p;state.off=null;loadMsgs();loadPosMeta();};
 async function loadMsgs(){ if(!state.topic)return; try{
@@ -643,14 +916,34 @@ rows.innerHTML=all.slice().reverse().map(m=>'<tr class="rowclick" onclick="insp(
 window.renderMsgRows=renderMsgRows;
 let tnId=0;
 function prim(v){if(v===null)return '<span class="jnull">null</span>';if(typeof v==='boolean')return '<span class="jbool">'+v+'</span>';if(typeof v==='number')return '<span class="jnum">'+v+'</span>';return '<span class="jstr">"'+esc(v)+'"</span>';}
-function jnode(key,val){tnId++;const id=tnId;
+function jnode(key,val,force){tnId++;const id=tnId;
   if(val===null||typeof val!=='object'){return '<div class="jrow" style="cursor:default;padding-left:0"><span class="jkey">"'+esc(key)+'"</span>: '+prim(val)+'</div>';}
-  const open=val&&Object.keys(val).length<=8;
+  const open=force||(val&&Object.keys(val).length<=8);
   const body=Object.entries(val||{}).map(function(e){return jnode(e[0],e[1]);}).join('');
   const label=Array.isArray(val)?('['+val.length+']'):('{'+Object.keys(val).length+'}');
   return '<div><div class="jrow" onclick="toggleNode('+id+')"><span class="jarrow" id="ta-'+id+'">'+(open?'v':'>')+'</span><span class="jkey">"'+esc(key)+'"</span>: <span class="jnum">'+label+'</span></div><div class="jnode" id="tn-'+id+'" style="'+(open?'':'display:none')+'">'+(body||'<div class="muted" style="padding-left:14px">(empty)</div>')+'</div></div>';}
 window.toggleNode=function(id){const b=document.getElementById('tn-'+id),a=document.getElementById('ta-'+id);if(b){const o=b.style.display!=='none';b.style.display=o?'none':'block';a.innerHTML=o?'>':'v';}};
-window.insp=function(m){$('#inspector').classList.remove('hidden');const obj={topic:m.topic,partition:m.partition,offset:m.offset,timestamp:new Date(m.timestamp).toISOString(),key:m.key,headers:m.headers,valueSize:m.valueSize,value:fmtValue(m)};let body='';for(const k in obj)body+=jnode(k,obj[k]);$('#insp').innerHTML='<div class="jnode" style="border:none;margin:0;padding-left:0">'+body+'</div>';};
+let _inspCur=null;
+window.insp=function(m){_inspCur=m;$('#inspector').classList.remove('hidden');const obj={topic:m.topic,partition:m.partition,offset:m.offset,timestamp:new Date(m.timestamp).toISOString(),key:m.key,headers:m.headers,valueSize:m.valueSize,value:fmtValue(m)};let body='';for(const k in obj)body+=jnode(k,obj[k],k==='value');$('#insp').innerHTML='<div class="jnode" style="border:none;margin:0;padding-left:0">'+body+'</div>';};
+window.closeInspector=function(){_inspCur=null;const el=document.getElementById('inspector');if(el)el.classList.add('hidden');};
+function inspJsonText(){
+  const m=_inspCur; if(!m)return '';
+  const obj={topic:m.topic,partition:m.partition,offset:m.offset,timestamp:new Date(m.timestamp).toISOString(),key:m.key,headers:m.headers||{},value:m.value??''};
+  return JSON.stringify(obj,null,2);
+}
+function inspValueText(){
+  const m=_inspCur; if(!m)return '';
+  if(m.isJSON&&m.value){ try{ return JSON.stringify(JSON.parse(m.value),null,2); }catch(e){ return m.value; } }
+  return m.value??'';
+}
+window.copyInspJson=function(btn){ const t=inspJsonText(); if(!t){toast('No message selected');return;} copyInspTo(t,btn,'copy json'); };
+window.copyInspValue=function(btn){ const t=inspValueText(); if(!t){toast('No message selected');return;} copyInspTo(t,btn,'copy value'); };
+function copyInspTo(t,btn,label){
+  const done=()=>{ if(!btn)return; const old=btn.textContent; btn.textContent='copied'; btn.classList.add('ok');
+    setTimeout(()=>{btn.textContent=label;btn.classList.remove('ok');},1200); };
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(done).catch(()=>{fallbackCopy(t);done();}); }
+  else{ fallbackCopy(t);done(); }
+}
 function fmtValue(m){ if(state.decoder==='hex')return hex(m.valueB64); if(m.isJSON)return JSON.stringify(JSON.parse(m.value||'null'),null,2); return m.value; }
 function hex(b64){let s='',bin=atob(b64||'');for(let i=0;i<bin.length;i++)s+=bin.charCodeAt(i).toString(16).padStart(2,'0')+' ';return s.trim();}
 function copyInsp(){const p=$('#insp');navigator.clipboard.writeText(p.textContent).then(()=>{const b=document.querySelector('.inspector .btn');if(b){const old=b.textContent;b.textContent='Copied';b.style.color='var(--success)';setTimeout(()=>{b.textContent=old;b.style.color='';},1500);}else toast('Copied');});}
@@ -954,22 +1247,8 @@ window.mockGenStop=function(){ if(mockTimer){clearInterval(mockTimer);mockTimer=
 window.rpcSend=function(){ const req=document.getElementById('rpcReq').value,reply=document.getElementById('rpcReply').value,method=document.getElementById('rpcMethod').value,payload=document.getElementById('rpcPayload').value; const corr=Math.random().toString(36).slice(2,10); const body={key:corr,value:JSON.stringify({method,request:JSON.parse(payload||'{}'),reply_to:reply}),headers:{correlation_id:corr,reply_to_topic:reply,type:'request'}}; api('/api/v1/topics/'+encodeURIComponent(req)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>toast('RPC request sent @ offset '+r.offset+' (corr '+corr+')')).catch(e=>toast(e.message)); };
 
 /* ================= Fitur 4.2: Stream Topology & Data Flow ================= */
-function topoLayer(label,nodesHtml){ return `<div class="topoLayer"><div class="topoLabel">${label}</div><div class="topoNodes">${nodesHtml}</div></div>`; }
-function viewTopology(){
-  const tops=state.topics||[]; const grps=state.groups||[];
-  let skew='';
-  if(tops.length){ const sel=tops[0]; const ps=sel.partitions||[]; const max=Math.max(1,...ps.map(p=>p.logEndOffset||0)); skew=`<div class="card"><h3 style="margin-bottom:4px">Partition Skew - ${esc(sel.name)}</h3><div class="muted" style="font-size:11px;margin-bottom:4px">Log end offset per partition (hot partition = uneven)</div><div class="skewBar">${ps.map(p=>`<div style="height:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"><span>P${p.partition}</span></div>`).join('')||'<span class="muted">no partitions</span>'}</div></div>`; }
-  return `<div class="card">
-    <h3 style="margin-bottom:10px">Stream Topology</h3>
-    ${topoLayer('Producer Apps','<span class="gNode">producer-app-1</span><span class="gNode">producer-app-2</span>')}
-    <div class="topoArrow">| v</div>
-    ${topoLayer('Topics',tops.map(t=>`<span class="gNode">${esc(t.name)}</span>`).join('')||'<span class="muted" style="font-size:12px">no topics</span>')}
-    <div class="topoArrow">| v</div>
-    ${topoLayer('Partitions',tops.flatMap(t=>(t.partitions||[]).map(p=>`<span class="gNode">${esc(t.name)} P${p.partition}</span>`)).join('')||'<span class="muted" style="font-size:12px">none</span>')}
-    <div class="topoArrow">| v</div>
-    ${topoLayer('Consumer Groups',grps.map(g=>`<span class="gNode">${esc(g.name)}</span>`).join('')||'<span class="muted" style="font-size:12px">no groups</span>')}
-  </div>${skew}<div class="card"><h3>Data Flow Legend</h3><div class="row" style="font-size:12px"><span class="badge b-purple">Producer</span><span>-&gt;</span><span class="badge b-green">Topic</span><span>-&gt;</span><span class="badge b-amber">Partition</span><span>-&gt;</span><span class="badge">Group</span></div></div>`; }
-window.refreshTopo=function(){render();};
+/* Dipindah: peta SVG broker -> topics -> groups ada di renderTopoSvg()/viewTopology()
+   di atas (workbench), lengkap dengan node detail drawer. */
 
 /* ================= Fitur 4.3: Storage & Segment Inspector ================= */
 function viewStorage(){
@@ -1206,7 +1485,7 @@ window.resumeTail=function(){ state.tailPaused=false; state.pendingTail=0; updat
 function bindTailPause(){ const mainEl=$('main'); if(!mainEl||mainEl._tailBind)return; mainEl._tailBind=1;
   mainEl.addEventListener('scroll',()=>{ if(state.view==='databrowser'&&state.tail&&!state.tailPaused&&mainEl.scrollTop>40){ state.tailPaused=true; updateTailBar(); } }); }
 
-function bindView(){ if(state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();} if(state.view==='groups'&&state.group)loadGroupDetail(); if(state.view==='security'){loadACLs();loadAudit();} if(state.view==='metrics')loadThroughput(); if(state.view==='logs')loadLogs(); if(state.view==='databrowser')bindTailPause(); }
+function bindView(){ if(state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();} if(state.view==='groups'&&state.group)loadGroupDetail(); if(state.view==='security'){loadACLs();loadAudit();} if(state.view==='metrics')loadThroughput(); if(state.view==='logs')loadLogs(); if(state.view==='topology')renderTopoSvg(); if(state.view==='databrowser')bindTailPause(); }
 initTheme();
 (async function(){await refresh();applyHash();})();
 </script>
