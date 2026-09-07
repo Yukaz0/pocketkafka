@@ -122,9 +122,6 @@ func (s *Segment) recover() error {
 	return nil
 }
 
-// baseOffsetOf returns the base offset of this segment.
-func (s *Segment) baseOffsetOf() int64 { return s.baseOffset }
-
 // append writes a raw RecordBatch to the segment, rewriting its base offset to
 // the segment's current nextOffset. It returns the assigned base offset.
 func (s *Segment) append(raw []byte) (int64, error) {

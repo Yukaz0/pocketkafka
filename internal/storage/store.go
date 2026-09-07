@@ -223,15 +223,6 @@ func (s *Store) TopicsSnapshot() map[string]*Topic {
 	return out
 }
 
-// PartitionCount returns the number of partitions for a topic (or 0 if unknown).
-func (s *Store) PartitionCount(topic string) int {
-	t := s.GetTopic(topic)
-	if t == nil {
-		return 0
-	}
-	return len(t.Partitions)
-}
-
 // CompactNow runs log compaction immediately for a topic marked
 // cleanup.policy=compact. It is the backend for the web UI compact action.
 func (s *Store) CompactNow(topic string) error {

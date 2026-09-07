@@ -43,28 +43,6 @@ func NewRegistry() *Registry {
 }
 
 // ObserveProduce records one produced batch for the metrics registry.
-func (r *Registry) ObserveProduce(topic string, count, bytes int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.messagesIn[topic] += int64(count)
-	r.bytesIn[topic] += int64(bytes)
-}
-
-// ObserveLatency records a request duration for an API key.
-func (r *Registry) ObserveLatency(api string, seconds float64) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.latencyTotal[api]++
-	r.latencySum[api] += seconds
-	for i, b := range r.latencyBuckets {
-		if seconds <= b {
-			if r.latencyCounts[api] == nil {
-				r.latencyCounts[api] = make([]uint64, len(r.latencyBuckets))
-			}
-			r.latencyCounts[api][i]++
-		}
-	}
-}
 
 // Render produces the Prometheus text exposition.
 func (r *Registry) Render(store *storage.Store, gm *coordinator.GroupManager, clusterID string) string {

@@ -108,6 +108,7 @@ func (s *Server) handleUpsertACL(w http.ResponseWriter, r *http.Request) {
 	s.aclMu.Lock()
 	s.acls[key] = rule
 	s.aclMu.Unlock()
+	s.persistACLs()
 	s.recordAudit(actorFrom(r), "acl.update", rule.ResourceName, fmt.Sprintf("%s grants %v on %s %s", rule.Principal, rule.Operations, rule.ResourceType, rule.ResourceName))
 	writeJSON(w, 200, rule)
 }
@@ -122,6 +123,7 @@ func (s *Server) handleDeleteACL(w http.ResponseWriter, r *http.Request) {
 	s.aclMu.Lock()
 	delete(s.acls, key)
 	s.aclMu.Unlock()
+	s.persistACLs()
 	s.recordAudit(actorFrom(r), "acl.delete", rule.ResourceName, fmt.Sprintf("removed ACL for %s on %s %s", rule.Principal, rule.ResourceType, rule.ResourceName))
 	writeJSON(w, 200, map[string]string{"deleted": key})
 }

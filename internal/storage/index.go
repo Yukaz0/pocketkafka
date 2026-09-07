@@ -126,11 +126,6 @@ func (idx *indexFile) positionForOffset(targetOffset int64) int64 {
 	return int64(idx.entries[i-1].position)
 }
 
-// size returns the on-disk size of the index file.
-func (idx *indexFile) size() int64 {
-	return idx.writtenSize
-}
-
 // reset clears the in-memory entries and truncates the index file to zero.
 func (idx *indexFile) reset() error {
 	idx.entries = idx.entries[:0]

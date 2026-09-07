@@ -378,12 +378,6 @@ func (s *Server) persistACLs() {
 // ---------------------------------------------------------------------------
 
 // avroInfo reports whether a message value carries the Confluent Avro magic.
-func avroInfo(value []byte) map[string]any {
-	if len(value) < 5 || value[0] != 0 {
-		return map[string]any{"avro": false}
-	}
-	return map[string]any{"avro": true, "schemaID": int32(value[1])<<24 | int32(value[2])<<16 | int32(value[3])<<8 | int32(value[4])}
-}
 
 // ---------------------------------------------------------------------------
 // Throughput samples (Batch 2): the UI polls /api/v1/cluster every few
@@ -429,6 +423,7 @@ func ThroughputSamples() []float64 {
 
 // handleThroughput exposes the samples plus totals for the UI sparkline.
 func (s *Server) handleThroughput(w http.ResponseWriter, r *http.Request) {
+	NoteThroughput(s.store)
 	var total int64
 	for _, t := range s.store.TopicsSnapshot() {
 		for _, p := range t.Partitions {

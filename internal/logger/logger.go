@@ -3,7 +3,6 @@
 package logger
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -48,11 +47,3 @@ func slogOut(sink io.Writer) io.Writer {
 }
 
 // LogProduce emits a structured "record appended" log line.
-func LogProduce(ctx context.Context, topic string, partition int32, offset int64, bytes int) {
-	slog.InfoContext(ctx, "record appended",
-		slog.String("topic", topic),
-		slog.Int("partition", int(partition)),
-		slog.Int64("offset", offset),
-		slog.Int("bytes", bytes),
-	)
-}
