@@ -541,17 +541,9 @@ function renderTopoSvg(){
   const H=Math.max(240,topics.length*L.rowH+40);
   const CX=470, GX=820, B={x:40,y:H/2-32,w:170,h:64};
   const colT=topics.map((t,i)=>({...t,x:CX,y:i*L.rowH+L.pad}));
-  const colG=groups.map(g=>{
-    const anchors=g.subs.map(s=>colT.find(t=>t.id===s)).filter(Boolean);
-    const y=anchors.length?anchors.reduce((a,t)=>a+t.y+L.h/2,0)/anchors.length-L.h/2:H/2-22;
-    return {...g,x:GX,y};
-  });
-  const seen=new Set(); let cy=0;
-  const gc=colG.map(g=>{
-    let y=g.y;
-    while(seen.has(Math.round(y))){y=g.y+(++cy)*12;}
-    seen.add(Math.round(y)); return {...g,y};
-  });
+  /* consumer groups: antre rapi dari atas (tidak bertumpuk), edge tetap mengikuti */
+  const G_H=L.h, GAP=Math.max(12,(topics.length*L.rowH-groups.length*G_H)/(groups.length+1));
+  const gc=groups.map((g,i)=>({...g,x:GX,y:L.pad+i*(G_H+GAP)}));
   const seenT=new Set(); let cyT=0;
   const T=colT.map(t=>{
     let y=t.y;
