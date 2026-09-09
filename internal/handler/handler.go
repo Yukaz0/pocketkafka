@@ -119,7 +119,7 @@ func (h *Handler) Handle(apiKey, version int16, body []byte, localPort int32) ([
 	case protocol.APKDeleteTopics:
 		return h.handleDeleteTopics(version, body)
 	case protocol.APKFindCoordinator:
-		return h.handleFindCoordinator(version, body)
+		return h.handleFindCoordinator(version, body, localPort)
 	case protocol.APKJoinGroup:
 		return h.handleJoinGroup(version, body)
 	case protocol.APKSyncGroup:
@@ -479,12 +479,15 @@ func (h *Handler) handleDeleteTopics(version int16, body []byte) ([]byte, error)
 	return protocol.EncodeDeleteTopicsResponse(resp)
 }
 
-func (h *Handler) handleFindCoordinator(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleFindCoordinator(version int16, body []byte, localPort int32) ([]byte, error) {
 	req, err := protocol.DecodeFindCoordinatorRequest(version, body)
 	if err != nil {
 		return nil, err
 	}
 	resp := h.coord.FindCoordinator(req)
+	// Koordinator group harus reachable dari jalur klien: override alamat
+	// dengan advertised listener tempat klien masuk.
+	resp.Host, resp.Port = h.advertisedFor(localPort)
 	return protocol.EncodeFindCoordinatorResponse(resp)
 }
 
