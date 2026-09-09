@@ -28,6 +28,12 @@ type Partition struct {
 	// is enabled.
 	idempotence *PartitionIdempotenceTracker
 
+	// appendCh signals fetch long-polls that new data has arrived. Append
+	// closes the current channel (waking every waiter) and installs a fresh
+	// one; longPoll waits on it instead of sleep-polling the HWM.
+	appendMu sync.Mutex
+	appendCh chan struct{}
+
 	// remoteFetch downloads an object-store key (set when tiering is enabled).
 	remoteFetch func(key string) ([]byte, error)
 }
@@ -44,6 +50,7 @@ func OpenPartition(dir, topic string, partitionID int32, maxSegmentBytes, indexI
 		maxSegmentBytes: maxSegmentBytes,
 		indexInterval:   indexInterval,
 		idempotence:     NewPartitionIdempotenceTracker(),
+		appendCh:        make(chan struct{}),
 	}
 	if err := p.recover(); err != nil {
 		return nil, err
@@ -101,6 +108,23 @@ func (p *Partition) recover() error {
 	return nil
 }
 
+// DataWaiter returns a channel that is closed on the next Append, plus the
+// current high watermark. Fetch long-polls wait on this channel (with a
+// timeout) instead of sleep-polling the HWM, so an idle partition costs zero
+// CPU for both broker and clients. The wake is not lost: Append closes the
+// snapshot channel under appendMu; a waiter that snapshots after the close
+// receives an already-closed channel and simply rechecks the HWM.
+func (p *Partition) DataWaiter() (<-chan struct{}, int64) {
+	p.mu.RLock()
+	hwm := p.highWatermark
+	p.mu.RUnlock()
+
+	p.appendMu.Lock()
+	ch := p.appendCh
+	p.appendMu.Unlock()
+	return ch, hwm
+}
+
 // Append writes a raw RecordBatch, assigns it the next offset, and advances the
 // LEO and HWM. It returns the assigned base offset.
 func (p *Partition) Append(raw []byte) (int64, error) {
@@ -118,6 +142,11 @@ func (p *Partition) Append(raw []byte) (int64, error) {
 	}
 	p.nextOffset = p.activeSegment.nextOffset
 	p.highWatermark = p.nextOffset
+	// Bangunkan semua fetch long-poll yang menunggu offset ini.
+	p.appendMu.Lock()
+	close(p.appendCh)
+	p.appendCh = make(chan struct{})
+	p.appendMu.Unlock()
 	return assigned, nil
 }
 

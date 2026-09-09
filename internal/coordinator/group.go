@@ -54,7 +54,19 @@ type Group struct {
 	Members      map[string]*Member
 	JoinOrder    []string
 	assignments  map[string][]byte // memberID -> assignment bytes (from SyncGroup)
-	offsets      *OffsetStore
+	// assignmentsChanged is closed (and replaced) whenever assignments are
+	// written, so SyncGroup followers can wait event-driven instead of
+	// sleep-polling every 20ms.
+	assignmentsChanged chan struct{}
+	offsets            *OffsetStore
+}
+
+// minDuration returns the smaller of two durations.
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // syncWaitTimeout bounds how long a follower's SyncGroup blocks waiting for
@@ -105,12 +117,13 @@ func (gm *GroupManager) getOrCreate(name string) *Group {
 		return g
 	}
 	g := &Group{
-		Name:        name,
-		State:       StateEmpty,
-		Generation:  0,
-		Members:     make(map[string]*Member),
-		assignments: make(map[string][]byte),
-		offsets:     gm.offsets,
+		Name:               name,
+		State:              StateEmpty,
+		Generation:         0,
+		Members:            make(map[string]*Member),
+		assignments:        make(map[string][]byte),
+		assignmentsChanged: make(chan struct{}),
+		offsets:            gm.offsets,
 	}
 	gm.groups[name] = g
 	return g
@@ -289,16 +302,34 @@ func (gm *GroupManager) SyncGroup(req *protocol.SyncGroupRequest) *protocol.Sync
 	for _, a := range req.Assignments {
 		g.assignments[a.MemberID] = a.Assignment
 	}
+	// Bangunkan follower yang sedang menunggu assignment.
+	close(g.assignmentsChanged)
+	g.assignmentsChanged = make(chan struct{})
 
 	// Followers may reach SyncGroup before the leader uploads assignments.
 	// Blocking here (like Kafka does until the sync timeout) prevents them
 	// from receiving a null assignment, which clients such as sarama reject
 	// with "invalid byteslice length" while decoding the response.
 	if _, ok := g.assignments[req.MemberID]; !ok && req.MemberID != g.LeaderID {
+		// Event-driven: tunggu sinyal assignmentsChanged, bukan
+		// sleep-poll 20ms berkala.
 		deadline := time.Now().Add(syncWaitTimeout)
 		for {
+			changed := g.assignmentsChanged
+			if _, ok := g.assignments[req.MemberID]; ok {
+				break
+			}
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				break
+			}
 			g.mu.Unlock()
-			time.Sleep(20 * time.Millisecond)
+			timer := time.NewTimer(minDuration(remaining, 250*time.Millisecond))
+			select {
+			case <-changed:
+			case <-timer.C:
+			}
+			timer.Stop()
 			g.mu.Lock()
 			if _, ok := g.assignments[req.MemberID]; ok {
 				break

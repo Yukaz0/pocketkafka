@@ -653,12 +653,17 @@ func (h *Handler) longPoll(part *storage.Partition, fetchOffset int64, maxWait i
 	if part.HighWatermark() > fetchOffset {
 		return
 	}
-	deadline := time.Now().Add(time.Duration(maxWait) * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if part.HighWatermark() > fetchOffset {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+	// Event-driven wait: tidur sampai Append menutup channel (data baru)
+	// atau deadline habis. Tidak ada polling HWM berkala.
+	ch, _ := part.DataWaiter()
+	if ch == nil {
+		return
+	}
+	timer := time.NewTimer(time.Duration(maxWait) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ch:
+	case <-timer.C:
 	}
 }
 
