@@ -22,6 +22,7 @@ import (
 type Server struct {
 	cfg        *config.Config
 	handler    *handler.Handler
+	bindPorts  map[net.Listener]int32 // port bind per listener (untuk advertise per-listener)
 	maxReqSize int64
 	listeners  []net.Listener
 	tlsConf    *tls.Config
@@ -42,6 +43,7 @@ func New(cfg *config.Config, h *handler.Handler) *Server {
 	return &Server{
 		cfg:        cfg,
 		handler:    h,
+		bindPorts:  make(map[net.Listener]int32),
 		maxReqSize: cfg.Network.MaxRequestSizeBytes,
 		closeCh:    make(chan struct{}),
 	}
@@ -61,6 +63,9 @@ func (s *Server) Start() error {
 			return fmt.Errorf("listen on %s: %w", addr, err)
 		}
 		s.listeners = append(s.listeners, ln)
+		if tcAddr, ok := ln.Addr().(*net.TCPAddr); ok {
+			s.bindPorts[ln] = int32(tcAddr.Port)
+		}
 		log.Printf("pocketkafka listening on %s", addr)
 	}
 
@@ -81,11 +86,47 @@ func (s *Server) Start() error {
 		log.Printf("pocketkafka TLS listening on %s", s.cfg.Security.TLS.Listen)
 	}
 
+	// Register advertised address per bind port: koneksi yang masuk lewat
+	// listener N dijawab metadata dengan advertised listener pasangannya,
+	// bukan satu alamat global (pencegah reconnect-storm klien docker yang
+	// diberi localhost padahal jalurnya jaringan internal).
+	for name, addr := range s.cfg.Listeners {
+		bindHost, bindPort, err := net.SplitHostPort(addr)
+		if err != nil {
+			continue
+		}
+		adv, ok := s.cfg.AdvertisedListeners[name]
+		if !ok || adv == "" {
+			adv = advertisedPrimary(s.cfg)
+		}
+		advHost, advPortStr, err := net.SplitHostPort(adv)
+		if err != nil {
+			continue
+		}
+		var advPort int64
+		fmt.Sscanf(strings.TrimSpace(advPortStr), "%d", &advPort)
+		_ = bindHost
+		s.handler.SetAdvertisedForPort(int32(advPort), advHost, int32(advPort))
+		_ = bindPort
+	}
+
 	for _, ln := range s.listeners {
 		s.wg.Add(1)
 		go s.acceptLoop(ln)
 	}
 	return nil
+}
+
+// advertisedPrimary returns the primary advertised address (same rule as the
+// cmd/server helpers, duplicated here to keep the server package decoupled).
+func advertisedPrimary(cfg *config.Config) string {
+	if a, ok := cfg.AdvertisedListeners["plain"]; ok && a != "" {
+		return a
+	}
+	for _, v := range cfg.AdvertisedListeners {
+		return v
+	}
+	return "localhost:9092"
 }
 
 func (s *Server) acceptLoop(ln net.Listener) {
@@ -158,7 +199,11 @@ func (s *Server) handleConn(conn net.Conn) {
 			}
 		}
 
-		respBody, err := s.handler.Handle(hdr.ApiKey, hdr.ApiVersion, body)
+		var localPort int32
+		if tcp, ok := conn.LocalAddr().(*net.TCPAddr); ok {
+			localPort = int32(tcp.Port)
+		}
+		respBody, err := s.handler.Handle(hdr.ApiKey, hdr.ApiVersion, body, localPort)
 		if err != nil {
 			log.Printf("request error key=%d v=%d: %v", hdr.ApiKey, hdr.ApiVersion, err)
 			return

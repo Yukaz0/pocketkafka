@@ -52,6 +52,7 @@ services:
     ports:
       - "9092:9092"   # Kafka API (host / luar container)
       - "29092:29092" # Kafka API (internal docker network)
+      - "6060:6060"   # pprof (debug profiling)
       - "8080:8080"   # Embedded Web UI Dashboard (Buka di browser)
       - "8081:8081"   # Embedded Schema Registry
       - "8082:8082"   # HTTP REST Proxy Gateway
@@ -65,6 +66,7 @@ services:
       - KAFKA_ENABLE_REST_PROXY=true
       - KAFKA_DATA_DIR=/var/lib/pocketkafka/data
       - KAFKA_LOG_LEVEL=info
+      - KAFKA_PPROF_LISTEN=0.0.0.0:6060
     volumes:
       - kafka_data:/var/lib/pocketkafka/data
     healthcheck:

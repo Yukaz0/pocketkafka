@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	_ "net/http/pprof" // registrasi handler /debug/pprof ke DefaultServeMux
 	"os"
 	"os/signal"
 	"sort"
@@ -63,6 +64,17 @@ func main() {
 
 	if err := srv.Start(); err != nil {
 		log.Fatalf("start server: %v", err)
+	}
+
+	// pprof (opsional, default off): KAFKA_PPROF_LISTEN=0.0.0.0:6060 untuk
+	// profiling CPU/heap broker tanpa deploy ulang.
+	if listen := os.Getenv("KAFKA_PPROF_LISTEN"); listen != "" {
+		go func() {
+			log.Printf("pocketkafka pprof on http://%s/debug/pprof/", listen)
+			if err := http.ListenAndServe(listen, nil); err != nil {
+				log.Printf("pprof error: %v", err)
+			}
+		}()
 	}
 
 	// Embedded Schema Registry (port 8081, Confluent-compatible).

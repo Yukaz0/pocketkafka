@@ -16,6 +16,13 @@ import (
 )
 
 // Handler routes API requests to the correct logic and encodes responses.
+// listenerAdvertised is the advertised host:port clients should use when
+// they connected through a specific listener (bind port).
+type listenerAdvertised struct {
+	host string
+	port int32
+}
+
 type Handler struct {
 	store          *storage.Store
 	coord          *coordinator.GroupManager
@@ -23,6 +30,10 @@ type Handler struct {
 	nodeID         int32
 	advertisedHost string
 	advertisedPort int32
+	// advertisedByBind maps a listener bind port to the advertised address
+	// for connections accepted through that listener (set once by the server
+	// during Start, before any request is served).
+	advertisedByBind map[int32]listenerAdvertised
 }
 
 // New builds a Handler bound to the given storage store and group coordinator.
@@ -66,9 +77,27 @@ func (h *Handler) supportedKeys() []protocol.ApiKeySupport {
 	}
 }
 
+// SetAdvertisedForPort registers the advertised address for connections
+// accepted through the listener bound to bindPort.
+func (h *Handler) SetAdvertisedForPort(bindPort int32, host string, port int32) {
+	if h.advertisedByBind == nil {
+		h.advertisedByBind = make(map[int32]listenerAdvertised)
+	}
+	h.advertisedByBind[bindPort] = listenerAdvertised{host: host, port: port}
+}
+
+// advertisedFor resolves the advertised address for a connection accepted
+// through bindPort, falling back to the primary advertised address.
+func (h *Handler) advertisedFor(bindPort int32) (string, int32) {
+	if a, ok := h.advertisedByBind[bindPort]; ok {
+		return a.host, a.port
+	}
+	return h.advertisedHost, h.advertisedPort
+}
+
 // Handle decodes and processes a single request body, returning the encoded
 // response body (the correlation ID is added by the server layer).
-func (h *Handler) Handle(apiKey, version int16, body []byte) ([]byte, error) {
+func (h *Handler) Handle(apiKey, version int16, body []byte, localPort int32) ([]byte, error) {
 	maxV := protocol.MaxVersion(apiKey)
 	if apiKey != protocol.APKApiVersions && (maxV < 0 || version > maxV || version < 0) {
 		return h.unsupportedVersion(apiKey, version)
@@ -78,7 +107,7 @@ func (h *Handler) Handle(apiKey, version int16, body []byte) ([]byte, error) {
 	case protocol.APKApiVersions:
 		return h.handleApiVersions(version, body)
 	case protocol.APKMetadata:
-		return h.handleMetadata(version, body)
+		return h.handleMetadata(version, body, localPort)
 	case protocol.APKProduce:
 		return h.handleProduce(version, body)
 	case protocol.APKFetch:
@@ -143,19 +172,23 @@ func (h *Handler) handleApiVersions(version int16, body []byte) ([]byte, error) 
 	return protocol.EncodeApiVersionsResponse(resp)
 }
 
-func (h *Handler) handleMetadata(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleMetadata(version int16, body []byte, localPort int32) ([]byte, error) {
 	req, err := protocol.DecodeMetadataRequest(version, body)
 	if err != nil {
 		return nil, err
 	}
+	// Advertise per-listener: klien yang masuk lewat listener tertentu harus
+	// mendapat alamat yang reachable dari jalur yang sama (mencegah klien
+	// docker-internal dial localhost yang tidak reachable).
+	host, port := h.advertisedFor(localPort)
 	resp := &protocol.MetadataResponse{
 		Version:                     version,
 		ThrottleTimeMs:              0,
 		ClusterAuthorizedOperations: -2147483648,
 		Brokers: []protocol.MetadataBroker{{
 			NodeID: h.nodeID,
-			Host:   h.advertisedHost,
-			Port:   h.advertisedPort,
+			Host:   host,
+			Port:   port,
 		}},
 		ClusterID:    &h.cfg.Broker.ClusterID,
 		ControllerID: h.nodeID,
