@@ -421,6 +421,14 @@ func (h *Handler) handleListOffsets(version int16, body []byte) ([]byte, error) 
 					rp.ErrorCode = protocol.ErrUnknownServerError
 				} else {
 					rp.Offset = off
+					if version == 0 {
+						// v0 tidak punya field Offset — hasil dibawa
+						// OldStyleOffsets. Tanpa ini klien legacy
+						// (librdkafka broker.version.fallback=0.9.0)
+						// membaca array null (-1) dan menyimpulkan
+						// offset END, jadi konsumen tidak pernah fetch.
+						rp.OldStyleOffsets = []int64{off}
+					}
 				}
 			}
 			rt.Partitions = append(rt.Partitions, rp)
