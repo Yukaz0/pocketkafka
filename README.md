@@ -222,15 +222,21 @@ pocketkafka/
 │   └── client/             # Zero-dependency Go client SDK
 ├── internal/
 │   ├── server/             # TCP socket server, dispatcher, SASL/SCRAM, TLS
-│   ├── handler/            # Core Kafka API handlers (0..42)
+│   ├── handler/            # Core Kafka API handlers (0..42) + dispatcher
 │   ├── storage/            # Commit log, sparse index, compaction, S3 tiered storage
-│   ├── coordinator/        # Consumer group coordinator, rebalance & offsets
-│   ├── schemaregistry/     # Embedded Confluent-compatible schema registry
+│   ├── coordinator/        # Consumer group coordinator, offsets (snapshot + WAL)
+│   ├── schemaregistry/     # Embedded Confluent-compatible subset, persisted
 │   ├── gateway/            # HTTP REST proxy & MQTT 3.1.1 bridge
+│   ├── authz/              # Shared ACL store + Authorizer (all ingresses)
+│   ├── httpauth/           # HTTP authentication/authorization middleware
+│   ├── atomicfile/         # Durable temp-file + fsync + rename helper
 │   ├── web/                # Embedded UI HTTP server & WebSocket live tail
-│   └── config/             # YAML & 12-factor environment loader
+│   └── config/             # YAML & 12-factor loader, normalizer and validator
 ├── web/                    # Frontend SPA source code & embedded assets
 │   └── dist/index.html     # Embedded single-file dashboard
+├── test/
+│   ├── interop/            # External client compatibility matrix & runners
+│   └── bench/              # Reproducible benchmark runner
 ├── deploy/                 # Docker Compose, Prometheus & Grafana configs
 ├── Dockerfile              # Ultra-lightweight multi-stage container (< 29MB)
 ├── go.mod                  # 100% clean - zero external requires
@@ -250,11 +256,49 @@ go test -v ./...
 
 Tests cover:
 - Binary protocol serialization/deserialization & Castagnoli CRC-32C.
+- Golden byte fixtures for every advertised API version (`pkg/protocol/golden_test.go`).
+- Fuzz targets for the frame, record-batch, compression and request decoders.
 - Commit log segment rolling, sparse index lookups, crash recovery & log compaction.
 - Idempotent producer sequence validation.
-- Consumer group rebalance state machine & offset commits.
+- Consumer group rebalance state machine & offset commits, plus offset WAL/retention.
 - Tiered storage against mock S3 server.
-- End-to-end client compatibility with `franz-go`, `kcat`, and official Kafka CLI tools.
+- End-to-end tests through the bundled SDK, including transactional fail-closed and restart recovery.
+
+### Client compatibility
+
+The `pocketkafka-native` client is covered by `go test ./internal/e2e` on every
+PR. The external matrix — `kcat`/librdkafka (modern and the `0.9.0` fallback),
+KafkaJS and franz-go — lives in [`test/interop`](test/interop/README.md) and is
+driven by `test/interop/run.sh` (nightly / on demand, requires Docker). The
+auditable list of what is supported vs planned is
+[`test/interop/compatibility.yaml`](test/interop/compatibility.yaml); treat that
+file, not this README, as the source of truth.
+
+---
+
+## 🔒 Production Hardening
+
+Behaviour that matters when you point real workloads at the broker:
+
+- **Configuration is validated before any listener opens.** `config.Load`
+  normalizes and validates ports, buffer/timeout limits, storage backend, flush
+  policy, and security settings; a bad value stops startup with the field name.
+- **The dashboard is never an auth bypass.** Enabling `security` also requires a
+  web login, and state-changing web API calls need an `Admin` ACL. The same ACL
+  store backs the REST proxy and the MQTT bridge.
+- **Durability is explicit.** `storage.flush_policy` selects `none` (OS decides),
+  `interval` (periodic fsync, default), or `request` (fsync before the produce
+  ack). Independent of that, `acks=-1` syncs when
+  `storage.sync_on_acks_all=true`. Under `acks=1` a record is in the local page
+  cache, not necessarily on disk.
+- **Transactional APIs fail closed.** `AddPartitionsToTxn`, `AddOffsetsToTxn`
+  and `EndTxn` (keys 24-26) are not advertised and answer `UNSUPPORTED_VERSION`;
+  the client SDK returns `ErrTransactionsUnsupported` rather than pretending a
+  commit succeeded. On a single node `acks=-1` means durable, not replicated.
+- **Schema Registry is an API-compatible subset.** Schemas and IDs persist across
+  restarts and `AVRO`/`JSON` payloads are syntax-checked, but full
+  backward/forward compatibility checking is not implemented; `PROTOBUF` is
+  rejected until a validator exists.
 
 ---
 

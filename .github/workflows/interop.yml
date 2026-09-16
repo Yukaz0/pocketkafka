@@ -1,0 +1,43 @@
+name: Interop
+
+# External-client interoperability. The native client check runs on every PR
+# that touches the protocol, handler, server, or coordinator; the full Docker
+# matrix (kcat/librdkafka, KafkaJS) runs on a schedule and on demand because it
+# is slow and needs the Docker daemon.
+on:
+  pull_request:
+    paths:
+      - 'pkg/protocol/**'
+      - 'internal/handler/**'
+      - 'internal/server/**'
+      - 'internal/coordinator/**'
+      - 'test/interop/**'
+      - '.github/workflows/interop.yml'
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Native client interop
+        run: test/interop/run.sh
+
+  external:
+    # Only the nightly/dispatch runs exercise the Docker matrix.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Full external client matrix
+        env:
+          INTEROP_DOCKER: '1'
+        run: test/interop/run.sh

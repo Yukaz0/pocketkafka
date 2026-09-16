@@ -28,11 +28,11 @@ func main() {
 	// Metadata v8: topics array (compact? tidak - v8 classic: int32 array),
 	// null = -1, lalu bool aut creation + 2 bool authorized ops.
 	body := []byte{}
-	body = append(body, 0xff, 0xff, 0xff, 0xff) // null topics array
-	body = append(body, 0x01)                   // allow auto topic creation = true
-	body = append(body, 0x01)                   // include cluster authorized ops = true
-	body = append(body, 0x01)                   // include topic authorized ops = true
-	resp, err := h.Handle(3, 8, body, 29092)    // Metadata v8
+	body = append(body, 0xff, 0xff, 0xff, 0xff)                                    // null topics array
+	body = append(body, 0x01)                                                      // allow auto topic creation = true
+	body = append(body, 0x01)                                                      // include cluster authorized ops = true
+	body = append(body, 0x01)                                                      // include topic authorized ops = true
+	resp, err := h.Handle(3, 8, body, handler.RequestContext{ListenerPort: 29092}) // Metadata v8
 	if err != nil {
 		panic(err)
 	}

@@ -6,6 +6,7 @@ on:
   pull_request:
 
 jobs:
+  # Fast gate: formatting, build, vet, unit/integration tests, race detector.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -15,6 +16,9 @@ jobs:
         with:
           go-version: '1.26'
 
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+
       - name: Build
         run: go build ./...
 
@@ -23,3 +27,48 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      - name: Race
+        run: go test -race ./...
+
+  # Fuzz seeds run on every PR (short); the corpus is explored longer nightly.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Fuzz seed corpus
+        run: go test ./pkg/protocol -run=Fuzz -count=1
+
+      - name: Fuzz frame decoder
+        run: go test ./pkg/protocol -run=XXX -fuzz=FuzzReadRequestFrame -fuzztime=20s
+
+      - name: Fuzz record batch decoder
+        run: go test ./pkg/protocol -run=XXX -fuzz=FuzzDecodeRecordBatch -fuzztime=20s
+
+  # Coverage floor plus vulnerability scan.
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Coverage
+        run: |
+          go test -coverpkg=./... -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -1
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
+          echo "total coverage: ${total}%"
+          awk -v c="$total" 'BEGIN { if (c+0 < 51.0) { printf "coverage %.1f%% below floor 51%%\n", c; exit 1 } }'
+
+      - name: Vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...

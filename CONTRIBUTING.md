@@ -24,6 +24,26 @@ go build -o bin/pkctl ./cmd/kctl
 ./bin/pocketkafka -config config/config.yaml
 ```
 
+### Quality gates
+
+CI runs the same commands you can run locally. Please make sure they pass before
+opening a PR:
+
+```bash
+test -z "$(gofmt -l .)"          # formatting
+go build ./...
+go vet ./...
+go test ./...
+go test -race ./...
+go test ./pkg/protocol -run=Fuzz -count=1      # fuzz seed corpus
+go test -coverpkg=./... -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out | tail -1     # total coverage must stay >= 51%
+```
+
+Wire-format changes additionally need updated golden fixtures
+(`pkg/protocol/golden_test.go`). External client coverage lives in
+`test/interop/`; see its README before editing the compatibility matrix.
+
 ---
 
 ## 📐 Code Guidelines

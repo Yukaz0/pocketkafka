@@ -8,14 +8,9 @@ import (
 	"os"
 )
 
-// Init configures slog as the default logger. level is one of
-// "debug", "info", "warn", "error"; format is "json" or "text".
-// sink, when non-nil, receives a copy of every formatted log line.
-func Init(level, format string) {
-	InitWithSink(level, format, nil)
-}
-
-// InitWithSink behaves like Init but tees every record into sink.
+// InitWithSink configures slog as the default logger and tees every record into
+// sink (when non-nil). level is one of "debug", "info", "warn", "error"; format
+// is "json" or "text".
 func InitWithSink(level, format string, sink io.Writer) {
 	var lvl slog.Level
 	switch level {
