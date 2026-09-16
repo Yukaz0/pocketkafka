@@ -5,6 +5,7 @@ package schemaregistry
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -20,21 +21,70 @@ type schemaEntry struct {
 	SchemaType string
 }
 
-// Registry is an in-memory schema store.
+// Registry is a schema store. When constructed with Open it persists every
+// registration to disk and reloads it on restart; New returns a purely
+// in-memory registry.
 type Registry struct {
 	mu        sync.RWMutex
 	nextID    int
 	bySubject map[string][]*schemaEntry // subject -> versions (ascending)
 	byID      map[int]*schemaEntry
+	path      string // empty for in-memory
 }
 
-// New returns an empty registry.
+// New returns an empty in-memory registry.
 func New() *Registry {
 	return &Registry{
 		nextID:    1,
 		bySubject: make(map[string][]*schemaEntry),
 		byID:      make(map[int]*schemaEntry),
 	}
+}
+
+// Open loads (or creates) a file-backed registry at path. A missing file yields
+// an empty registry; a corrupt file is an error so a damaged store is never
+// silently treated as empty.
+func Open(path string) (*Registry, error) {
+	r := New()
+	r.path = path
+	if path == "" {
+		return r, nil
+	}
+	st, err := loadState(path)
+	if err != nil {
+		return nil, err
+	}
+	if st == nil {
+		return r, nil
+	}
+	r.nextID = st.NextID
+	if r.nextID < 1 {
+		r.nextID = 1
+	}
+	for _, e := range st.Entries {
+		entry := &schemaEntry{ID: e.ID, Subject: e.Subject, Version: e.Version, Schema: e.Schema, SchemaType: e.SchemaType}
+		r.bySubject[e.Subject] = append(r.bySubject[e.Subject], entry)
+		r.byID[e.ID] = entry
+	}
+	return r, nil
+}
+
+// persist writes the whole registry state atomically. Callers must not hold mu.
+func (r *Registry) persist() error {
+	if r.path == "" {
+		return nil
+	}
+	r.mu.RLock()
+	st := persistedState{NextID: r.nextID}
+	for _, entries := range r.bySubject {
+		for _, e := range entries {
+			st.Entries = append(st.Entries, persistedEntry{
+				ID: e.ID, Subject: e.Subject, Version: e.Version, Schema: e.Schema, SchemaType: e.SchemaType,
+			})
+		}
+	}
+	r.mu.RUnlock()
+	return saveState(r.path, st)
 }
 
 // ListSubjects returns the sorted names of all registered subjects.
@@ -115,6 +165,10 @@ func (r *Registry) register(w http.ResponseWriter, req *http.Request) {
 	if schemaType == "" {
 		schemaType = "AVRO"
 	}
+	if err := validateSchema(schemaType, body.Schema); err != nil {
+		writeJSON(w, 422, map[string]string{"error_code": "422", "message": err.Error()})
+		return
+	}
 
 	r.mu.Lock()
 	// Deduplicate: if the exact schema already exists for the subject, return it.
@@ -134,7 +188,35 @@ func (r *Registry) register(w http.ResponseWriter, req *http.Request) {
 	r.byID[id] = entry
 	r.mu.Unlock()
 
+	if err := r.persist(); err != nil {
+		// The schema is in memory but not durable; surface this rather than
+		// acknowledging a registration that would vanish on restart.
+		writeJSON(w, 500, map[string]string{"error_code": "500", "message": "persist schema: " + err.Error()})
+		return
+	}
+
 	writeJSON(w, 200, map[string]int{"id": id})
+}
+
+// validateSchema rejects empty, syntactically invalid, or unsupported schemas
+// instead of storing any string. Avro schemas are JSON documents, so both AVRO
+// and JSON are checked with the JSON parser. PROTOBUF has no validator here, so
+// it is rejected rather than accepted unvalidated.
+func validateSchema(schemaType, schema string) error {
+	if strings.TrimSpace(schema) == "" {
+		return fmt.Errorf("schema is empty")
+	}
+	switch schemaType {
+	case "AVRO", "JSON":
+		if !json.Valid([]byte(schema)) {
+			return fmt.Errorf("schema is not valid JSON for type %s", schemaType)
+		}
+		return nil
+	case "PROTOBUF":
+		return fmt.Errorf("schemaType PROTOBUF is not supported (no validator available)")
+	default:
+		return fmt.Errorf("unsupported schemaType %q", schemaType)
+	}
 }
 
 func (r *Registry) listVersions(w http.ResponseWriter, req *http.Request) {
