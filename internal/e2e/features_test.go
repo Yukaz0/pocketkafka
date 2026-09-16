@@ -135,6 +135,124 @@ func TestGroupAdminAPIs(t *testing.T) {
 	}
 }
 
+// TestTransactionAPIsFailClosed proves the broker neither advertises nor
+// answers the transactional APIs (Milestone 1 / decision D1). A direct request
+// must never come back as success, and the working paths (plain produce,
+// idempotent produce) must keep working.
+func TestTransactionAPIsFailClosed(t *testing.T) {
+	kc, stop := startBroker(t)
+	defer stop()
+
+	// 1. ApiVersions must not list keys 24, 25, 26.
+	respBody, err := kcRawRoundTrip(kc, protocol.APKApiVersions, 0, nil)
+	if err != nil {
+		t.Fatalf("ApiVersions round trip: %v", err)
+	}
+	av, err := protocol.DecodeApiVersionsResponse(0, respBody)
+	if err != nil {
+		t.Fatalf("decode ApiVersions: %v", err)
+	}
+	advertised := map[int16]bool{}
+	for _, k := range av.ApiKeys {
+		advertised[k.ApiKey] = true
+	}
+	for _, key := range protocol.DisabledTransactionAPIKeys {
+		if advertised[key] {
+			t.Errorf("ApiVersions advertises disabled transactional key %d", key)
+		}
+	}
+
+	// 2. Direct requests must report UNSUPPORTED_VERSION, never ErrNone.
+	txnAdd, _ := protocol.EncodeAddPartitionsToTxnRequest(&protocol.AddPartitionsToTxnRequest{
+		TransactionalID: "txn-1", ProducerID: 1, ProducerEpoch: 0,
+		Topics: []protocol.AddPartitionsToTxnRequestTopic{{Topic: "t", Partitions: []int32{0}}},
+	})
+	body, err := kcRawRoundTrip(kc, protocol.APKAddPartitionsToTxn, 1, txnAdd)
+	if err != nil {
+		t.Fatalf("AddPartitionsToTxn round trip: %v", err)
+	}
+	ap, err := protocol.DecodeAddPartitionsToTxnResponse(1, body)
+	if err != nil {
+		t.Fatalf("decode AddPartitionsToTxn: %v", err)
+	}
+	if ap.ErrorCode == protocol.ErrNone {
+		t.Error("AddPartitionsToTxn returned ErrNone (false success)")
+	}
+
+	offsetsReq, _ := protocol.EncodeAddOffsetsToTxnRequest(&protocol.AddOffsetsToTxnRequest{
+		TransactionalID: "txn-1", ProducerID: 1, ProducerEpoch: 0, GroupID: "g",
+	})
+	body, err = kcRawRoundTrip(kc, protocol.APKAddOffsetsToTxn, 1, offsetsReq)
+	if err != nil {
+		t.Fatalf("AddOffsetsToTxn round trip: %v", err)
+	}
+	ao, err := protocol.DecodeAddOffsetsToTxnResponse(1, body)
+	if err != nil {
+		t.Fatalf("decode AddOffsetsToTxn: %v", err)
+	}
+	if ao.ErrorCode == protocol.ErrNone {
+		t.Error("AddOffsetsToTxn returned ErrNone (false success)")
+	}
+
+	endReq, _ := protocol.EncodeEndTxnRequest(&protocol.EndTxnRequest{
+		TransactionalID: "txn-1", ProducerID: 1, ProducerEpoch: 0, Committed: true,
+	})
+	body, err = kcRawRoundTrip(kc, protocol.APKEndTxn, 1, endReq)
+	if err != nil {
+		t.Fatalf("EndTxn round trip: %v", err)
+	}
+	et, err := protocol.DecodeEndTxnResponse(1, body)
+	if err != nil {
+		t.Fatalf("decode EndTxn: %v", err)
+	}
+	if et.ErrorCode == protocol.ErrNone {
+		t.Error("EndTxn returned ErrNone (false success)")
+	}
+
+	// 3. Non-transactional produce still succeeds.
+	if err := kc.CreateTopic("txn-check", 1); err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	prod := client.NewProducer(kc, client.DefaultProducerConfig())
+	defer prod.Close()
+	off, err := prod.SendSync(context.Background(), &client.Message{Topic: "txn-check", Value: []byte("v")})
+	if err != nil || off != 0 {
+		t.Fatalf("non-transactional produce off=%d err=%v", off, err)
+	}
+
+	// 4. Idempotent producer still works.
+	icfg := client.DefaultProducerConfig()
+	icfg.Idempotent = true
+	ip := client.NewProducer(kc, icfg)
+	defer ip.Close()
+	ioff, err := ip.SendSync(context.Background(), &client.Message{Topic: "txn-check", Value: []byte("i")})
+	if err != nil || ioff != 1 {
+		t.Fatalf("idempotent produce off=%d err=%v", ioff, err)
+	}
+}
+
+// TestTransactionClientMethodsFailClosed verifies the client SDK returns a
+// clear sentinel instead of pretending a transaction started or committed.
+func TestTransactionClientMethodsFailClosed(t *testing.T) {
+	kc, stop := startBroker(t)
+	defer stop()
+
+	cfg := client.DefaultProducerConfig()
+	cfg.TransactionalID = "txn-client"
+	p := client.NewProducer(kc, cfg)
+	defer p.Close()
+
+	if err := p.BeginTransaction(); err != client.ErrTransactionsUnsupported {
+		t.Errorf("BeginTransaction = %v, want ErrTransactionsUnsupported", err)
+	}
+	if err := p.CommitTransaction(); err != client.ErrTransactionsUnsupported {
+		t.Errorf("CommitTransaction = %v, want ErrTransactionsUnsupported", err)
+	}
+	if err := p.AbortTransaction(); err != client.ErrTransactionsUnsupported {
+		t.Errorf("AbortTransaction = %v, want ErrTransactionsUnsupported", err)
+	}
+}
+
 // TestIdempotentProduce verifies InitProducerId + sequence validation (Fitur 4).
 func TestIdempotentProduce(t *testing.T) {
 	kc, stop := startBroker(t)

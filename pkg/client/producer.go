@@ -27,11 +27,11 @@ type Producer struct {
 
 	accum *RecordAccumulator
 
-	// Idempotent / transactional state.
+	// Idempotent producer state. Transactional state is deliberately absent:
+	// the broker does not implement transactions (see ErrTransactionsUnsupported).
 	producerID    int64
 	producerEpoch int16
 	sequence      int32 // per-partition base sequence (single-partition broker)
-	txnActive     bool
 	mu            sync.Mutex
 }
 
@@ -216,61 +216,34 @@ func (p *Producer) encodeBatch(msgs []*Message) ([]byte, error) {
 	return protocol.EncodeRecordBatch(b)
 }
 
-// BeginTransaction starts a new transactional session.
+// BeginTransaction always fails with ErrTransactionsUnsupported. The broker
+// does not implement transactional semantics, so the producer must not pretend
+// a transaction started.
 func (p *Producer) BeginTransaction() error {
 	if p.cfg.TransactionalID == "" {
 		return errNoTransaction
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.txnActive = true
-	p.sequence = 0
-	return nil
+	return ErrTransactionsUnsupported
 }
 
-// CommitTransaction ends the transaction successfully (EndTxn, committed=true).
+// CommitTransaction always fails with ErrTransactionsUnsupported (see
+// BeginTransaction).
 func (p *Producer) CommitTransaction() error {
 	return p.endTransaction(true)
 }
 
-// AbortTransaction rolls the transaction back (EndTxn, committed=false).
+// AbortTransaction always fails with ErrTransactionsUnsupported (see
+// BeginTransaction).
 func (p *Producer) AbortTransaction() error {
 	return p.endTransaction(false)
 }
 
 func (p *Producer) endTransaction(commit bool) error {
+	_ = commit
 	if p.cfg.TransactionalID == "" {
 		return errNoTransaction
 	}
-	if p.accum != nil {
-		p.accum.Flush(context.Background())
-	}
-	req := &protocol.EndTxnRequest{
-		Version:         p.client.version(protocol.APKEndTxn),
-		TransactionalID: p.cfg.TransactionalID,
-		ProducerID:      p.producerID,
-		ProducerEpoch:   p.producerEpoch,
-		Committed:       commit,
-	}
-	body, err := protocol.EncodeEndTxnRequest(req)
-	if err != nil {
-		return err
-	}
-	respBody, err := p.client.roundTrip(protocol.APKEndTxn, req.Version, body)
-	if err != nil {
-		return err
-	}
-	resp, err := protocol.DecodeEndTxnResponse(req.Version, respBody)
-	if err != nil {
-		return err
-	}
-	if resp.ErrorCode != protocol.ErrNone {
-		return &KafkaError{Code: resp.ErrorCode}
-	}
-	p.mu.Lock()
-	p.txnActive = false
-	p.mu.Unlock()
-	return nil
+	return ErrTransactionsUnsupported
 }
 
 // Close flushes pending batches and releases resources held by the producer.

@@ -69,8 +69,7 @@ func defaultAPIVersions() map[int16]int16 {
 		protocol.APKLeaveGroup, protocol.APKSyncGroup, protocol.APKApiVersions,
 		protocol.APKCreateTopics, protocol.APKDeleteTopics,
 		protocol.APKDescribeGroups, protocol.APKListGroups, protocol.APKDeleteGroups,
-		protocol.APKInitProducerID, protocol.APKAddPartitionsToTxn,
-		protocol.APKAddOffsetsToTxn, protocol.APKEndTxn,
+		protocol.APKInitProducerID,
 	} {
 		out[k] = protocol.MaxVersion(k)
 	}

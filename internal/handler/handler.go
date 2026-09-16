@@ -9,11 +9,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/authz"
 	"github.com/Yukaz0/pocketkafka/internal/config"
 	"github.com/Yukaz0/pocketkafka/internal/coordinator"
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
+
+// RequestContext carries the identity and transport details of one request from
+// the connection layer into the handlers, so authorization decisions can be made
+// against the authenticated principal rather than an anonymous caller.
+type RequestContext struct {
+	Principal    string
+	ListenerPort int32
+	ClientID     string
+	ClientAddr   string
+}
 
 // Handler routes API requests to the correct logic and encodes responses.
 // listenerAdvertised is the advertised host:port clients should use when
@@ -34,6 +45,9 @@ type Handler struct {
 	// for connections accepted through that listener (set once by the server
 	// during Start, before any request is served).
 	advertisedByBind map[int32]listenerAdvertised
+	// authorizer decides every read/write/admin permission. It defaults to
+	// allow-all so security-disabled deployments keep their old behaviour.
+	authorizer authz.Authorizer
 }
 
 // New builds a Handler bound to the given storage store and group coordinator.
@@ -45,110 +59,28 @@ func New(store *storage.Store, coord *coordinator.GroupManager, cfg *config.Conf
 		nodeID:         nodeID,
 		advertisedHost: host,
 		advertisedPort: port,
+		authorizer:     authz.AllowAllAuthorizer{},
 	}
 }
 
-// supportedKeys returns the ApiVersions table advertised by this broker.
-func (h *Handler) supportedKeys() []protocol.ApiKeySupport {
-	return []protocol.ApiKeySupport{
-		{ApiKey: protocol.APKProduce, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKProduce)},
-		{ApiKey: protocol.APKFetch, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKFetch)},
-		{ApiKey: protocol.APKListOffsets, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKListOffsets)},
-		{ApiKey: protocol.APKMetadata, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKMetadata)},
-		{ApiKey: protocol.APKOffsetCommit, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKOffsetCommit)},
-		{ApiKey: protocol.APKOffsetFetch, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKOffsetFetch)},
-		{ApiKey: protocol.APKFindCoordinator, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKFindCoordinator)},
-		{ApiKey: protocol.APKJoinGroup, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKJoinGroup)},
-		{ApiKey: protocol.APKHeartbeat, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKHeartbeat)},
-		{ApiKey: protocol.APKLeaveGroup, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKLeaveGroup)},
-		{ApiKey: protocol.APKSyncGroup, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKSyncGroup)},
-		{ApiKey: protocol.APKDescribeGroups, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKDescribeGroups)},
-		{ApiKey: protocol.APKListGroups, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKListGroups)},
-		{ApiKey: protocol.APKSaslHandshake, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKSaslHandshake)},
-		{ApiKey: protocol.APKApiVersions, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKApiVersions)},
-		{ApiKey: protocol.APKCreateTopics, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKCreateTopics)},
-		{ApiKey: protocol.APKDeleteTopics, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKDeleteTopics)},
-		{ApiKey: protocol.APKInitProducerID, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKInitProducerID)},
-		{ApiKey: protocol.APKAddPartitionsToTxn, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKAddPartitionsToTxn)},
-		{ApiKey: protocol.APKAddOffsetsToTxn, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKAddOffsetsToTxn)},
-		{ApiKey: protocol.APKEndTxn, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKEndTxn)},
-		{ApiKey: protocol.APKSaslAuthenticate, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKSaslAuthenticate)},
-		{ApiKey: protocol.APKDeleteGroups, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKDeleteGroups)},
+// WithAuthorizer installs the authorization policy used for every request.
+// Passing nil restores allow-all.
+func (h *Handler) WithAuthorizer(a authz.Authorizer) *Handler {
+	if a == nil {
+		a = authz.AllowAllAuthorizer{}
 	}
+	h.authorizer = a
+	return h
 }
 
-// SetAdvertisedForPort registers the advertised address for connections
-// accepted through the listener bound to bindPort.
-func (h *Handler) SetAdvertisedForPort(bindPort int32, host string, port int32) {
-	if h.advertisedByBind == nil {
-		h.advertisedByBind = make(map[int32]listenerAdvertised)
+// authorize reports whether ctx.Principal may perform op on res. An empty
+// principal is treated as anonymous.
+func (h *Handler) authorize(ctx RequestContext, op authz.Operation, res authz.Resource) error {
+	principal := ctx.Principal
+	if principal == "" {
+		principal = authz.AnonymPrincipal
 	}
-	h.advertisedByBind[bindPort] = listenerAdvertised{host: host, port: port}
-}
-
-// advertisedFor resolves the advertised address for a connection accepted
-// through bindPort, falling back to the primary advertised address.
-func (h *Handler) advertisedFor(bindPort int32) (string, int32) {
-	if a, ok := h.advertisedByBind[bindPort]; ok {
-		return a.host, a.port
-	}
-	return h.advertisedHost, h.advertisedPort
-}
-
-// Handle decodes and processes a single request body, returning the encoded
-// response body (the correlation ID is added by the server layer).
-func (h *Handler) Handle(apiKey, version int16, body []byte, localPort int32) ([]byte, error) {
-	maxV := protocol.MaxVersion(apiKey)
-	if apiKey != protocol.APKApiVersions && (maxV < 0 || version > maxV || version < 0) {
-		return h.unsupportedVersion(apiKey, version)
-	}
-
-	switch apiKey {
-	case protocol.APKApiVersions:
-		return h.handleApiVersions(version, body)
-	case protocol.APKMetadata:
-		return h.handleMetadata(version, body, localPort)
-	case protocol.APKProduce:
-		return h.handleProduce(version, body)
-	case protocol.APKFetch:
-		return h.handleFetch(version, body)
-	case protocol.APKListOffsets:
-		return h.handleListOffsets(version, body)
-	case protocol.APKCreateTopics:
-		return h.handleCreateTopics(version, body)
-	case protocol.APKDeleteTopics:
-		return h.handleDeleteTopics(version, body)
-	case protocol.APKFindCoordinator:
-		return h.handleFindCoordinator(version, body, localPort)
-	case protocol.APKJoinGroup:
-		return h.handleJoinGroup(version, body)
-	case protocol.APKSyncGroup:
-		return h.handleSyncGroup(version, body)
-	case protocol.APKHeartbeat:
-		return h.handleHeartbeat(version, body)
-	case protocol.APKLeaveGroup:
-		return h.handleLeaveGroup(version, body)
-	case protocol.APKOffsetCommit:
-		return h.handleOffsetCommit(version, body)
-	case protocol.APKOffsetFetch:
-		return h.handleOffsetFetch(version, body)
-	case protocol.APKListGroups:
-		return h.handleListGroups(version, body)
-	case protocol.APKDescribeGroups:
-		return h.handleDescribeGroups(version, body)
-	case protocol.APKDeleteGroups:
-		return h.handleDeleteGroups(version, body)
-	case protocol.APKInitProducerID:
-		return h.handleInitProducerID(version, body)
-	case protocol.APKAddPartitionsToTxn:
-		return h.handleAddPartitionsToTxn(version, body)
-	case protocol.APKAddOffsetsToTxn:
-		return h.handleAddOffsetsToTxn(version, body)
-	case protocol.APKEndTxn:
-		return h.handleEndTxn(version, body)
-	default:
-		return nil, fmt.Errorf("unsupported api key %d", apiKey)
-	}
+	return h.authorizer.Authorize(principal, op, res)
 }
 
 func (h *Handler) handleApiVersions(version int16, body []byte) ([]byte, error) {
@@ -238,7 +170,7 @@ func (h *Handler) handleMetadata(version int16, body []byte, localPort int32) ([
 	return protocol.EncodeMetadataResponse(resp)
 }
 
-func (h *Handler) handleProduce(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleProduce(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeProduceRequest(version, body)
 	if err != nil {
 		return nil, err
@@ -246,13 +178,26 @@ func (h *Handler) handleProduce(version int16, body []byte) ([]byte, error) {
 	resp := &protocol.ProduceResponse{Version: version, ThrottleTimeMs: 0}
 	now := time.Now().UnixMilli()
 
+	// Durability contract: flush_policy=request fsyncs before the ack, and a
+	// full-ack (acks=-1) does too when sync_on_acks_all is set.
+	syncBeforeAck := h.cfg.Storage.FlushPolicy == config.FlushPolicyRequest ||
+		(req.Acks == -1 && h.cfg.Storage.SyncOnAcksAll)
+
 	for _, t := range req.Topics {
 		rt := protocol.ProduceResponseTopic{Topic: t.Topic}
+		allowed := h.authorize(ctx, authz.OpWrite, authz.Resource{Type: authz.ResourceTopic, Name: t.Topic}) == nil
 		for _, p := range t.Partitions {
 			rp := protocol.ProduceResponsePartition{
 				Partition:     p.Partition,
 				ErrorCode:     protocol.ErrNone,
 				LogAppendTime: now,
+			}
+			if !allowed {
+				// Denied before any write so the log is untouched.
+				rp.ErrorCode = protocol.ErrTopicAuthorizationFailed
+				rp.BaseOffset = -1
+				rt.Partitions = append(rt.Partitions, rp)
+				continue
 			}
 			part := h.store.GetPartition(t.Topic, p.Partition)
 			if part == nil {
@@ -268,7 +213,7 @@ func (h *Handler) handleProduce(version int16, body []byte) ([]byte, error) {
 				continue
 			}
 
-			base, aerr := h.appendToPartition(part, p.Records)
+			base, aerr := h.appendToPartition(part, p.Records, syncBeforeAck)
 			if aerr != nil {
 				rp.ErrorCode = protocol.ErrCorruptMessage
 				rp.BaseOffset = -1
@@ -286,7 +231,7 @@ func (h *Handler) handleProduce(version int16, body []byte) ([]byte, error) {
 // request. It handles compression (decompressing the batch before storing it so
 // the log always stores uncompressed payloads) and idempotent producer
 // sequence validation.
-func (h *Handler) appendToPartition(part *storage.Partition, raw []byte) (int64, error) {
+func (h *Handler) appendToPartition(part *storage.Partition, raw []byte, sync bool) (int64, error) {
 	if len(raw) < 61 {
 		return -1, fmt.Errorf("record batch too short")
 	}
@@ -307,9 +252,9 @@ func (h *Handler) appendToPartition(part *storage.Partition, raw []byte) (int64,
 	}
 	if batch.ProducerID >= 0 {
 		// Idempotent producer path: sequence validation + dedup.
-		return part.AppendIdempotent(batch.ProducerID, batch.ProducerEpoch, batch.BaseSequence, raw)
+		return part.AppendIdempotentSynced(batch.ProducerID, batch.ProducerEpoch, batch.BaseSequence, raw, sync)
 	}
-	return part.Append(raw)
+	return part.AppendSynced(raw, sync)
 }
 
 // rebuildBatch re-encodes a RecordBatch with decompressed records and a zeroed
@@ -357,7 +302,7 @@ func rebuildBatch(raw []byte, records []byte) []byte {
 	return out
 }
 
-func (h *Handler) handleFetch(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleFetch(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeFetchRequest(version, body)
 	if err != nil {
 		return nil, err
@@ -366,12 +311,18 @@ func (h *Handler) handleFetch(version int16, body []byte) ([]byte, error) {
 
 	for _, t := range req.Topics {
 		rt := protocol.FetchResponseTopic{Topic: t.Topic}
+		allowed := h.authorize(ctx, authz.OpRead, authz.Resource{Type: authz.ResourceTopic, Name: t.Topic}) == nil
 		for _, p := range t.Partitions {
 			rp := protocol.FetchResponsePartition{
 				Partition:        p.Partition,
 				HighWatermark:    0,
 				LastStableOffset: -1,
 				LogStartOffset:   0,
+			}
+			if !allowed {
+				rp.ErrorCode = protocol.ErrTopicAuthorizationFailed
+				rt.Partitions = append(rt.Partitions, rp)
+				continue
 			}
 			part := h.store.GetPartition(t.Topic, p.Partition)
 			if part == nil {
@@ -396,7 +347,7 @@ func (h *Handler) handleFetch(version int16, body []byte) ([]byte, error) {
 	return protocol.EncodeFetchResponse(resp)
 }
 
-func (h *Handler) handleListOffsets(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleListOffsets(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeListOffsetsRequest(version, body)
 	if err != nil {
 		return nil, err
@@ -404,6 +355,7 @@ func (h *Handler) handleListOffsets(version int16, body []byte) ([]byte, error) 
 	resp := &protocol.ListOffsetsResponse{Version: version, ThrottleTimeMs: 0}
 	for _, t := range req.Topics {
 		rt := protocol.ListOffsetsResponseTopic{Topic: t.Topic}
+		allowed := h.authorize(ctx, authz.OpRead, authz.Resource{Type: authz.ResourceTopic, Name: t.Topic}) == nil
 		for _, p := range t.Partitions {
 			rp := protocol.ListOffsetsResponsePartition{
 				Partition:   p.Partition,
@@ -411,6 +363,11 @@ func (h *Handler) handleListOffsets(version int16, body []byte) ([]byte, error) 
 				Timestamp:   -1,
 				Offset:      -1,
 				LeaderEpoch: -1,
+			}
+			if !allowed {
+				rp.ErrorCode = protocol.ErrTopicAuthorizationFailed
+				rt.Partitions = append(rt.Partitions, rp)
+				continue
 			}
 			part := h.store.GetPartition(t.Topic, p.Partition)
 			if part == nil {
@@ -438,7 +395,7 @@ func (h *Handler) handleListOffsets(version int16, body []byte) ([]byte, error) 
 	return protocol.EncodeListOffsetsResponse(resp)
 }
 
-func (h *Handler) handleCreateTopics(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleCreateTopics(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeCreateTopicsRequest(version, body)
 	if err != nil {
 		return nil, err
@@ -446,6 +403,11 @@ func (h *Handler) handleCreateTopics(version int16, body []byte) ([]byte, error)
 	resp := &protocol.CreateTopicsResponse{Version: version, ThrottleTimeMs: 0}
 	for _, t := range req.Topics {
 		ct := protocol.CreateTopicsResponseTopic{Topic: t.Topic, ErrorCode: protocol.ErrNone}
+		if err := h.authorize(ctx, authz.OpAdmin, authz.Resource{Type: authz.ResourceTopic, Name: t.Topic}); err != nil {
+			ct.ErrorCode = protocol.ErrTopicAuthorizationFailed
+			resp.Topics = append(resp.Topics, ct)
+			continue
+		}
 		if req.ValidateOnly {
 			resp.Topics = append(resp.Topics, ct)
 			continue
@@ -469,7 +431,7 @@ func (h *Handler) handleCreateTopics(version int16, body []byte) ([]byte, error)
 	return protocol.EncodeCreateTopicsResponse(resp)
 }
 
-func (h *Handler) handleDeleteTopics(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleDeleteTopics(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeDeleteTopicsRequest(version, body)
 	if err != nil {
 		return nil, err
@@ -477,6 +439,11 @@ func (h *Handler) handleDeleteTopics(version int16, body []byte) ([]byte, error)
 	resp := &protocol.DeleteTopicsResponse{Version: version, ThrottleTimeMs: 0}
 	for _, name := range req.TopicNames {
 		dt := protocol.DeleteTopicsResponseTopic{Name: name, ErrorCode: protocol.ErrNone}
+		if err := h.authorize(ctx, authz.OpAdmin, authz.Resource{Type: authz.ResourceTopic, Name: name}); err != nil {
+			dt.ErrorCode = protocol.ErrTopicAuthorizationFailed
+			resp.Topics = append(resp.Topics, dt)
+			continue
+		}
 		if h.store.GetTopic(name) == nil {
 			dt.ErrorCode = protocol.ErrUnknownTopicOrPartition
 		} else if err := h.store.DeleteTopic(name); err != nil {
@@ -499,55 +466,97 @@ func (h *Handler) handleFindCoordinator(version int16, body []byte, localPort in
 	return protocol.EncodeFindCoordinatorResponse(resp)
 }
 
-func (h *Handler) handleJoinGroup(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleJoinGroup(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeJoinGroupRequest(version, body)
 	if err != nil {
 		return nil, err
+	}
+	if err := h.authorize(ctx, authz.OpRead, authz.Resource{Type: authz.ResourceGroup, Name: req.Group}); err != nil {
+		// Denied before the coordinator sees the request, so no group state
+		// is created or mutated.
+		return protocol.EncodeJoinGroupResponse(&protocol.JoinGroupResponse{
+			Version: version, ErrorCode: protocol.ErrGroupAuthorizationFailed,
+		})
 	}
 	resp := h.coord.JoinGroup(req)
 	return protocol.EncodeJoinGroupResponse(resp)
 }
 
-func (h *Handler) handleSyncGroup(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleSyncGroup(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeSyncGroupRequest(version, body)
 	if err != nil {
 		return nil, err
+	}
+	if err := h.authorize(ctx, authz.OpRead, authz.Resource{Type: authz.ResourceGroup, Name: req.Group}); err != nil {
+		return protocol.EncodeSyncGroupResponse(&protocol.SyncGroupResponse{
+			Version: version, ErrorCode: protocol.ErrGroupAuthorizationFailed,
+		})
 	}
 	resp := h.coord.SyncGroup(req)
 	return protocol.EncodeSyncGroupResponse(resp)
 }
 
-func (h *Handler) handleHeartbeat(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleHeartbeat(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeHeartbeatRequest(version, body)
 	if err != nil {
 		return nil, err
+	}
+	if err := h.authorize(ctx, authz.OpRead, authz.Resource{Type: authz.ResourceGroup, Name: req.Group}); err != nil {
+		return protocol.EncodeHeartbeatResponse(&protocol.HeartbeatResponse{
+			Version: version, ErrorCode: protocol.ErrGroupAuthorizationFailed,
+		})
 	}
 	resp := h.coord.Heartbeat(req)
 	return protocol.EncodeHeartbeatResponse(resp)
 }
 
-func (h *Handler) handleLeaveGroup(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleLeaveGroup(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeLeaveGroupRequest(version, body)
 	if err != nil {
 		return nil, err
+	}
+	if err := h.authorize(ctx, authz.OpRead, authz.Resource{Type: authz.ResourceGroup, Name: req.Group}); err != nil {
+		return protocol.EncodeLeaveGroupResponse(&protocol.LeaveGroupResponse{
+			Version: version, ErrorCode: protocol.ErrGroupAuthorizationFailed,
+		})
 	}
 	resp := h.coord.LeaveGroup(req)
 	return protocol.EncodeLeaveGroupResponse(resp)
 }
 
-func (h *Handler) handleOffsetCommit(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleOffsetCommit(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeOffsetCommitRequest(version, body)
 	if err != nil {
 		return nil, err
+	}
+	if err := h.authorize(ctx, authz.OpWrite, authz.Resource{Type: authz.ResourceGroup, Name: req.Group}); err != nil {
+		// Report the denial per partition without touching the offset store.
+		resp := &protocol.OffsetCommitResponse{Version: version}
+		for _, t := range req.Topics {
+			rt := protocol.OffsetCommitResponseTopic{Topic: t.Topic}
+			for _, p := range t.Partitions {
+				rt.Partitions = append(rt.Partitions, protocol.OffsetCommitResponsePartition{
+					Partition: p.Partition,
+					ErrorCode: protocol.ErrGroupAuthorizationFailed,
+				})
+			}
+			resp.Topics = append(resp.Topics, rt)
+		}
+		return protocol.EncodeOffsetCommitResponse(resp)
 	}
 	resp := h.coord.OffsetCommit(req)
 	return protocol.EncodeOffsetCommitResponse(resp)
 }
 
-func (h *Handler) handleOffsetFetch(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleOffsetFetch(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeOffsetFetchRequest(version, body)
 	if err != nil {
 		return nil, err
+	}
+	if err := h.authorize(ctx, authz.OpRead, authz.Resource{Type: authz.ResourceGroup, Name: req.Group}); err != nil {
+		return protocol.EncodeOffsetFetchResponse(&protocol.OffsetFetchResponse{
+			Version: version, ErrorCode: protocol.ErrGroupAuthorizationFailed,
+		})
 	}
 	resp := h.coord.OffsetFetch(req)
 	return protocol.EncodeOffsetFetchResponse(resp)
@@ -604,7 +613,7 @@ func (h *Handler) handleDescribeGroups(version int16, body []byte) ([]byte, erro
 }
 
 // handleDeleteGroups (Key 42) deletes empty groups.
-func (h *Handler) handleDeleteGroups(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleDeleteGroups(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeDeleteGroupsRequest(version, body)
 	if err != nil {
 		return nil, err
@@ -612,6 +621,11 @@ func (h *Handler) handleDeleteGroups(version int16, body []byte) ([]byte, error)
 	resp := &protocol.DeleteGroupsResponse{Version: req.Version}
 	for _, id := range req.GroupIDs {
 		g := protocol.DeleteGroupsResponseGroup{GroupID: id, ErrorCode: protocol.ErrNone}
+		if err := h.authorize(ctx, authz.OpAdmin, authz.Resource{Type: authz.ResourceGroup, Name: id}); err != nil {
+			g.ErrorCode = protocol.ErrGroupAuthorizationFailed
+			resp.Groups = append(resp.Groups, g)
+			continue
+		}
 		if err := h.coord.DeleteGroup(id); err != nil {
 			g.ErrorCode = protocol.ErrNonEmptyGroup
 			msg := "group is not empty"
@@ -623,7 +637,9 @@ func (h *Handler) handleDeleteGroups(version int16, body []byte) ([]byte, error)
 }
 
 // handleInitProducerID (Key 22) allocates a producer ID and epoch for
-// idempotent producers and transactions.
+// idempotent producers. Transactional producers are accepted here but cannot
+// make progress: the transactional APIs are not advertised (see
+// DisabledTransactionAPIKeys) and always answer UNSUPPORTED_VERSION.
 func (h *Handler) handleInitProducerID(version int16, body []byte) ([]byte, error) {
 	req, err := protocol.DecodeInitProducerIdRequest(version, body)
 	if err != nil {
@@ -637,56 +653,6 @@ func (h *Handler) handleInitProducerID(version int16, body []byte) ([]byte, erro
 		ProducerEpoch: epoch,
 	}
 	return protocol.EncodeInitProducerIdResponse(resp)
-}
-
-// handleAddPartitionsToTxn (Key 24) registers partitions with a transaction.
-func (h *Handler) handleAddPartitionsToTxn(version int16, body []byte) ([]byte, error) {
-	req, err := protocol.DecodeAddPartitionsToTxnRequest(version, body)
-	if err != nil {
-		return nil, err
-	}
-	resp := &protocol.AddPartitionsToTxnResponse{Version: req.Version, ErrorCode: protocol.ErrNone}
-	if !h.coord.ValidateProducer(req.TransactionalID, req.ProducerID, req.ProducerEpoch) {
-		resp.ErrorCode = protocol.ErrTransactionCoordinatorFenced
-		return protocol.EncodeAddPartitionsToTxnResponse(resp)
-	}
-	for _, t := range req.Topics {
-		rt := protocol.AddPartitionsToTxnResponseTopic{Topic: t.Topic}
-		for _, p := range t.Partitions {
-			rt.Partitions = append(rt.Partitions, protocol.AddPartitionsToTxnResponsePartition{
-				Partition: p,
-				ErrorCode: protocol.ErrNone,
-			})
-		}
-		resp.Topics = append(resp.Topics, rt)
-	}
-	return protocol.EncodeAddPartitionsToTxnResponse(resp)
-}
-
-// handleAddOffsetsToTxn (Key 25) registers a consumer group with a transaction.
-func (h *Handler) handleAddOffsetsToTxn(version int16, body []byte) ([]byte, error) {
-	req, err := protocol.DecodeAddOffsetsToTxnRequest(version, body)
-	if err != nil {
-		return nil, err
-	}
-	resp := &protocol.AddOffsetsToTxnResponse{Version: req.Version, ErrorCode: protocol.ErrNone}
-	if !h.coord.ValidateProducer(req.TransactionalID, req.ProducerID, req.ProducerEpoch) {
-		resp.ErrorCode = protocol.ErrTransactionCoordinatorFenced
-	}
-	return protocol.EncodeAddOffsetsToTxnResponse(resp)
-}
-
-// handleEndTxn (Key 26) commits or aborts a transaction.
-func (h *Handler) handleEndTxn(version int16, body []byte) ([]byte, error) {
-	req, err := protocol.DecodeEndTxnRequest(version, body)
-	if err != nil {
-		return nil, err
-	}
-	resp := &protocol.EndTxnResponse{Version: req.Version, ErrorCode: protocol.ErrNone}
-	if !h.coord.ValidateProducer(req.TransactionalID, req.ProducerID, req.ProducerEpoch) {
-		resp.ErrorCode = protocol.ErrTransactionCoordinatorFenced
-	}
-	return protocol.EncodeEndTxnResponse(resp)
 }
 
 // longPoll blocks until data beyond fetchOffset is available or maxWait elapses.
@@ -738,18 +704,4 @@ func splitComma(s string) []string {
 		}
 	}
 	return out
-}
-
-// unsupportedVersion builds a response body reporting UNSUPPORTED_VERSION. For
-// ApiVersions we include the supported keys so the client can downgrade.
-func (h *Handler) unsupportedVersion(apiKey, version int16) ([]byte, error) {
-	if apiKey == protocol.APKApiVersions {
-		resp := &protocol.ApiVersionsResponse{
-			Version:   protocol.MaxVersion(protocol.APKApiVersions),
-			ErrorCode: protocol.ErrUnsupportedVersion,
-			ApiKeys:   h.supportedKeys(),
-		}
-		return protocol.EncodeApiVersionsResponse(resp)
-	}
-	return nil, fmt.Errorf("unsupported version %d for api key %d", version, apiKey)
 }
