@@ -4,13 +4,16 @@
 package server
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Yukaz0/pocketkafka/internal/config"
@@ -20,19 +23,36 @@ import (
 
 // Server accepts TCP connections and dispatches Kafka requests.
 type Server struct {
-	cfg        *config.Config
-	handler    *handler.Handler
-	bindPorts  map[net.Listener]int32 // port bind per listener (untuk advertise per-listener)
-	maxReqSize int64
-	listeners  []net.Listener
-	tlsConf    *tls.Config
-	wg         sync.WaitGroup
-	closeCh    chan struct{}
+	cfg          *config.Config
+	handler      *handler.Handler
+	bindPorts    map[net.Listener]int32 // port bind per listener (untuk advertise per-listener)
+	maxReqSize   int64
+	readTimeout  time.Duration
+	writeTimeout time.Duration
+	idleTimeout  time.Duration
+	listeners    []net.Listener
+	tlsConf      *tls.Config
+	wg           sync.WaitGroup
+	closeCh      chan struct{}
+
+	// connSem bounds the number of concurrently served connections to
+	// network.max_connections. A connection that cannot take a slot is closed
+	// immediately and counted in rejections.
+	connSem    chan struct{}
+	rejections atomic.Int64
+
+	// conns tracks live connections so Close can tear them down instead of
+	// waiting forever for clients that never disconnect. closing guards against
+	// a connection being registered after Close has swept the set.
+	connMu  sync.Mutex
+	conns   map[net.Conn]struct{}
+	closing bool
 }
 
 // connState carries per-connection authentication state.
 type connState struct {
 	authed        bool
+	principal     string // authenticated username, empty while unauthenticated
 	mechanism     string // "PLAIN" or "SCRAM-SHA-256"/"SCRAM-SHA-512"
 	scram         *scramSession
 	scramUsername string
@@ -40,14 +60,29 @@ type connState struct {
 
 // New creates a Server that routes requests to h.
 func New(cfg *config.Config, h *handler.Handler) *Server {
+	maxConns := cfg.Network.MaxConnections
+	if maxConns <= 0 {
+		// Config validation rejects this for real configs; keep the server
+		// itself fail-closed rather than treating 0 as "unlimited".
+		maxConns = 1
+	}
 	return &Server{
-		cfg:        cfg,
-		handler:    h,
-		bindPorts:  make(map[net.Listener]int32),
-		maxReqSize: cfg.Network.MaxRequestSizeBytes,
-		closeCh:    make(chan struct{}),
+		cfg:          cfg,
+		handler:      h,
+		bindPorts:    make(map[net.Listener]int32),
+		maxReqSize:   cfg.Network.MaxRequestSizeBytes,
+		readTimeout:  time.Duration(cfg.Network.ReadTimeoutMs) * time.Millisecond,
+		writeTimeout: time.Duration(cfg.Network.WriteTimeoutMs) * time.Millisecond,
+		idleTimeout:  time.Duration(cfg.Network.IdleTimeoutMs) * time.Millisecond,
+		closeCh:      make(chan struct{}),
+		connSem:      make(chan struct{}, maxConns),
+		conns:        make(map[net.Conn]struct{}),
 	}
 }
+
+// RejectedConnections reports how many connections were refused because the
+// max_connections limit was full.
+func (s *Server) RejectedConnections() int64 { return s.rejections.Load() }
 
 // Start binds all configured listeners and begins accepting connections.
 func (s *Server) Start() error {
@@ -148,19 +183,89 @@ func (s *Server) acceptLoop(ln net.Listener) {
 		if s.tlsConf != nil {
 			conn = tls.Server(conn, s.tlsConf)
 		}
+		select {
+		case s.connSem <- struct{}{}:
+		default:
+			// Connection slots are exhausted: refuse fast instead of queueing
+			// an unbounded number of goroutines.
+			s.rejections.Add(1)
+			log.Printf("rejecting connection from %s: max_connections %d reached", conn.RemoteAddr(), cap(s.connSem))
+			conn.Close()
+			continue
+		}
+		if !s.registerConn(conn) {
+			// Close is already running; do not start a worker that Close would
+			// not be able to tear down.
+			conn.Close()
+			<-s.connSem
+			return
+		}
 		s.wg.Add(1)
 		go s.handleConn(conn)
 	}
 }
 
+// registerConn adds conn to the live-connection set. It returns false when the
+// server is shutting down, in which case the caller must close conn and release
+// its slot.
+func (s *Server) registerConn(conn net.Conn) bool {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	if s.closing {
+		return false
+	}
+	s.conns[conn] = struct{}{}
+	return true
+}
+
+// releaseConn removes conn from the live set, closes it, and frees its slot.
+func (s *Server) releaseConn(conn net.Conn) {
+	s.connMu.Lock()
+	delete(s.conns, conn)
+	s.connMu.Unlock()
+	conn.Close()
+	<-s.connSem
+}
+
+// readFrame reads one request frame, applying the idle deadline while waiting
+// for a frame to start and the read deadline once bytes have arrived. This
+// bounds both a stalled connect-and-say-nothing client and a client that sends
+// a frame header then stalls mid-body.
+func (s *Server) readFrame(conn net.Conn) (*protocol.RequestHeader, []byte, error) {
+	if s.idleTimeout > 0 {
+		if err := conn.SetReadDeadline(time.Now().Add(s.idleTimeout)); err != nil {
+			return nil, nil, err
+		}
+	}
+	var lenBuf [4]byte
+	if _, err := io.ReadFull(conn, lenBuf[:]); err != nil {
+		return nil, nil, err
+	}
+	if s.readTimeout > 0 {
+		if err := conn.SetReadDeadline(time.Now().Add(s.readTimeout)); err != nil {
+			return nil, nil, err
+		}
+	}
+	// Replay the length prefix we already consumed, then let the protocol
+	// decoder read the body from the connection.
+	frame := io.MultiReader(bytes.NewReader(lenBuf[:]), conn)
+	return protocol.ReadRequestFrame(frame, s.maxReqSize)
+}
+
 func (s *Server) handleConn(conn net.Conn) {
 	defer s.wg.Done()
-	defer conn.Close()
+	defer s.releaseConn(conn)
 
 	tcp, ok := conn.(*net.TCPConn)
 	if ok {
 		tcp.SetKeepAlive(true)
 		tcp.SetNoDelay(true)
+		if n := s.cfg.Network.ReadBufferBytes; n > 0 {
+			tcp.SetReadBuffer(n)
+		}
+		if n := s.cfg.Network.WriteBufferBytes; n > 0 {
+			tcp.SetWriteBuffer(n)
+		}
 	}
 
 	// When SASL is enabled, a connection must authenticate before issuing any
@@ -168,7 +273,7 @@ func (s *Server) handleConn(conn net.Conn) {
 	st := &connState{authed: !s.cfg.Security.Enabled}
 
 	for {
-		hdr, body, err := protocol.ReadRequestFrame(conn, s.maxReqSize)
+		hdr, body, err := s.readFrame(conn)
 		if err != nil {
 			return
 		}
@@ -203,7 +308,16 @@ func (s *Server) handleConn(conn net.Conn) {
 		if tcp, ok := conn.LocalAddr().(*net.TCPAddr); ok {
 			localPort = int32(tcp.Port)
 		}
-		respBody, err := s.handler.Handle(hdr.ApiKey, hdr.ApiVersion, body, localPort)
+		clientAddr := ""
+		if ra := conn.RemoteAddr(); ra != nil {
+			clientAddr = ra.String()
+		}
+		respBody, err := s.handler.Handle(hdr.ApiKey, hdr.ApiVersion, body, handler.RequestContext{
+			Principal:    st.principal,
+			ListenerPort: localPort,
+			ClientID:     hdr.ClientID,
+			ClientAddr:   clientAddr,
+		})
 		if err != nil {
 			log.Printf("request error key=%d v=%d: %v", hdr.ApiKey, hdr.ApiVersion, err)
 			return
@@ -253,7 +367,8 @@ func (s *Server) handleSASLAuthenticate(st *connState, hdr *protocol.RequestHead
 
 	switch st.mechanism {
 	case "PLAIN", "":
-		if s.authenticatePlain(req.AuthBytes) {
+		if user, ok := s.authenticatePlain(req.AuthBytes); ok {
+			st.principal = user
 			resp.ErrorCode = protocol.ErrNone
 			out, err := protocol.EncodeSaslAuthenticateResponse(resp)
 			return out, true, err
@@ -310,6 +425,7 @@ func (s *Server) handleSCRAM(st *connState, version int16, authBytes []byte) ([]
 	if err != nil {
 		return s.scramErrorResponse(resp, err.Error())
 	}
+	st.principal = st.scramUsername
 	resp.ErrorCode = protocol.ErrNone
 	resp.AuthBytes = final
 	out, _ := protocol.EncodeSaslAuthenticateResponse(resp)
@@ -356,19 +472,20 @@ func randomSalt(n int) []byte {
 	return salt
 }
 
-// authenticatePlain checks a SASL/PLAIN token ("authzid\0authcid\0passwd").
-func (s *Server) authenticatePlain(token []byte) bool {
+// authenticatePlain checks a SASL/PLAIN token ("authzid\0authcid\0passwd") and
+// returns the authenticated username so it can become the request principal.
+func (s *Server) authenticatePlain(token []byte) (string, bool) {
 	parts := strings.SplitN(string(token), "\x00", 3)
 	if len(parts) != 3 {
-		return false
+		return "", false
 	}
 	username, password := parts[1], parts[2]
 	for _, u := range s.cfg.Security.Users {
 		if u.Username == username && u.Password == password {
-			return true
+			return username, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // writeResponse writes a length-prefixed response frame.
@@ -376,12 +493,19 @@ func (s *Server) writeResponse(conn net.Conn, corrID int32, body []byte) {
 	// The ApiVersions response header is always classic (non-flexible) per
 	// KIP-482, even when the request version is >= 3 (flexible body).
 	frame := protocol.WriteResponseFrame(corrID, body)
+	if s.writeTimeout > 0 {
+		if err := conn.SetWriteDeadline(time.Now().Add(s.writeTimeout)); err != nil {
+			return
+		}
+	}
 	if _, err := conn.Write(frame); err != nil {
 		return
 	}
 }
 
-// Close shuts down all listeners and waits for active connections to finish.
+// Close shuts down all listeners, tears down live connections, and waits for
+// the connection goroutines to finish. Tearing connections down keeps Close
+// from blocking on idle clients that never disconnect.
 func (s *Server) Close() error {
 	select {
 	case <-s.closeCh:
@@ -391,6 +515,12 @@ func (s *Server) Close() error {
 	for _, ln := range s.listeners {
 		ln.Close()
 	}
+	s.connMu.Lock()
+	s.closing = true
+	for conn := range s.conns {
+		conn.Close()
+	}
+	s.connMu.Unlock()
 	s.wg.Wait()
 	return nil
 }

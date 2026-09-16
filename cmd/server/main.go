@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net"
@@ -9,16 +10,20 @@ import (
 	_ "net/http/pprof" // registrasi handler /debug/pprof ke DefaultServeMux
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/authz"
 	"github.com/Yukaz0/pocketkafka/internal/config"
 	"github.com/Yukaz0/pocketkafka/internal/coordinator"
 	"github.com/Yukaz0/pocketkafka/internal/gateway"
 	"github.com/Yukaz0/pocketkafka/internal/handler"
+	"github.com/Yukaz0/pocketkafka/internal/httpauth"
 	"github.com/Yukaz0/pocketkafka/internal/logger"
 	"github.com/Yukaz0/pocketkafka/internal/schemaregistry"
 	"github.com/Yukaz0/pocketkafka/internal/server"
@@ -49,6 +54,13 @@ func main() {
 	}
 	defer store.Close()
 
+	// Durability: the "interval" flush policy fsyncs all partitions
+	// periodically; "request" and acks=-1 sync per produce ack (see handler).
+	if cfg.Storage.FlushPolicy == config.FlushPolicyInterval {
+		stopFlush := store.StartFlush(time.Duration(cfg.Storage.FlushIntervalMs) * time.Millisecond)
+		defer stopFlush()
+	}
+
 	// Offsets + group coordinator.
 	offsetDir := cfg.Storage.DataDir + "/__coordinator"
 	offsetStore, err := coordinator.NewOffsetStore(cfg.Coordinator.StorageBackend, offsetDir)
@@ -57,9 +69,24 @@ func main() {
 	}
 	advHost, advPort := advertised(cfg)
 	gm := coordinator.NewGroupManager(offsetStore, int32(cfg.Broker.ID), advHost, advPort, int32(cfg.Coordinator.SessionTimeoutMs))
+	// Flush the offset snapshot/WAL before the process exits, and drop idle
+	// commits per offsets_retention_minutes while it runs.
+	defer offsetStore.Close()
+	defer startOffsetRetention(gm, cfg.Coordinator.OffsetsRetentionMinutes)()
+
+	// Shared ACL store. When security is disabled the broker keeps its
+	// historical allow-all behaviour (allow-all authorizer); when it is enabled
+	// every ingress uses this store with default-deny.
+	aclStore, err := authz.NewStore(filepath.Join(cfg.Storage.DataDir, "__acls.json"))
+	if err != nil {
+		log.Fatalf("init ACL store: %v", err)
+	}
 
 	// Handlers + server.
 	h := handler.New(store, gm, &cfg, int32(cfg.Broker.ID), advHost, advPort)
+	if cfg.Security.Enabled {
+		h.WithAuthorizer(aclStore)
+	}
 	srv := server.New(&cfg, h)
 
 	if err := srv.Start(); err != nil {
@@ -77,9 +104,20 @@ func main() {
 		}()
 	}
 
-	// Embedded Schema Registry (port 8081, Confluent-compatible).
-	sr := schemaregistry.New()
-	srSrv := &http.Server{Addr: cfg.SchemaRegistry.Listen, Handler: sr.Handler()}
+	// Management surfaces require identity/authorization whenever security is
+	// enabled, so REST/Schema Registry cannot bypass the ACLs enforced on the
+	// Kafka protocol path.
+	httpPolicy := httpauth.Policy{Public: []string{"/healthz", "/livez"}}
+
+	// Embedded Schema Registry (port 8081, Confluent-compatible). Schemas are
+	// persisted under the data dir so IDs/versions survive a restart.
+	sr, err := schemaregistry.Open(filepath.Join(cfg.Storage.DataDir, "__schemas.json"))
+	if err != nil {
+		log.Fatalf("init schema registry: %v", err)
+	}
+	srHandler := httpauth.New(cfg.Security.Enabled, cfg.Security.Users, aclStore, httpPolicy).
+		Wrap(limitBody(sr.Handler(), cfg.Network.MaxRequestSizeBytes))
+	srSrv := newHTTPServer(cfg, cfg.SchemaRegistry.Listen, srHandler, false)
 	go func() {
 		log.Printf("pocketkafka schema registry on http://%s", cfg.SchemaRegistry.Listen)
 		if err := srSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -87,24 +125,25 @@ func main() {
 		}
 	}()
 
-	// Embedded Web UI dashboard (port 8080). The MQTT bridge handle is wired
-	// after this block, so the server exposes it through WithMQTT below.
-	ws := web.New(store, gm, sr, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).WithAuth(cfg).WithDataDir(cfg.Storage.DataDir).
-		WithBrokerInfo(listenerAddrs(cfg), advertisedString(cfg), securityModeOf(cfg))
-	ws.InstallLogSink()
-	webSrv := &http.Server{
-		Addr:    cfg.Web.Listen,
-		Handler: ws.Handler(),
+	// Embedded Web UI dashboard (port 8080), started only when web.enabled is
+	// true. The MQTT bridge handle is wired after this block, so the server
+	// exposes it through WithMQTT below.
+	ws, webSrv := buildWebServer(cfg, store, gm, sr, aclStore, version)
+	if webSrv != nil {
+		go func() {
+			log.Printf("pocketkafka web UI on http://%s", cfg.Web.Listen)
+			if err := webSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("web server error: %v", err)
+			}
+		}()
+	} else {
+		log.Printf("pocketkafka web UI disabled (web.enabled=false)")
 	}
-	go func() {
-		log.Printf("pocketkafka web UI on http://%s", cfg.Web.Listen)
-		if err := webSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("web server error: %v", err)
-		}
-	}()
 
 	// HTTP REST Proxy gateway (port 8082).
-	gwSrv := &http.Server{Addr: cfg.Gateway.Listen, Handler: gateway.NewRESTProxy(store).Handler()}
+	restHandler := httpauth.New(cfg.Security.Enabled, cfg.Security.Users, aclStore, httpPolicy).
+		Wrap(limitBody(gateway.NewRESTProxy(store).Handler(), cfg.Network.MaxRequestSizeBytes))
+	gwSrv := newHTTPServer(cfg, cfg.Gateway.Listen, restHandler, false)
 	go func() {
 		log.Printf("pocketkafka REST proxy on http://%s", cfg.Gateway.Listen)
 		if err := gwSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -112,12 +151,17 @@ func main() {
 		}
 	}()
 
-	// MQTT Bridge (port 1883) bridging IoT topics to Kafka.
-	mqttBridge := gateway.NewMQTTBridge(store)
+	// MQTT Bridge (port 1883) bridging IoT topics to Kafka. When security is on
+	// the bridge authenticates CONNECT and authorizes publish/subscribe against
+	// the mapped Kafka topic so MQTT is not an authorization bypass.
+	mqttBridge := gateway.NewMQTTBridge(store).
+		WithSecurity(cfg.Security.Enabled, cfg.Security.Users, aclStore)
 	if err := mqttBridge.Start(cfg.MQTT.Listen); err != nil {
 		log.Printf("mqtt bridge error: %v", err)
 	}
-	ws.WithMQTT(mqttBridge, cfg.MQTT.Listen)
+	if ws != nil {
+		ws.WithMQTT(mqttBridge, cfg.MQTT.Listen)
+	}
 	defer mqttBridge.Close()
 
 	// Background retention cleanup.
@@ -154,7 +198,104 @@ func main() {
 	log.Printf("shutting down")
 	stopRetention()
 	stopCompaction()
+	shutdownHTTP(webSrv)
+	shutdownHTTP(gwSrv)
+	shutdownHTTP(srSrv)
 	srv.Close()
+}
+
+// startOffsetRetention drops committed offsets idle beyond retentionMinutes on
+// a background ticker. It returns a stop function; a non-positive retention
+// disables the loop (offset retention turned off).
+func startOffsetRetention(gm *coordinator.GroupManager, retentionMinutes int) func() {
+	if retentionMinutes <= 0 {
+		return func() {}
+	}
+	retention := time.Duration(retentionMinutes) * time.Minute
+	interval := retention / 2
+	if interval < time.Minute {
+		interval = time.Minute
+	}
+	done := make(chan struct{})
+	var once sync.Once
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				if n := gm.PruneOffsets(time.Now(), retention); n > 0 {
+					log.Printf("offset retention: pruned %d idle committed offsets", n)
+				}
+			}
+		}
+	}()
+	return func() { once.Do(func() { close(done) }) }
+}
+
+// buildWebServer constructs the embedded dashboard server. It returns
+// (nil, nil) when the web UI is disabled, so callers must treat a nil server as
+// "not started" instead of unconditionally shutting it down.
+func buildWebServer(cfg config.Config, store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.Registry, aclStore *authz.Store, version string) (*web.Server, *http.Server) {
+	if !cfg.Web.Enabled {
+		return nil, nil
+	}
+	ws := web.New(store, gm, sr, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).WithAuth(cfg).
+		WithDataDir(cfg.Storage.DataDir).
+		WithACLStore(aclStore).
+		WithBrokerInfo(listenerAddrs(cfg), advertisedString(cfg), securityModeOf(cfg))
+	ws.InstallLogSink()
+	srv := newHTTPServer(cfg, cfg.Web.Listen, limitBody(ws.Handler(), cfg.Network.MaxRequestSizeBytes), true)
+	return ws, srv
+}
+
+// newHTTPServer builds an http.Server with the network timeouts from config.
+// allowWebSocket must be true for servers that hijack connections for
+// WebSockets: a WriteTimeout deadline would survive the hijack and break the
+// long-lived tail stream, so it is left unset for those.
+func newHTTPServer(cfg config.Config, addr string, h http.Handler, allowWebSocket bool) *http.Server {
+	srv := &http.Server{Addr: addr, Handler: h}
+	if ms := cfg.Network.ReadTimeoutMs; ms > 0 {
+		d := time.Duration(ms) * time.Millisecond
+		srv.ReadTimeout = d
+		srv.ReadHeaderTimeout = d
+	}
+	if ms := cfg.Network.IdleTimeoutMs; ms > 0 {
+		srv.IdleTimeout = time.Duration(ms) * time.Millisecond
+	}
+	if !allowWebSocket {
+		if ms := cfg.Network.WriteTimeoutMs; ms > 0 {
+			srv.WriteTimeout = time.Duration(ms) * time.Millisecond
+		}
+	}
+	return srv
+}
+
+// limitBody bounds the size of any request body a handler will read, so a
+// client cannot exhaust memory with an oversized payload.
+func limitBody(next http.Handler, max int64) http.Handler {
+	if max <= 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, max)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// shutdownHTTP gracefully stops an HTTP server. It is nil-safe so callers do not
+// need to special-case servers that were never started (e.g. a disabled web UI).
+func shutdownHTTP(srv *http.Server) {
+	if srv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
 }
 
 // listenerAddrs returns the sorted listener addresses from config.

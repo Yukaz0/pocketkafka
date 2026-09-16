@@ -217,6 +217,9 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 		cfg.Storage.DataDir = getString(s, "data_dir", cfg.Storage.DataDir)
 		cfg.Storage.SegmentMaxBytes = getInt64(s, "segment_max_bytes", cfg.Storage.SegmentMaxBytes)
 		cfg.Storage.IndexIntervalBytes = getInt64(s, "index_interval_bytes", cfg.Storage.IndexIntervalBytes)
+		cfg.Storage.FlushPolicy = getString(s, "flush_policy", cfg.Storage.FlushPolicy)
+		cfg.Storage.FlushIntervalMs = getInt(s, "flush_interval_ms", cfg.Storage.FlushIntervalMs)
+		cfg.Storage.SyncOnAcksAll = getBool(s, "sync_on_acks_all", cfg.Storage.SyncOnAcksAll)
 		if r := asMap(s, "retention"); r != nil {
 			cfg.Storage.Retention.CheckIntervalMs = getInt64(r, "check_interval_ms", cfg.Storage.Retention.CheckIntervalMs)
 			cfg.Storage.Retention.RetentionHours = getInt(r, "retention_hours", cfg.Storage.Retention.RetentionHours)
@@ -251,6 +254,9 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 		cfg.Network.ReadBufferBytes = getInt(n, "read_buffer_bytes", cfg.Network.ReadBufferBytes)
 		cfg.Network.WriteBufferBytes = getInt(n, "write_buffer_bytes", cfg.Network.WriteBufferBytes)
 		cfg.Network.MaxRequestSizeBytes = getInt64(n, "max_request_size_bytes", cfg.Network.MaxRequestSizeBytes)
+		cfg.Network.ReadTimeoutMs = getInt(n, "read_timeout_ms", cfg.Network.ReadTimeoutMs)
+		cfg.Network.WriteTimeoutMs = getInt(n, "write_timeout_ms", cfg.Network.WriteTimeoutMs)
+		cfg.Network.IdleTimeoutMs = getInt(n, "idle_timeout_ms", cfg.Network.IdleTimeoutMs)
 	}
 	if lg := asMap(m, "logging"); lg != nil {
 		cfg.Logging.Level = getString(lg, "level", cfg.Logging.Level)

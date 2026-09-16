@@ -23,8 +23,12 @@ func TestAuthenticatePlain(t *testing.T) {
 		{"\x00app\x00secret\x00extra", false}, // too many fields
 	}
 	for _, c := range cases {
-		if got := s.authenticatePlain([]byte(c.token)); got != c.ok {
-			t.Fatalf("token %q: got %v want %v", c.token, got, c.ok)
+		user, ok := s.authenticatePlain([]byte(c.token))
+		if ok != c.ok {
+			t.Fatalf("token %q: got %v want %v", c.token, ok, c.ok)
+		}
+		if ok && user != "app" {
+			t.Fatalf("token %q: principal = %q, want %q", c.token, user, "app")
 		}
 	}
 }

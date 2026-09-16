@@ -17,6 +17,14 @@ storage:
   data_dir: "./data"
   segment_max_bytes: 104857600 # 100MB (default), 10MB for dev
   index_interval_bytes: 4096   # 4KB sparse index interval
+  # Durability contract:
+  #   none     -> never fsync; OS decides when data hits disk
+  #   interval -> fsync every flush_interval_ms and on shutdown (default)
+  #   request  -> fsync before the produce ack is returned
+  # Independent of this, acks=-1 fsyncs when sync_on_acks_all is true.
+  flush_policy: "interval"
+  flush_interval_ms: 100
+  sync_on_acks_all: true
   retention:
     check_interval_ms: 300000  # 5 minutes
     retention_hours: 168       # 7 days
@@ -41,14 +49,17 @@ coordinator:
   session_timeout_ms: 45000     # 45s
   rebalance_timeout_ms: 60000   # 60s
   heartbeat_interval_ms: 3000   # 3s
-  offsets_retention_minutes: 10080 # 7 days
-  storage_backend: "inmemory"   # inmemory | file
+  offsets_retention_minutes: 10080 # committed offsets idle longer are pruned (0 disables)
+  storage_backend: "inmemory"   # inmemory | file (legacy "pebble" is an alias for file)
 
 network:
-  max_connections: 10000
-  read_buffer_bytes: 65536
-  write_buffer_bytes: 65536
-  max_request_size_bytes: 104857600 # 100MB
+  max_connections: 10000        # excess connections are refused immediately
+  read_buffer_bytes: 65536      # socket SO_RCVBUF
+  write_buffer_bytes: 65536     # socket SO_SNDBUF
+  max_request_size_bytes: 104857600 # 100MB; also caps HTTP request bodies
+  read_timeout_ms: 30000        # bound for reading a frame once it has started
+  write_timeout_ms: 30000
+  idle_timeout_ms: 120000       # bound for waiting for the next frame
 
 logging:
   level: "info"
@@ -56,8 +67,10 @@ logging:
 
 web:
   listen: "0.0.0.0:8080"  # Embedded dashboard (REST + WebSocket live tail)
-  enabled: true
-  auth: false             # Require login to the web UI (uses security.users)
+  enabled: true           # enabled: false starts no dashboard at all
+  auth: false             # Require login even with security disabled (uses security.users)
+  # Signing key for the login cookie. MUST be changed: startup fails if it is
+  # empty or still a placeholder while web.auth or security.enabled is true.
   auth_secret: "change-me-in-production"
 
 schema_registry:
@@ -70,7 +83,10 @@ mqtt:
   listen: "0.0.0.0:1883"  # MQTT Bridge (IoT)
 
 security:
-  enabled: false          # SASL/PLAIN auth (set true to require login)
+  # disabled -> allow-all (historical behaviour). enabled -> default-deny:
+  # Kafka, REST proxy, MQTT and the web dashboard all require identity and are
+  # checked against the ACLs under <data_dir>/__acls.json.
+  enabled: false
   users:
     - username: "app"
       password: "changeme"

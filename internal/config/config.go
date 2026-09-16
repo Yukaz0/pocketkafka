@@ -4,10 +4,17 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
 )
+
+// configWarnf reports a configuration deprecation. It is a package variable so
+// tests can capture the warning instead of polluting the test log.
+var configWarnf = func(format string, args ...interface{}) {
+	log.Printf("config warning: "+format, args...)
+}
 
 // Broker identifies this broker within the cluster.
 type Broker struct {
@@ -49,6 +56,14 @@ type Storage struct {
 	IndexIntervalBytes int64     `yaml:"index_interval_bytes"`
 	Retention          Retention `yaml:"retention"`
 	Tiered             Tiered    `yaml:"tiered"`
+	// FlushPolicy controls when appended records are fsync'd:
+	// "none" (never, OS decides), "interval" (periodic FlushIntervalMs plus
+	// shutdown), or "request" (before the produce ack is returned).
+	FlushPolicy     string `yaml:"flush_policy"`
+	FlushIntervalMs int    `yaml:"flush_interval_ms"`
+	// SyncOnAcksAll forces a sync for acks=-1 produce requests regardless of
+	// FlushPolicy, so a full-ack carries the durable-storage promise.
+	SyncOnAcksAll bool `yaml:"sync_on_acks_all"`
 }
 
 // Topics configures topic auto creation.
@@ -73,6 +88,9 @@ type Network struct {
 	ReadBufferBytes     int   `yaml:"read_buffer_bytes"`
 	WriteBufferBytes    int   `yaml:"write_buffer_bytes"`
 	MaxRequestSizeBytes int64 `yaml:"max_request_size_bytes"`
+	ReadTimeoutMs       int   `yaml:"read_timeout_ms"`
+	WriteTimeoutMs      int   `yaml:"write_timeout_ms"`
+	IdleTimeoutMs       int   `yaml:"idle_timeout_ms"`
 }
 
 // Logging configures the logger.
@@ -165,6 +183,9 @@ func Default() Config {
 				RetentionHours:  168,    // 7 days
 				RetentionBytes:  -1,     // unlimited
 			},
+			FlushPolicy:     FlushPolicyInterval,
+			FlushIntervalMs: 100,
+			SyncOnAcksAll:   true,
 		},
 		Topics: Topics{AutoCreate: true, DefaultPartitions: 1, DefaultReplicationFactor: 1},
 		Coordinator: Coordinator{
@@ -172,13 +193,16 @@ func Default() Config {
 			RebalanceTimeoutMs:      60000,
 			HeartbeatIntervalMs:     3000,
 			OffsetsRetentionMinutes: 10080,
-			StorageBackend:          "pebble",
+			StorageBackend:          BackendFile,
 		},
 		Network: Network{
 			MaxConnections:      10000,
 			ReadBufferBytes:     65536,
 			WriteBufferBytes:    65536,
 			MaxRequestSizeBytes: 104857600,
+			ReadTimeoutMs:       30000,
+			WriteTimeoutMs:      30000,
+			IdleTimeoutMs:       120000,
 		},
 		Logging:        Logging{Level: "info", Format: "json"},
 		Web:            Web{Listen: "0.0.0.0:8080", Enabled: true, Auth: false, AuthSecret: "pocketkafka-web-secret"},
@@ -189,8 +213,26 @@ func Default() Config {
 	}
 }
 
+// Storage backend names. Only BackendFile and BackendInMemory are real
+// implementations; BackendPebbleLegacy is accepted as an alias for BackendFile
+// so existing configuration keeps working (see Normalize).
+const (
+	BackendFile         = "file"
+	BackendInMemory     = "inmemory"
+	BackendPebbleLegacy = "pebble"
+)
+
+// Segment flush policies (Storage.FlushPolicy).
+const (
+	FlushPolicyNone     = "none"
+	FlushPolicyInterval = "interval"
+	FlushPolicyRequest  = "request"
+)
+
 // Load reads the YAML file at path (if it exists), overlays it on top of the
-// defaults, then applies environment variable overrides.
+// defaults, then applies environment variable overrides. The result is
+// normalized and validated before it is returned, so a caller that gets a nil
+// error can start listeners safely.
 func Load(path string) (Config, error) {
 	cfg := Default()
 	if path != "" {
@@ -206,7 +248,21 @@ func Load(path string) (Config, error) {
 		}
 	}
 	applyEnv(&cfg)
+	cfg.Normalize()
+	if err := cfg.Validate(); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
+}
+
+// Normalize rewrites legacy or shorthand values into their canonical form so
+// downstream code only ever sees the canonical spelling. Legacy "pebble" is an
+// alias for the file-backed backend and triggers a one-time warning.
+func (c *Config) Normalize() {
+	if c.Coordinator.StorageBackend == BackendPebbleLegacy {
+		configWarnf("coordinator.storage_backend=%q is a legacy alias for %q (the offset store has always been a gob file, never Pebble)", BackendPebbleLegacy, BackendFile)
+		c.Coordinator.StorageBackend = BackendFile
+	}
 }
 
 func applyEnv(cfg *Config) {
