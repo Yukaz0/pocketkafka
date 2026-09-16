@@ -238,6 +238,46 @@ func (s *Store) CompactNow(topic string) error {
 	return nil
 }
 
+// SyncAll fsyncs every partition's active segment. It is the interval flush
+// policy's periodic action and is also called before shutdown.
+func (s *Store) SyncAll() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var firstErr error
+	for _, t := range s.topics {
+		for _, p := range t.Partitions {
+			if err := p.Sync(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
+// StartFlush runs periodic fsyncs of all partitions until stop is called. It
+// implements the "interval" flush policy; a non-positive interval disables the
+// loop and returns a no-op stop.
+func (s *Store) StartFlush(interval time.Duration) (stop func()) {
+	if interval <= 0 {
+		return func() {}
+	}
+	done := make(chan struct{})
+	var once sync.Once
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				_ = s.SyncAll()
+			}
+		}
+	}()
+	return func() { once.Do(func() { close(done) }) }
+}
+
 // Close closes all open partition segment files.
 func (s *Store) Close() error {
 	s.mu.RLock()

@@ -136,6 +136,14 @@ func (idx *indexFile) reset() error {
 	return nil
 }
 
+// sync flushes the index file to stable storage without closing it.
+func (idx *indexFile) sync() error {
+	if idx.file == nil {
+		return nil
+	}
+	return idx.file.Sync()
+}
+
 func (idx *indexFile) close() error {
 	if err := idx.file.Sync(); err != nil {
 		idx.file.Close()

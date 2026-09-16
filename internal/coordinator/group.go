@@ -110,6 +110,16 @@ func (gm *GroupManager) ValidateProducer(transactionalID string, pid int64, epoc
 	return gm.producers.Validate(transactionalID, pid, epoch)
 }
 
+// PruneOffsets drops committed offsets that have not been updated within
+// retention relative to now, implementing offsets_retention_minutes. It returns
+// the number of offsets removed. A non-positive retention disables pruning.
+func (gm *GroupManager) PruneOffsets(now time.Time, retention time.Duration) int {
+	if retention <= 0 {
+		return 0
+	}
+	return gm.offsets.PruneOlderThan(now.Add(-retention))
+}
+
 func (gm *GroupManager) getOrCreate(name string) *Group {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()

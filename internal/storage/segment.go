@@ -370,6 +370,20 @@ func (s *Segment) indexPath() string {
 	return filepath.Join(s.dir, fmt.Sprintf("%020d.index", s.baseOffset))
 }
 
+// sync flushes the segment's log and index to stable storage so an
+// acknowledged append survives a power loss.
+func (s *Segment) sync() error {
+	if s.logFile != nil {
+		if err := s.logFile.Sync(); err != nil {
+			return err
+		}
+	}
+	if s.index != nil {
+		return s.index.sync()
+	}
+	return nil
+}
+
 func (s *Segment) close() error {
 	if s.logFile == nil {
 		return nil

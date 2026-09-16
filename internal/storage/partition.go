@@ -154,9 +154,41 @@ func (p *Partition) Append(raw []byte) (int64, error) {
 // and appends the batch only when the sequence advances by one. Duplicate
 // sequences return the previously assigned offset without persisting again.
 func (p *Partition) AppendIdempotent(pid int64, epoch int16, baseSeq int32, raw []byte) (int64, error) {
+	return p.AppendIdempotentSynced(pid, epoch, baseSeq, raw, false)
+}
+
+// AppendSynced appends a RecordBatch and, when sync is true, fsyncs the active
+// segment (log and index) before returning. The caller can then treat a
+// successful return as "this record is durable", which is the contract behind
+// flush_policy=request and sync_on_acks_all.
+func (p *Partition) AppendSynced(raw []byte, sync bool) (int64, error) {
+	off, err := p.Append(raw)
+	if err != nil {
+		return 0, err
+	}
+	if sync {
+		if err := p.Sync(); err != nil {
+			return 0, err
+		}
+	}
+	return off, nil
+}
+
+// AppendIdempotentSynced is AppendSynced for the idempotent producer path.
+func (p *Partition) AppendIdempotentSynced(pid int64, epoch int16, baseSeq int32, raw []byte, sync bool) (int64, error) {
 	return p.idempotence.ValidateAndAppend(pid, epoch, baseSeq, func() (int64, error) {
-		return p.Append(raw)
+		return p.AppendSynced(raw, sync)
 	})
+}
+
+// Sync flushes the active segment's log and index to stable storage.
+func (p *Partition) Sync() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.activeSegment != nil {
+		return p.activeSegment.sync()
+	}
+	return nil
 }
 
 // TruncateTo truncates the log to the given offset (inclusive of earlier data),
