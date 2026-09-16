@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/authz"
 	"github.com/Yukaz0/pocketkafka/internal/config"
 	"github.com/Yukaz0/pocketkafka/internal/coordinator"
 	"github.com/Yukaz0/pocketkafka/internal/gateway"
@@ -35,6 +37,10 @@ type Server struct {
 	users       []config.SecurityUser
 	authSecret  string
 	authEnabled bool
+	// authorize turns on ACL enforcement for state-changing web API calls. It
+	// is set when security is enabled, so the dashboard cannot act as an
+	// authorization bypass.
+	authorize bool
 
 	// Data dir for persisted UI state (ACLs, etc.).
 	dataDir string
@@ -48,9 +54,10 @@ type Server struct {
 	mqtt       *gateway.MQTTBridge
 	mqttListen string
 
-	// Enterprise (Fitur 4.5): in-memory visual ACL + audit trail.
-	aclMu    sync.RWMutex
-	acls     map[string]ACLRule // key "principal|resourceType|resourceName"
+	// Enterprise (Fitur 4.5): shared ACL store + audit trail. The ACL store is
+	// the same one the Kafka/MQTT/REST surfaces authorize against, so an ACL
+	// edited in the UI takes effect everywhere.
+	aclStore *authz.Store
 	auditMu  sync.Mutex
 	auditLog []AuditEntry
 
@@ -59,10 +66,18 @@ type Server struct {
 	rrCounter map[string]uint64
 }
 
-// WithDataDir records the broker data dir for ACL persistence.
+// WithDataDir records the broker data dir for persisted UI state.
 func (s *Server) WithDataDir(dir string) *Server {
 	s.dataDir = dir
-	s.loadACLsFromDisk()
+	return s
+}
+
+// WithACLStore installs the shared ACL store. The web UI manages exactly the
+// same rules the Kafka/MQTT/REST surfaces enforce.
+func (s *Server) WithACLStore(store *authz.Store) *Server {
+	if store != nil {
+		s.aclStore = store
+	}
 	return s
 }
 
@@ -93,17 +108,65 @@ func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.
 		version:   version,
 		startTime: time.Now(),
 		metrics:   metrics.NewRegistry(),
-		acls:      make(map[string]ACLRule),
+		aclStore:  authz.NewInMemory(),
 		rrCounter: make(map[string]uint64),
 	}
 }
 
-// WithAuth enables web UI login using the given credentials.
+// WithAuth enables web UI login using the given credentials. Security enabled
+// implies web login: otherwise the dashboard would be an unauthenticated way
+// around the broker's ACLs.
 func (s *Server) WithAuth(cfg config.Config) *Server {
 	s.users = cfg.Security.Users
 	s.authSecret = cfg.Web.AuthSecret
-	s.authEnabled = cfg.Security.Enabled && cfg.Web.Auth
+	s.authEnabled = cfg.Security.Enabled || (cfg.Web.Enabled && cfg.Web.Auth)
+	s.authorize = cfg.Security.Enabled
 	return s
+}
+
+// sessionUser returns the verified username from the signed auth cookie, or ""
+// when there is no valid session. Unlike authenticatedUser it checks the HMAC,
+// so it is safe to use for authorization decisions.
+func (s *Server) sessionUser(r *http.Request) string {
+	c, err := r.Cookie(authCookieName)
+	if err != nil {
+		return ""
+	}
+	payload, ok := verifyToken(c.Value, s.authSecret)
+	if !ok {
+		return ""
+	}
+	return authPayloadToUser(payload)
+}
+
+// authorizeMutations requires cluster Admin (or the more specific ACL) for
+// state-changing API calls when security is enabled. Read-only requests are
+// left to the authentication middleware.
+func (s *Server) authorizeMutations(next http.Handler) http.Handler {
+	if !s.authorize {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		op := authz.OpWrite
+		if strings.Contains(r.URL.Path, "/acls") {
+			op = authz.OpAdmin
+		}
+		res := authz.Resource{Type: authz.ResourceCluster, Name: "cluster"}
+		if err := s.aclStore.Authorize(s.sessionUser(r), op, res); err != nil {
+			writeErr(w, http.StatusForbidden, "forbidden: "+err.Error())
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Handler returns the HTTP handler exposing the dashboard and API.
@@ -147,7 +210,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /livez", s.handleLivez)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
-	return newAuthMiddleware(s.users, s.authSecret, s.authEnabled)(mux)
+	authed := newAuthMiddleware(s.users, s.authSecret, s.authEnabled)(mux)
+	return s.authorizeMutations(authed)
 }
 
 // handleMetrics exposes pocketkafka metrics in Prometheus text format.

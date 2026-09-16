@@ -6,25 +6,17 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"github.com/Yukaz0/pocketkafka/internal/authz"
 )
 
-// actorFrom returns the authenticated user for an audit entry, or "anonymous".
-func actorFrom(r *http.Request) string {
-	if u := authenticatedUser(r); u != "" {
+// actorFrom returns the verified authenticated user for an audit entry, or
+// "anonymous".
+func (s *Server) actorFrom(r *http.Request) string {
+	if u := s.sessionUser(r); u != "" {
 		return u
 	}
 	return "anonymous"
-}
-
-// authenticatedUser extracts the username from the signed auth cookie, if valid.
-func authenticatedUser(r *http.Request) string {
-	c, err := r.Cookie(authCookieName)
-	if err != nil {
-		return ""
-	}
-	// The token is signed; we cannot verify the signature without the secret
-	// here, so fall back to the payload-only extraction used for display.
-	return authPayloadToUser(c.Value)
 }
 
 // ---------------------------------------------------------------------------
@@ -79,18 +71,17 @@ func (s *Server) recordAudit(actor, action, resource, detail string) {
 }
 
 func (s *Server) handleListACLs(w http.ResponseWriter, r *http.Request) {
-	s.aclMu.RLock()
-	out := make([]ACLRule, 0, len(s.acls))
-	for _, v := range s.acls {
-		out = append(out, v)
-	}
-	s.aclMu.RUnlock()
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Principal != out[j].Principal {
-			return out[i].Principal < out[j].Principal
+	rules := s.aclStore.Rules()
+	sort.Slice(rules, func(i, j int) bool {
+		if rules[i].Principal != rules[j].Principal {
+			return rules[i].Principal < rules[j].Principal
 		}
-		return out[i].ResourceName < out[j].ResourceName
+		return rules[i].ResourceName < rules[j].ResourceName
 	})
+	out := make([]ACLRule, 0, len(rules))
+	for _, v := range rules {
+		out = append(out, ruleToWire(v))
+	}
 	writeJSON(w, 200, out)
 }
 
@@ -104,12 +95,11 @@ func (s *Server) handleUpsertACL(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "principal and resourceName required")
 		return
 	}
-	key := fmt.Sprintf("%s|%s|%s", rule.Principal, rule.ResourceType, rule.ResourceName)
-	s.aclMu.Lock()
-	s.acls[key] = rule
-	s.aclMu.Unlock()
-	s.persistACLs()
-	s.recordAudit(actorFrom(r), "acl.update", rule.ResourceName, fmt.Sprintf("%s grants %v on %s %s", rule.Principal, rule.Operations, rule.ResourceType, rule.ResourceName))
+	if err := s.aclStore.Upsert(ruleFromWire(rule)); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	s.recordAudit(s.actorFrom(r), "acl.update", rule.ResourceName, fmt.Sprintf("%s grants %v on %s %s", rule.Principal, rule.Operations, rule.ResourceType, rule.ResourceName))
 	writeJSON(w, 200, rule)
 }
 
@@ -119,13 +109,32 @@ func (s *Server) handleDeleteACL(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid JSON body")
 		return
 	}
-	key := fmt.Sprintf("%s|%s|%s", rule.Principal, rule.ResourceType, rule.ResourceName)
-	s.aclMu.Lock()
-	delete(s.acls, key)
-	s.aclMu.Unlock()
-	s.persistACLs()
-	s.recordAudit(actorFrom(r), "acl.delete", rule.ResourceName, fmt.Sprintf("removed ACL for %s on %s %s", rule.Principal, rule.ResourceType, rule.ResourceName))
-	writeJSON(w, 200, map[string]string{"deleted": key})
+	if err := s.aclStore.Delete(rule.Principal, rule.ResourceType, rule.ResourceName); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	s.recordAudit(s.actorFrom(r), "acl.delete", rule.ResourceName, fmt.Sprintf("removed ACL for %s on %s %s", rule.Principal, rule.ResourceType, rule.ResourceName))
+	writeJSON(w, 200, map[string]string{"deleted": fmt.Sprintf("%s|%s|%s", rule.Principal, rule.ResourceType, rule.ResourceName)})
+}
+
+// ruleFromWire converts the web API representation into an authz rule.
+func ruleFromWire(r ACLRule) authz.Rule {
+	return authz.Rule{
+		Principal:    r.Principal,
+		ResourceType: r.ResourceType,
+		ResourceName: r.ResourceName,
+		Operations:   r.Operations,
+	}
+}
+
+// ruleToWire converts an authz rule into the web API representation.
+func ruleToWire(r authz.Rule) ACLRule {
+	return ACLRule{
+		Principal:    r.Principal,
+		ResourceType: r.ResourceType,
+		ResourceName: r.ResourceName,
+		Operations:   r.Operations,
+	}
 }
 
 func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {

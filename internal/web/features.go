@@ -13,7 +13,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -248,7 +247,7 @@ func (s *Server) handleTopicConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.recordAudit(actorFrom(r), "topic.config", topic, fmt.Sprintf("cleanup.policy=%s", map[bool]string{true: "compact", false: "delete"}[req.Compacted]))
+	s.recordAudit(s.actorFrom(r), "topic.config", topic, fmt.Sprintf("cleanup.policy=%s", map[bool]string{true: "compact", false: "delete"}[req.Compacted]))
 	writeJSON(w, 200, map[string]any{"topic": topic, "compacted": req.Compacted})
 }
 
@@ -292,7 +291,7 @@ func (s *Server) handleRegisterSchema(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, rec.code, strings.TrimSpace(rec.buf.String()))
 		return
 	}
-	s.recordAudit(actorFrom(r), "schema.register", req.Subject, fmt.Sprintf("type=%s bytes=%d", req.SchemaType, len(req.Schema)))
+	s.recordAudit(s.actorFrom(r), "schema.register", req.Subject, fmt.Sprintf("type=%s bytes=%d", req.SchemaType, len(req.Schema)))
 	writeJSON(w, rec.code, json.RawMessage(rec.buf.Bytes()))
 }
 
@@ -324,53 +323,8 @@ func (s *Server) handleMQTTStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---------------------------------------------------------------------------
-// ACL persistence (Fitur 4.5 lanjutan)
-// ---------------------------------------------------------------------------
-
-// aclFilePath returns where ACLs persist inside the broker data dir.
-func (s *Server) aclFilePath() string {
-	return s.dataDir + "/__acls.json"
-}
-
-// loadACLsFromDisk restores persisted ACL rules at startup.
-func (s *Server) loadACLsFromDisk() {
-	data, err := os.ReadFile(s.aclFilePath())
-	if err != nil {
-		return
-	}
-	var rules []ACLRule
-	if json.Unmarshal(data, &rules) == nil {
-		for _, rule := range rules {
-			key := rule.Principal + "|" + rule.ResourceType + "|" + rule.ResourceName
-			s.acls[key] = rule
-		}
-	}
-}
-
-// persistACLs writes the current ACL set to disk (atomic rename).
-func (s *Server) persistACLs() {
-	s.aclMu.RLock()
-	out := make([]ACLRule, 0, len(s.acls))
-	for _, v := range s.acls {
-		out = append(out, v)
-	}
-	s.aclMu.RUnlock()
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Principal != out[j].Principal {
-			return out[i].Principal < out[j].Principal
-		}
-		return out[i].ResourceName < out[j].ResourceName
-	})
-	data, err := json.Marshal(out)
-	if err != nil {
-		return
-	}
-	tmp := s.aclFilePath() + ".tmp"
-	if os.WriteFile(tmp, data, 0o644) == nil {
-		os.Rename(tmp, s.aclFilePath())
-	}
-}
+// ACL persistence now lives in internal/authz (shared across every ingress);
+// the web server only reads and writes through its *authz.Store.
 
 // ---------------------------------------------------------------------------
 // Avro decode (minimal): parse the Confluent wire format and interpret the

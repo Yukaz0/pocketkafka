@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -12,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/authz"
+	"github.com/Yukaz0/pocketkafka/internal/config"
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
@@ -41,6 +44,51 @@ type MQTTBridge struct {
 
 	active  atomic.Int32 // currently connected MQTT clients
 	bridged atomic.Int64 // messages bridged MQTT -> Kafka since start
+
+	// Security (optional). When secure is true a client must present valid
+	// CONNECT credentials and every publish/subscribe is authorized against the
+	// mapped Kafka topic, closing the MQTT authorization bypass.
+	secure     bool
+	users      []config.SecurityUser
+	authorizer authz.Authorizer
+}
+
+// WithSecurity enables MQTT authentication and authorization. When enabled the
+// bridge requires CONNECT username/password matching users and authorizes
+// publish (Write) and subscribe (Read) against the mapped Kafka topic using
+// a. Passing enabled=false keeps the historical unauthenticated behaviour.
+func (b *MQTTBridge) WithSecurity(enabled bool, users []config.SecurityUser, a authz.Authorizer) *MQTTBridge {
+	b.secure = enabled
+	b.users = users
+	// Security disabled always means allow-all (decision D2), even if a
+	// default-deny store was passed in.
+	if !enabled || a == nil {
+		a = authz.AllowAllAuthorizer{}
+	}
+	b.authorizer = a
+	return b
+}
+
+// authorize checks a principal's permission, defaulting to anonymous.
+func (b *MQTTBridge) authorize(principal string, op authz.Operation, kafkaTopic string) error {
+	if b.authorizer == nil {
+		return nil
+	}
+	if principal == "" {
+		principal = authz.AnonymPrincipal
+	}
+	return b.authorizer.Authorize(principal, op, authz.Resource{Type: authz.ResourceTopic, Name: kafkaTopic})
+}
+
+// authenticate returns the principal for a CONNECT packet, or ok=false when the
+// credentials are missing or wrong.
+func (b *MQTTBridge) authenticate(info *mqttConnectInfo) (string, bool) {
+	for _, u := range b.users {
+		if u.Username == info.Username && u.Password == info.Password && u.Username != "" {
+			return u.Username, true
+		}
+	}
+	return "", false
 }
 
 // ActiveClients reports the number of live MQTT client connections.
@@ -103,10 +151,12 @@ func (b *MQTTBridge) Close() error {
 // ---------------------------------------------------------------------------
 
 type mqttClient struct {
-	conn net.Conn
-	br   *bufio.Reader
-	mu   sync.Mutex // serializes writes
-	stop chan struct{}
+	conn      net.Conn
+	br        *bufio.Reader
+	mu        sync.Mutex // serializes writes
+	stop      chan struct{}
+	principal string
+	authed    bool
 }
 
 func (b *MQTTBridge) serveClient(conn net.Conn) {
@@ -114,7 +164,7 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 	defer conn.Close()
 	b.active.Add(1)
 	defer b.active.Add(-1)
-	c := &mqttClient{conn: conn, br: bufio.NewReader(conn), stop: make(chan struct{})}
+	c := &mqttClient{conn: conn, br: bufio.NewReader(conn), stop: make(chan struct{}), authed: !b.secure}
 	defer close(c.stop)
 
 	var subs []string // kafka topics subscribed
@@ -123,14 +173,37 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 		if err != nil {
 			return
 		}
+		if b.secure && !c.authed && ptype != mqttConnect {
+			// No request is served before a successful CONNECT.
+			return
+		}
 		switch ptype {
 		case mqttConnect:
+			if b.secure {
+				info, err := parseConnect(payload)
+				if err != nil {
+					c.writePacket(mqttConnack, []byte{0x00, 0x01}) // unacceptable protocol
+					return
+				}
+				user, ok := b.authenticate(info)
+				if !ok {
+					// 0x05 = not authorized.
+					c.writePacket(mqttConnack, []byte{0x00, 0x05})
+					return
+				}
+				c.principal = user
+				c.authed = true
+			}
 			if err := c.writePacket(mqttConnack, []byte{0x00, 0x00}); err != nil {
 				return
 			}
 		case mqttPublish:
 			ptopic, data, err := parsePublish(payload)
 			if err != nil {
+				continue
+			}
+			if err := b.authorize(c.principal, authz.OpWrite, mqttTopicToKafka(ptopic)); err != nil {
+				log.Printf("mqtt publish denied for %q: %v", c.principal, err)
 				continue
 			}
 			if err := b.bridgePublish(ptopic, data); err != nil {
@@ -141,16 +214,25 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 			if err != nil {
 				continue
 			}
-			// Acknowledge with granted QoS 0 for each filter.
+			// Acknowledge with granted QoS 0, or 0x80 for denied filters.
 			codes := make([]byte, len(filters))
-			for i := range codes {
+			allowed := make([]bool, len(filters))
+			for i, f := range filters {
+				if b.authorize(c.principal, authz.OpRead, mqttFilterToKafka(f)) != nil {
+					codes[i] = 0x80 // failure: not authorized
+					continue
+				}
 				codes[i] = 0x00
+				allowed[i] = true
 			}
 			suback := append(u16(packetID), codes...)
 			if err := c.writePacket(mqttSuback, suback); err != nil {
 				return
 			}
-			for _, f := range filters {
+			for i, f := range filters {
+				if !allowed[i] {
+					continue
+				}
 				kt := mqttFilterToKafka(f)
 				subs = append(subs, kt)
 				// Ensure the Kafka topic exists; capture the current offset so the
@@ -317,6 +399,85 @@ func appendRemainingLength(dst []byte, length int) []byte {
 		}
 	}
 	return dst
+}
+
+// mqttConnectInfo holds the fields the bridge needs from a CONNECT packet.
+type mqttConnectInfo struct {
+	ClientID    string
+	Username    string
+	Password    string
+	HasUsername bool
+	HasPassword bool
+}
+
+// parseConnect extracts the client ID and optional username/password from an
+// MQTT 3.1.1 CONNECT payload.
+func parseConnect(payload []byte) (*mqttConnectInfo, error) {
+	if len(payload) < 10 {
+		return nil, fmt.Errorf("short connect packet")
+	}
+	if !bytes.HasPrefix(payload, []byte{0x00, 0x04, 'M', 'Q', 'T', 'T'}) {
+		return nil, fmt.Errorf("unsupported protocol name")
+	}
+	pos := 6
+	level := payload[pos]
+	pos++
+	if level != 0x04 {
+		return nil, fmt.Errorf("unsupported protocol level %d", level)
+	}
+	flags := payload[pos]
+	pos++
+	pos += 2 // keepalive
+
+	info := &mqttConnectInfo{}
+	clientID, n, err := readMQTTString(payload[pos:])
+	if err != nil {
+		return nil, err
+	}
+	info.ClientID = clientID
+	pos += n
+
+	if flags&0x04 != 0 { // will flag: will topic then will payload
+		if _, n, err = readMQTTString(payload[pos:]); err != nil {
+			return nil, err
+		}
+		pos += n
+		if _, n, err = readMQTTString(payload[pos:]); err != nil {
+			return nil, err
+		}
+		pos += n
+	}
+	if flags&0x80 != 0 { // username
+		u, n, err := readMQTTString(payload[pos:])
+		if err != nil {
+			return nil, err
+		}
+		info.Username = u
+		info.HasUsername = true
+		pos += n
+	}
+	if flags&0x40 != 0 { // password (last field; no need to advance pos)
+		p, _, err := readMQTTString(payload[pos:])
+		if err != nil {
+			return nil, err
+		}
+		info.Password = p
+		info.HasPassword = true
+	}
+	return info, nil
+}
+
+// readMQTTString reads a 2-byte-length-prefixed MQTT string, returning the
+// value and the number of bytes consumed.
+func readMQTTString(b []byte) (string, int, error) {
+	if len(b) < 2 {
+		return "", 0, fmt.Errorf("short mqtt string")
+	}
+	n := int(binary.BigEndian.Uint16(b[0:2]))
+	if 2+n > len(b) {
+		return "", 0, fmt.Errorf("mqtt string overrun")
+	}
+	return string(b[2 : 2+n]), 2 + n, nil
 }
 
 // parsePublish extracts the topic and payload from a QoS 0 PUBLISH payload.
