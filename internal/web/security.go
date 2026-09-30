@@ -1,18 +1,8 @@
 package web
 
-// Transport-level protections for the dashboard.
-//
-// Two things are load-bearing here:
-//
-//   - The mutation endpoints (ACLs, cluster registry, topic and group
-//     operations) authenticate with an ambient cookie. Without a cross-site
-//     guard, any page the operator visits could POST to this broker while that
-//     cookie is attached. A required custom header plus a same-origin check
-//     closes that class: a cross-site form cannot set a header, and a
-//     cross-origin fetch with one is rejected by the browser's preflight.
-//   - The embedded page is served from the same origin as the API, so a CSP
-//     that forbids external scripts and framing costs nothing but still stops
-//     an injected script from loading anything off-origin.
+// Mutations authenticate with an ambient cookie, so they need a header a
+// cross-site page cannot set, plus a same-origin check. The page itself is
+// served from this origin, which is what makes the CSP below free.
 
 import (
 	"net/http"
@@ -20,8 +10,8 @@ import (
 	"strings"
 )
 
-// csrfHeader is required on every state-changing /api request. The SPA sends it
-// from its api() helper and from the login form.
+// csrfHeader is required on every state-changing /api request; the SPA sends it
+// from api() and from the login form.
 const csrfHeader = "X-PocketKafka-Request"
 
 // securityHeaders applies the dashboard's response headers. The policy allows
@@ -48,12 +38,8 @@ func securityHeaders(next http.Handler) http.Handler {
 }
 
 // csrfMiddleware rejects state-changing API calls that cannot have come from the
-// dashboard itself.
-//
-// A request authenticated by an Authorization header is exempt: that is a
-// broker-to-broker credential carried deliberately by the caller, not a browser
-// cookie attached automatically, so there is nothing for a third-party page to
-// ride on.
+// dashboard. A Bearer-authenticated request is exempt: that credential is carried
+// deliberately by the caller, not attached by a browser.
 func csrfMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
@@ -76,11 +62,8 @@ func csrfMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// sameOriginRequest compares the Origin header with the Host the request was
-// sent to. Browsers omit Origin on same-origin GETs and on some same-origin
-// requests, and a non-browser client may not send it at all; a missing Origin is
-// therefore accepted, because the required custom header is what actually stops
-// a cross-site page from reaching these endpoints.
+// sameOriginRequest accepts a missing Origin (browsers omit it on same-origin
+// requests); the required custom header is what keeps a cross-site page out.
 func sameOriginRequest(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {

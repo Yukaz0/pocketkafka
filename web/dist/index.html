@@ -298,11 +298,9 @@
   .brokerBadge .dot{width:6px;height:6px;border-radius:50%;background:var(--live);animation:ping 2.4s cubic-bezier(0,0,.2,1) infinite}
 
   /* compact density */
-  /* Windowed message table. Saat daftar pesan besar, hanya potongan yang
-     terlihat yang ada di DOM. Tinggi baris dipatok lewat --virtRowH dan setiap
-     sel dipotong satu baris: tanpa pemaksaan ini sel Headers yang wrap membuat
-     tinggi baris berkisar 53..171 px, dan spacer atas/bawah menghitung posisi
-     yang salah. Nilai penuh tetap ada di inspector. */
+  /* Tabel pesan berjendela: hanya potongan yang terlihat yang dibangun. Tinggi
+     baris dipatok (--virtRowH) karena tanpa pemaksaan itu sel Headers yang wrap
+     membuat tinggi baris 53..171 px dan spacer meleset. */
   #rows.virt td{box-sizing:border-box;height:var(--virtRowH);line-height:var(--virtLh);padding:0 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:none;vertical-align:middle}
   #rows.virt .hdr{flex-wrap:nowrap;overflow:hidden}
   #rows.virt tr.virtSpacer td{height:auto;line-height:0;padding:0;border:0}
@@ -936,25 +934,19 @@ function filteredMsgs(){ return state.msgs.filter(passesFilters); }
 function passesFilters(m){ if(!state.filters.length)return true; const v=jsonOf(m); return state.filters.every(f=>evalFilter(f,v)); }
 function rowHtml(m){const val=fmtValue(m);const sel=state.diffSel.includes(m.offset);return `<td class="chkCell"><input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleDiffSel(${m.offset})"></td><td>${timeCell(m.timestamp)}</td><td><span class="chip">P${m.partition}</span></td><td>${m.offset}</td><td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td><td><div class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</div></td>${state.projCols.map(c=>`<td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(getPath(jsonOf(m),c))}</td>`).join('')}<td style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td><td style="white-space:nowrap"><button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();replayOne(${m.offset})">Replay</button></td>`;}
 function rowTr(m){ return '<tr class="rowclick" onclick="insp('+JSON.stringify(m).replace(/"/g,'&quot;')+')">'+rowHtml(m)+'</tr>'; }
-/* Windowed rendering. Di atas VIRT_MIN baris hanya potongan yang terlihat (plus
-   cadangan di atas/bawah) yang dibangun, dengan spacer di kedua ujung supaya
-   panjang gulir tetap sepadan. Tinggi baris diukur dari baris nyata lalu gaya
-   #rows.virt memaksa semua baris setinggi itu (satu baris teks, sel dipotong):
-   tanpa itu sel Headers yang wrap membuat tinggi baris tidak seragam dan spacer
-   menghitung posisi yang salah. */
+/* Di atas VIRT_MIN baris hanya potongan yang terlihat (plus cadangan) yang
+   dibangun, dengan spacer di kedua ujung supaya panjang gulir tetap sepadan. */
 const VIRT_MIN=300, VIRT_OVERSCAN=12;
-/* Tinggi baris dipatok per kerapatan, bukan diukur: pengukuran satu baris tidak
-   mewakili baris lain dan galatnya menumpuk di spacer. Nilai harus sejalan
-   dengan gaya #rows.virt di CSS: sel Timestamp selalu dua baris (waktu absolut
-   + relatif), jadi tinggi baris = 2 x line-height + 1 px garis pemisah. */
+/* Tinggi baris dipatok per kerapatan, bukan diukur: satu baris contoh tidak
+   mewakili baris lain dan galatnya menumpuk di spacer. Sel Timestamp selalu dua
+   baris, jadi tinggi = 2 x line-height + 1 px garis pemisah. */
 const VIRT_ROW_H={comfortable:35,compact:27}, VIRT_LH={comfortable:17,compact:13};
 let msgVirtStart=-1, msgVirtEnd=-1, msgVirtKey='';
 function virtRowH(){ return VIRT_ROW_H[state.density]||VIRT_ROW_H.comfortable; }
 function msgCols(){ return 8+state.projCols.length; }
-/* Urutan tampilan ditentukan di sini, bukan diwarisi dari urutan array: jalur
-   paging menyimpan terlama-dulu (urutan dari API) sementara jalur tail
-   menyisipkan yang terbaru di depan. Tanpa penegasan ini, satu render ulang
-   (ganti filter, kolom, atau mode berjendela) membalik urutan yang terlihat. */
+/* Urutan tampilan ditegaskan di sini: jalur paging menyimpan terlama-dulu
+   sementara jalur tail menyisipkan terbaru di depan, jadi satu render ulang
+   akan membalik urutan yang terlihat tanpa ini. */
 function displayOrder(filtered){ return filtered.slice().sort((a,b)=>(b.offset-a.offset)||(b.timestamp-a.timestamp)); }
 function virtSpacer(n,h){ return n>0?'<tr class="virtSpacer"><td colspan="'+msgCols()+'" style="height:'+(n*h)+'px"></td></tr>':''; }
 function renderMsgRows(){

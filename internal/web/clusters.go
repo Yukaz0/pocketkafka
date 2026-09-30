@@ -1,17 +1,8 @@
 package web
 
-// Multi-cluster monitoring. The dashboard of one broker can report the health
-// of other brokers:
-//
-//   - the list of clusters is seeded from `web.clusters` in the config and can
-//     be edited from the UI, persisting in <data_dir>/__clusters.json next to
-//     the ACL store (same pattern);
-//   - per-cluster bearer tokens live in a SEPARATE file with 0600 permissions
-//     and are never part of a listing response.
-//
-// Only URLs from this registry are ever fetched. The browser can never make the
-// broker probe an arbitrary address, which is what keeps the fan-out from
-// becoming an SSRF primitive.
+// Multi-cluster monitoring: the dashboard of one broker reports the health of
+// others, driven by a registry that only ever fetches URLs it contains, so the
+// browser cannot turn the fan-out into an SSRF primitive.
 
 import (
 	"context"
@@ -35,11 +26,10 @@ import (
 const (
 	clustersFileName  = "__clusters.json"
 	clusterTokensFile = "__cluster_tokens.json"
-	// secretsKeyFile holds the auto-generated key that seals stored tokens. It
-	// must be backed up: without it the stored tokens cannot be read.
+	// secretsKeyFile seals stored tokens; losing it makes them unreadable.
 	secretsKeyFile = "__secrets.key"
-	// clusterFetchTimeout bounds one remote health fetch. A slow or dead peer
-	// must not stall the whole cluster overview.
+	// clusterFetchTimeout bounds one remote fetch; a dead peer must not stall
+	// the whole overview.
 	clusterFetchTimeout = 4 * time.Second
 	// clusterSummaryTTL keeps a polling dashboard from hammering every peer.
 	clusterSummaryTTL = 2 * time.Second
@@ -67,11 +57,9 @@ type clusterStore struct {
 	tokensPath  string
 	persistent  bool
 	// box seals tokens before they are written. It is nil only when there is
-	// nothing to persist; with a data dir it is always set, because refusing to
-	// store a token beats storing it in the clear.
+	// nothing to persist: refusing to store a token beats storing it in the clear.
 	box *secretBox
-	// boxErr records a secrets problem (missing key, unreadable key, a file
-	// sealed with a different key) so the next write can report it instead of
+	// boxErr records a secrets problem so the next write reports it instead of
 	// failing silently.
 	boxErr error
 }
@@ -583,12 +571,9 @@ func (s *Server) handleUpsertCluster(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"name": entry.Name, "url": entry.URL, "hasToken": s.clusters.HasToken(entry.Name)})
 }
 
-// handleTestCluster checks a candidate cluster WITHOUT registering it, so the
-// operator finds out that a URL or token is wrong before it is stored. It
-// fetches only URLs that pass the same validation as the registry, and the route
-// is admin-gated with the other mutations, so this does not widen what the
-// broker can be pointed at. An unreachable target is a test RESULT, not a failed
-// request: it answers 200 with ok=false and the reason, like the fan-out does.
+// handleTestCluster checks a candidate cluster WITHOUT registering it, so a
+// wrong URL or token is found before it is stored. An unreachable target is a
+// test RESULT, not a failed request: it answers 200 with ok=false.
 func (s *Server) handleTestCluster(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name  string `json:"name"`
@@ -661,9 +646,8 @@ func (s *Server) WithClusterMonitoring(cfg config.Config) *Server {
 }
 
 // loadClusterSecrets returns the box that seals stored tokens. An in-memory
-// registry (tests, embedded use) persists nothing and needs no key; with a data
-// dir the key is required, and its absence is reported rather than worked
-// around by writing credentials in the clear.
+// registry persists nothing and needs no key; with a data dir the key is
+// required, and its absence is reported rather than worked around.
 func loadClusterSecrets(cfg config.Config, dataDir string) (*secretBox, error) {
 	if dataDir == "" {
 		return nil, nil

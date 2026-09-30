@@ -1,15 +1,10 @@
 package web
 
-// Secrets at rest. A per-cluster bearer token is a credential for another
-// broker, so it must not sit in the data directory in the clear: whoever copies
-// that directory would otherwise hold a working key to every peer the dashboard
-// monitors.
-//
-// Tokens are sealed with AES-256-GCM. The key comes from web.secrets_key (or
-// KAFKA_SECRETS_KEY) and, when neither is set, a key file with 0600 is created
-// once next to the registry. Sealed values carry an "enc:v1:" prefix so a file
-// written before encryption existed still loads: plaintext values are read as
-// they are and re-written sealed on the next persist.
+// A per-cluster bearer token is a credential for another broker, so it is sealed
+// with AES-256-GCM rather than left in the data directory. The key comes from
+// web.secrets_key (or KAFKA_SECRETS_KEY) or a 0600 key file created once beside
+// the registry; sealed values carry an "enc:v1:" prefix, so a file written before
+// encryption existed still loads and is re-sealed on the next persist.
 
 import (
 	"crypto/aes"
@@ -32,16 +27,14 @@ const (
 
 type secretBox struct {
 	aead cipher.AEAD
-	// generated records that this process created the key file, so the caller
-	// can tell the operator to back it up: losing it makes stored tokens
-	// unreadable.
+	// generated tells the caller this process created the key file so it can ask
+	// the operator to back it up: losing it makes stored tokens unreadable.
 	generated bool
 }
 
-// newSecretBox returns nil (with a nil error) when there is nothing to protect,
-// and a nil box with an error when a key was asked for but could not be used.
-// Callers must treat a non-nil error as "no secrets can be stored", never as
-// "store them unencrypted".
+// newSecretBox returns nil when there is nothing to protect, and a nil box with
+// an error when a key was asked for but could not be used. Callers must read a
+// non-nil error as "no secrets can be stored", never as "store them unencrypted".
 func newSecretBox(key, keyFile string) (*secretBox, error) {
 	if key == "" {
 		raw, err := os.ReadFile(keyFile)
@@ -73,10 +66,9 @@ func newSecretBox(key, keyFile string) (*secretBox, error) {
 	return mustBox(key), nil
 }
 
+// mustBox derives a 32-byte key from the passphrase; GCM authenticates the
+// ciphertext, so a wrong key fails to open rather than returning garbage.
 func mustBox(key string) *secretBox {
-	// A passphrase of any length becomes a 32-byte key; GCM then authenticates
-	// the ciphertext, so a wrong key fails to open rather than returning
-	// garbage.
 	sum := sha256.Sum256([]byte(key))
 	block, err := aes.NewCipher(sum[:])
 	if err != nil {

@@ -1,12 +1,7 @@
 #!/bin/sh
-# Start the broker as an unprivileged user.
-#
-# The image starts as root for one reason only: to take ownership of the data
-# directory. A volume created by an earlier image is owned by root, so switching
-# the user without this step would leave the broker unable to write its segments
-# and indexes. After that the privileges are dropped with su-exec, and every
-# process that serves traffic runs as the broker user. Start the container with
-# --user and none of this runs: nothing here needs root.
+# Run the broker as an unprivileged user. The image starts as root only to take
+# ownership of the data directory (a volume from an earlier image is root-owned),
+# then drops privileges with su-exec. Started with --user, none of this runs.
 set -e
 
 DATA_DIR="${KAFKA_DATA_DIR:-/var/lib/pocketkafka/data}"
@@ -20,8 +15,8 @@ if [ ! -d "$DATA_DIR" ]; then
 	mkdir -p "$DATA_DIR"
 fi
 
-# Chown recursively only when it is needed: the directory itself is stat-ed
-# instead of walking a possibly large volume on every container start.
+# Chown only when the directory is not already ours: stat the directory instead
+# of walking a possibly large volume on every start.
 uid="$(id -u "$BROKER_USER")"
 if [ "$(stat -c %u "$DATA_DIR")" != "$uid" ]; then
 	echo "entrypoint: taking ownership of $DATA_DIR for $BROKER_USER (uid $uid)"
