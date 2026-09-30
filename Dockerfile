@@ -19,10 +19,21 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 FROM alpine:3.20
 
 WORKDIR /app
-RUN apk add --no-cache ca-certificates tzdata netcat-openbsd
+RUN apk add --no-cache ca-certificates tzdata netcat-openbsd su-exec
 
 COPY --from=builder /app/bin/pocketkafka /usr/local/bin/pocketkafka
 COPY config/config.yaml /etc/pocketkafka/config.yaml
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
+# The broker runs as an unprivileged user: it only needs ports above 1024 and its
+# own data directory. The entrypoint takes ownership of an existing volume (one
+# created by an earlier image is owned by root) and then drops privileges, so
+# upgrading keeps working without touching the data.
+RUN addgroup -g 10001 -S pocketkafka \
+ && adduser -u 10001 -S -G pocketkafka -h /var/lib/pocketkafka pocketkafka \
+ && mkdir -p /var/lib/pocketkafka/data \
+ && chown -R pocketkafka:pocketkafka /var/lib/pocketkafka \
+ && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Kafka TCP listeners + Embedded Web UI (8080) + Schema Registry (8081) +
 # REST Proxy (8082) + MQTT Bridge (1883)
@@ -32,7 +43,7 @@ VOLUME ["/var/lib/pocketkafka/data"]
 
 ENV KAFKA_DATA_DIR=/var/lib/pocketkafka/data
 
-ENTRYPOINT ["pocketkafka"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["--config", "/etc/pocketkafka/config.yaml"]
 
 # Built-in healthcheck (Fitur 19): the TCP listener must accept connections and
