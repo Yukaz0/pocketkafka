@@ -246,9 +246,41 @@ func (s *Server) handleCompactTopic(w http.ResponseWriter, r *http.Request) {
 // Data browser search & pagination (Fitur 14)
 // ---------------------------------------------------------------------------
 
+// Anggaran pemindaian. `limit` membatasi HASIL, bukan pekerjaan yang dilakukan:
+// tanpa anggaran byte dan waktu, predikat yang tak selektif menelusuri seluruh
+// log dari offset ke LogEndOffset() tanpa cara berhenti - dulu bahkan memutus
+// koneksi klien tidak menghentikan loop di server.
+const (
+	searchDefaultByteBudget = 8 << 20  // 8 MiB
+	searchMaxByteBudget     = 64 << 20 // batas atas yang boleh diminta klien
+	searchDefaultTimeBudget = 3 * time.Second
+	searchMaxTimeBudget     = 15 * time.Second
+	searchMaxConcurrent     = 4
+)
+
+// searchSem membatasi berapa banyak pemindaian yang boleh aktif di seluruh
+// broker. Pemindaian menahan I/O disk dan lewat Partition.Read memakai kunci
+// partisi bergantian dengan penulis, jadi N tab yang menekan Search bersamaan
+// tidak boleh berarti N pemindaian penuh paralel.
+var searchSem = make(chan struct{}, searchMaxConcurrent)
+
+// budgetInt64 membaca anggaran dari query string dan menjepitnya: nilai tak sah
+// jatuh ke default, nilai berlebihan ke batas atas.
+func budgetInt64(raw string, def, max int64) int64 {
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || v <= 0 {
+		return def
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 // handleGetMessages supports offset+limit pagination plus search/filtering on
 // key/value and a timestamp window.
 func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	topic := r.PathValue("topic")
 	q := r.URL.Query()
 	offset, _ := strconv.ParseInt(q.Get("offset"), 10, 64)
@@ -267,6 +299,22 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Kendali penerimaan: menolak lebih jujur daripada menumpuk pemindaian.
+	select {
+	case searchSem <- struct{}{}:
+		defer func() { <-searchSem }()
+	default:
+		writeErr(w, 503, "too many concurrent message scans; retry shortly")
+		return
+	}
+
+	byteBudget := budgetInt64(q.Get("budget_bytes"), searchDefaultByteBudget, searchMaxByteBudget)
+	timeBudget := time.Duration(budgetInt64(q.Get("budget_ms"),
+		int64(searchDefaultTimeBudget/time.Millisecond),
+		int64(searchMaxTimeBudget/time.Millisecond))) * time.Millisecond
+	deadline := time.Now().Add(timeBudget)
+	ctx := r.Context()
+
 	// Scan forward from the requested offset, applying filters, until we have
 	// `limit` matches or reach the high watermark. The slice starts non-nil so an
 	// empty result serialises as [] and not as null: a client that does
@@ -278,11 +326,44 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		next = p.EarliestOffset()
 	}
 	scanned := int64(0)
+	bytesRead := int64(0)
+	truncated := false
+	stopReason := "reached_end"
+	remoteSegments := 0
+	for _, si := range p.SegmentInfos() {
+		if si.Remote {
+			remoteSegments++
+		}
+	}
+	pageBytes := int32(limit*4096 + 4096)
+
 	for len(matches) < limit && next < p.LogEndOffset() {
-		raw, _, err := p.Read(next, int32(limit*4096+4096))
-		if err != nil || len(raw) == 0 {
+		// Klien pergi: hentikan pemindaian di server, jangan menunggu sampai
+		// kebetulan selesai.
+		if err := ctx.Err(); err != nil {
+			truncated, stopReason = true, "client_gone"
 			break
 		}
+		if bytesRead >= byteBudget {
+			truncated, stopReason = true, "byte_budget"
+			break
+		}
+		if time.Now().After(deadline) {
+			truncated, stopReason = true, "time_budget"
+			break
+		}
+		// Satu halaman terakhir boleh melewati anggaran (maksimal satu halaman,
+		// <= ~2 MB): memotong batch di tengah lebih buruk daripada melewati
+		// anggaran sedikit, dan angka yang dilaporkan tetap apa adanya.
+		raw, _, err := p.Read(next, pageBytes)
+		if err != nil {
+			truncated, stopReason = true, "read_error"
+			break
+		}
+		if len(raw) == 0 {
+			break
+		}
+		bytesRead += int64(len(raw))
 		records := decodeRecords(topic, int32(partition), raw)
 		before := len(matches)
 		for _, rec := range records {
@@ -314,6 +395,9 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 				last = records[len(records)-1].Offset
 			}
 			if last <= next {
+				// Tidak ada kemajuan: berhenti, dan katakan alasannya.
+				stopReason = "no_progress"
+				truncated = next < p.LogEndOffset()
 				break
 			}
 			next = last + 1
@@ -322,11 +406,32 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if !truncated {
+		if len(matches) >= limit {
+			stopReason = "limit_reached"
+		} else {
+			stopReason = "reached_end"
+		}
+	}
+
+	// nextOffset adalah lanjutan yang bisa dipakai klien, dan truncated/stopReason
+	// menjawab "apakah ini seluruh jawabannya" - pemindaian yang berhenti karena
+	// anggaran tidak boleh tampak seperti sudah sampai ujung log. bytesRead
+	// melaporkan byte yang dibaca lewat Read; kalau remoteSegments > 0 sebagian
+	// bacaan itu menuntut restore segmen dari object storage, yang biayanya
+	// melekat pada segmen (bukan pada angka ini) dan sengaja tidak dihitung.
 	writeJSON(w, 200, map[string]any{
-		"records": matches,
-		"offset":  offset,
-		"limit":   limit,
-		"scanned": scanned,
-		"count":   len(matches),
+		"records":        matches,
+		"offset":         offset,
+		"limit":          limit,
+		"scanned":        scanned,
+		"count":          len(matches),
+		"nextOffset":     next,
+		"bytesRead":      bytesRead,
+		"budgetBytes":    byteBudget,
+		"truncated":      truncated,
+		"stopReason":     stopReason,
+		"remoteSegments": remoteSegments,
+		"elapsedMs":      time.Since(started).Milliseconds(),
 	})
 }
