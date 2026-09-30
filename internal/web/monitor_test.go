@@ -339,21 +339,35 @@ func TestHealthOverviewHandler(t *testing.T) {
 	}
 }
 
-// TestMonitorPageServed verifies the dashboard ships inside the binary.
-func TestMonitorPageServed(t *testing.T) {
+// TestMonitorPageRetired locks the single-source-of-truth decision: the health
+// report lives in the SPA's Health view, so the old standalone page must not
+// come back as a second implementation.
+func TestMonitorPageRetired(t *testing.T) {
 	s, _, _ := newHealthTestServer(t)
 	h := s.Handler()
 	for _, path := range []string{"/monitor", "/monitor.html"} {
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
-		if rr.Code != http.StatusOK {
-			t.Fatalf("%s: status = %d, want 200", path, rr.Code)
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404 (standalone page retired)", path, rr.Code)
 		}
-		if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-			t.Fatalf("%s: content-type = %q, want text/html", path, ct)
-		}
-		if !strings.Contains(rr.Body.String(), "/api/v1/health/overview") {
-			t.Fatalf("%s: page does not call the health API", path)
+	}
+}
+
+// TestDashboardShipsHealthView proves the embedded SPA actually contains the
+// view that replaced the standalone page, so retiring it removes no UI.
+func TestDashboardShipsHealthView(t *testing.T) {
+	s, _, _ := newHealthTestServer(t)
+	h := s.Handler()
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"/api/v1/health/overview", "viewHealth", "'health','Health'"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("dashboard is missing %q: the Health view is not wired into the SPA", want)
 		}
 	}
 }

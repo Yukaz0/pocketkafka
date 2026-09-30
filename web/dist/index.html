@@ -374,7 +374,8 @@ const I={server:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" str
   send:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
   sun:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="18.4" y1="18.4" x2="19.8" y2="19.8"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.2" y1="19.8" x2="5.6" y2="18.4"/><line x1="18.4" y1="5.6" x2="19.8" y2="4.2"/></svg>',
   moon:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>',
-  gear:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'};
+  gear:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  pulse:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="2 12 7 12 10 5 14 19 17 12 22 12"/></svg>'};
 
 const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,alarmsDismissed:new Set((()=>{try{return JSON.parse(sessionStorage.getItem('pk_dismissed')||'[]');}catch(e){return [];}})()),
   /* pengaturan persisten */
@@ -390,7 +391,7 @@ const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],sc
   /* Fitur 3.4 message diff */
   diffSel:[], diffOpen:false,
 };
-const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.users],['schemas','Schemas',I.code],['producer','Producer Studio',I.send],['devstudio','Dev Studio',I.code],['topology','Topology',I.layers],['storage','Storage',I.table],['metrics','Metrics',I.layers],['logs','Broker Logs',I.code],['security','Security & ACL',I.users]];
+const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.users],['schemas','Schemas',I.code],['producer','Producer Studio',I.send],['devstudio','Dev Studio',I.code],['topology','Topology',I.layers],['storage','Storage',I.table],['health','Health',I.pulse],['metrics','Metrics',I.layers],['logs','Broker Logs',I.code],['security','Security & ACL',I.users]];
 
 /* ---- Fitur 15: auto theme detection (prefers-color-scheme) ---- */
 function initTheme(){
@@ -434,7 +435,7 @@ function updAgo(){
   el.title='Auto-refresh: '+(state.refreshMs/1000)+'s';
 }
 setInterval(updAgo,1000);
-function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden){ await refresh(); if(state.view==='connections')render(); if(state.view==='metrics')loadThroughput(); } scheduleRefresh(); },state.refreshMs); }
+function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden){ await refresh(); if(state.view==='connections'&&!patchConnections())render(); if(state.view==='metrics')loadThroughput(); } scheduleRefresh(); },state.refreshMs); }
 function skel(w){return '<span class="skel" style="width:'+(w||60)+'px"></span>';}
 scheduleRefresh();
 
@@ -666,6 +667,9 @@ function syncHash(){
 
 function render(){
   try{
+  /* View yang sama digambar ulang (aksi pengguna: filter, toggle, dsb) tidak
+     boleh melompat ke atas; polling sendiri sudah tidak lewat render(). */
+  const scroller=$('#view'),keepScroll=(scroller&&window.__renderedView===state.view)?scroller.scrollTop:0;
   buildTabs();buildTList();buildStatusbar();updateChips();
   const item=navItems.find(([k])=>k===state.view);
   const title=item?item[1]:'Settings';
@@ -683,6 +687,7 @@ function render(){
   else if(state.view==='devstudio')v.innerHTML=viewDevStudio();
   else if(state.view==='topology')v.innerHTML=viewTopology();
   else if(state.view==='storage')v.innerHTML=viewStorage();
+  else if(state.view==='health')v.innerHTML=viewHealth();
   else if(state.view==='metrics')v.innerHTML=viewMetrics();
   else if(state.view==='logs')v.innerHTML=viewLogs();
   else if(state.view==='security')v.innerHTML=viewSecurity();
@@ -690,6 +695,8 @@ function render(){
   else v.innerHTML='<div class="card"><h3>404</h3><div class="muted" style="margin-top:6px">Unknown view. <a href="#/connections" onclick="goView(\'connections\')">Go to overview</a></div></div>';
   bindView();
   applyDensity();
+  if(keepScroll&&scroller)scroller.scrollTop=keepScroll;
+  window.__renderedView=state.view;
   }catch(err){ console.error('render error:',err); renderFatal(err); }
 }
 async function refreshAll(){await refresh();render();}
@@ -808,12 +815,12 @@ function viewConnections(){
     <div class="card conn">
       <div class="kicker">Cluster Overview</div>
       <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-end;margin:6px 0 4px">
-        <div><div class="statXL">${c.topics??'--'}<small>topics</small></div><div class="statSub">${c.partitions??'--'} partitions</div></div>
-        <div><div class="statXL">${fmtBytes(c.totalBytes||0)}</div><div class="statSub">on disk</div></div>
-        <div><div class="statXL">${c.groups??'--'}<small>groups</small></div><div class="statSub">consumer groups</div></div>
+        <div><div class="statXL"><span id="cvTopics">${c.topics??'--'}</span><small>topics</small></div><div class="statSub" id="cvParts">${c.partitions??'--'} partitions</div></div>
+        <div><div class="statXL"><span id="cvBytes">${fmtBytes(c.totalBytes||0)}</span></div><div class="statSub">on disk</div></div>
+        <div><div class="statXL"><span id="cvGroups">${c.groups??'--'}</span><small>groups</small></div><div class="statSub">consumer groups</div></div>
         <div style="margin-left:auto;text-align:right">
           <span class="brokerBadge"><span class="dot"></span>BROKER ${esc(String(c.brokerId??'0'))}</span>
-          <div class="statSub" style="margin-top:6px">${esc(c.version||'')} &middot; ${c.diskUsagePct!=null?c.diskUsagePct.toFixed(1)+'% disk':''}</div>
+          <div class="statSub" style="margin-top:6px">${esc(c.version||'')} &middot; <span id="cvDisk">${c.diskUsagePct!=null?c.diskUsagePct.toFixed(1)+'% disk':''}</span></div>
         </div>
       </div>
       <hr class="hr">
@@ -821,10 +828,10 @@ function viewConnections(){
         <span class="dot"></span><b>pocketkafka-local</b><span class="tag">KAFKA</span>
         ${c.clusterId?'<span style="margin-left:auto" class="badge b-green">ONLINE</span>':'<span style="margin-left:auto">'+skel(52)+'</span>'}
       </div>
-      <div class="row"><span class="k">Cluster ID</span><span class="mono">${esc(c.clusterId||'-')}</span></div>
-      <div class="row"><span class="k">Endpoint</span><span class="mono">${esc(c.advertised||'localhost:9092')}</span></div>
-      <div class="row"><span class="k">Listeners</span><span class="mono">${(c.listeners||['-']).map(esc).join(', ')}</span></div>
-      <div class="row"><span class="k">Security</span><span class="mono">${esc(c.security||'PLAINTEXT')}</span></div>
+      <div class="row"><span class="k">Cluster ID</span><span class="mono" id="cvClusterId">${esc(c.clusterId||'-')}</span></div>
+      <div class="row"><span class="k">Endpoint</span><span class="mono" id="cvEndpoint">${esc(c.advertised||'localhost:9092')}</span></div>
+      <div class="row"><span class="k">Listeners</span><span class="mono" id="cvListeners">${(c.listeners||['-']).map(esc).join(', ')}</span></div>
+      <div class="row"><span class="k">Security</span><span class="mono" id="cvSecurity">${esc(c.security||'PLAINTEXT')}</span></div>
       <div class="actions">
         <button class="btn ghost" onclick="goView('databrowser')">Open Data Browser</button>
         <button class="btn ghost" onclick="goView('topology')">View Topology</button>
@@ -1388,6 +1395,142 @@ async function loadThroughput(){
 }
 window.loadThroughput=loadThroughput;
 
+/* Connections juga di-refresh oleh timer, jadi ia ikut di-patch di tempat
+   supaya view yang sedang dilihat tidak berkedip tiap refreshMs. */
+function patchConnections(){
+  if(!document.getElementById('cvTopics'))return false;
+  const c=state.cluster||{};
+  const set=(id,txt)=>{const el=document.getElementById(id); if(el&&el.textContent!==txt)el.textContent=txt;};
+  set('cvTopics',String(c.topics??'--'));
+  set('cvParts',String(c.partitions??'--')+' partitions');
+  set('cvBytes',fmtBytes(c.totalBytes||0));
+  set('cvGroups',String(c.groups??'--'));
+  if(c.diskUsagePct!=null)set('cvDisk',c.diskUsagePct.toFixed(1)+'% disk');
+  set('cvClusterId',String(c.clusterId||'-'));
+  set('cvEndpoint',String(c.advertised||'localhost:9092'));
+  set('cvListeners',(c.listeners||['-']).join(', '));
+  set('cvSecurity',String(c.security||'PLAINTEXT'));
+  return true;
+}
+
+/* ---- Health view: broker health overview (GET /api/v1/health/overview) ---- */
+let healthTimer=null,healthData=null,healthErr=null,healthWindow=60,healthOpenTopics=new Set();
+function hStatusBadge(s){return s==='healthy'?'<span class="badge b-green">healthy</span>':s==='degraded'?'<span class="badge b-amber">degraded</span>':s==='critical'?'<span class="badge" style="color:var(--danger);border-color:var(--danger)">critical</span>':s==='idle'?'<span class="badge muted">idle</span>':'<span class="badge muted">'+esc(s||'-')+'</span>';}
+function hTrend(t){return t==='rising'?'^ rising':t==='falling'?'v falling':'- flat';}
+/* aturan kejujuran rate: rateReliable===false -> n/a, bukan 0 */
+function hRate(reliable,v){return reliable===false?'n/a':(typeof v==='number'?v.toFixed(1):'0.0');}
+function sortedHealthTopics(){const s=state.sort.health;const arr=((healthData&&healthData.topics)||[]).slice();if(!s)return arr;const mul=s.dir==='asc'?1:-1;
+  return arr.sort((a,b)=>{let va,vb;
+    if(s.f==='name'){va=a.name;vb=b.name;}
+    else if(s.f==='partitions'){va=a.partitions||0;vb=b.partitions||0;}
+    else if(s.f==='msgs'){va=a.messagesPerSec||0;vb=b.messagesPerSec||0;}
+    else if(s.f==='bytes'){va=a.bytesPerSec||0;vb=b.bytesPerSec||0;}
+    else if(s.f==='messages'){va=a.messages||0;vb=b.messages||0;}
+    else if(s.f==='size'){va=a.bytes||0;vb=b.bytes||0;}
+    else if(s.f==='lag'){va=a.lag||0;vb=b.lag||0;}
+    else if(s.f==='lagps'){va=a.lagPerSec||0;vb=b.lagPerSec||0;}
+    else {va=a.lastAppendAgeMs??Infinity;vb=b.lastAppendAgeMs??Infinity;}
+    return (va>vb?1:va<vb?-1:0)*mul; }); }
+function viewHealth(){
+  if(healthErr)return `<div class="card"><h3>Health</h3><div class="muted" style="margin-top:10px">Failed to load health overview: ${esc(healthErr)}</div><button class="btn" style="margin-top:12px" onclick="loadHealth()">Retry</button></div>`;
+  if(!healthData)return `<div class="card"><h3>Health</h3><div style="margin-top:10px">${skel(220)}<div style="margin-top:8px">${skel(160)}</div></div></div>`;
+  const d=healthData,c=d.cluster||{},samp=d.sampling||{};
+  const rateOk=samp.rateReliable!==false;
+  const msgsRate=rateOk?(c.messagesPerSec||0).toFixed(1):'n/a';
+  const attention=d.attention||[];
+  const topics=sortedHealthTopics();
+  const groups=d.groups||[];
+  const hist=d.history||[];
+  const rateVals=hist.map(h=>h.messagesPerSec||0),lagVals=hist.map(h=>h.lag||0);
+  const rMax=Math.max(1,...rateVals),lMax=Math.max(1,...lagVals);
+  const rateSpark=rateVals.length>1?`<div class="spark" title="Messages per second, last ${samp.windowSeconds||healthWindow}s">${rateVals.map(v=>`<span style="height:${Math.max(3,v/rMax*100)}%"></span>`).join('')}</div>`:'<div class="muted" style="font-size:11px">Not enough history yet.</div>';
+  const lagSpark=lagVals.length>1?`<div class="spark" title="Total consumer lag, last ${samp.windowSeconds||healthWindow}s">${lagVals.map(v=>`<span style="height:${Math.max(3,v/lMax*100)}%"></span>`).join('')}</div>`:'<div class="muted" style="font-size:11px">Not enough history yet.</div>';
+  const attList=attention.length?attention.map(t=>`<div class="row" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="mono">${esc(t.name)}</span>${hStatusBadge(t.status)}<span class="muted" style="font-size:11px">${esc((t.reasons||[]).map(r=>r.message).join('; ')||'no reason given')}</span></div>`).join(''):'<div class="muted" style="padding:6px 0">No topic needs attention: all topics are currently within thresholds. This list refreshes on the next poll.</div>';
+  const topicRows=topics.map(t=>{
+    const open=healthOpenTopics.has(t.name);
+    const spk=t.sparkline||[],smax=Math.max(1,...spk);
+    const mini=spk.length>1?`<div class="spark" style="height:20px">${spk.map(v=>`<span style="height:${Math.max(3,v/smax*100)}%"></span>`).join('')}</div>`:'<span class="muted">-</span>';
+    const row=`<tr class="rowclick" tabindex="0" role="button" aria-expanded="${open}" onclick="toggleHealthTopic('${esc(t.name)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleHealthTopic('${esc(t.name)}')}"><td>${hStatusBadge(t.status)}</td><td class="mono">${esc(t.name)}</td><td>${t.partitions??'-'}</td><td>${hRate(t.rateReliable,t.messagesPerSec)}</td><td>${t.rateReliable===false?'n/a':fmtBytes(t.bytesPerSec||0)+'/s'}</td><td>${(t.messages||0).toLocaleString()}</td><td>${fmtBytes(t.bytes||0)}</td><td>${t.lag??0}</td><td>${hRate(t.rateReliable,t.lagPerSec)}</td><td>${hTrend(t.trend)}</td><td>${t.lastAppendAgeMs==null?'-':rel(Date.now()-t.lastAppendAgeMs)}</td><td>${mini}</td></tr>`;
+    const detail=open?`<tr><td colspan="12" style="background:var(--bg-canvas)"><div style="padding:10px 4px">
+      <div class="muted" style="font-size:11px;margin-bottom:8px">Replication factor ${t.replicationFactor??'-'} &middot; skew ratio ${(t.skewRatio||0).toFixed(2)}</div>
+      ${(t.reasons||[]).length?(t.reasons.map(r=>`<div class="row" style="gap:8px"><span class="chip">${esc(r.code)}</span><span class="muted" style="font-size:11px">${esc(r.severity)}: ${esc(r.message)}</span></div>`).join('')):''}
+      <table><thead><tr><th>Partition</th><th>Leader</th><th>LEO</th><th>Earliest</th><th>Messages</th><th>Bytes</th><th>Lag</th><th>Msgs/s</th><th>Bytes/s</th><th>Skew</th></tr></thead><tbody>
+      ${(t.partitionsDetail||[]).map(p=>`<tr><td>${p.partition}</td><td>${p.leader}</td><td>${p.logEndOffset}</td><td>${p.earliestOffset}</td><td>${p.messages}</td><td>${fmtBytes(p.bytes||0)}</td><td>${p.lag}</td><td>${(p.messagesPerSec||0).toFixed(1)}</td><td>${fmtBytes(p.bytesPerSec||0)}/s</td><td>${p.skewRatio??0}</td></tr>`).join('')||'<tr><td colspan="10" class="muted">No partition detail.</td></tr>'}
+      </tbody></table></div></td></tr>`:'';
+    return row+detail;
+  }).join('')||'<tr><td colspan="12" class="muted" style="padding:20px">No topics reported by the broker yet. Create a topic, or wait for the next health poll.</td></tr>';
+  const groupRows=groups.map(g=>`<tr><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span>${g.stalled?' <span class="badge muted">stalled</span>':''}</td><td>${g.members??0}</td><td class="mono">${(g.topics||[]).join(', ')||'-'}</td><td>${g.lag??0}</td><td>${hRate(samp.rateReliable,g.lagPerSec)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted" style="padding:20px">No consumer groups active right now. Consume from a topic to create one.</td></tr>';
+  const warmupNote=samp.warmup?`<div class="muted" style="font-size:11px;margin-top:6px">Warmup: still collecting samples (started ${samp.ageSeconds??0}s ago). Numbers below may still change.</div>`:'';
+  const rateNote=!rateOk?`<div class="muted" style="font-size:11px;margin-top:6px">Rate not reliable yet over the ${samp.windowSeconds??healthWindow}s window: the baseline may include traffic from before monitoring started, so n/a is shown instead of 0.</div>`:'';
+  return `<div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div><div class="kicker">Cluster</div><h3 style="display:flex;align-items:center;gap:8px">${esc(c.clusterId||'broker')} <span id="hClusterStatus">${hStatusBadge(c.status)}</span></h3></div>
+      <div class="row"><select id="healthWinSel" onchange="setHealthWindow(this.value)"><option value="60" ${healthWindow==60?'selected':''}>60s</option><option value="300" ${healthWindow==300?'selected':''}>5m</option><option value="900" ${healthWindow==900?'selected':''}>15m</option></select><button class="btn ghost" onclick="loadHealth()">Refresh</button></div>
+    </div>
+    <span id="hNotes">${warmupNote}${rateNote}</span>
+    <div class="row" style="gap:32px;margin-top:14px">
+      <div><div class="kicker">Throughput</div><div class="statXL"><span id="hMsgsRate">${msgsRate}</span><small>msg/s</small></div><div class="statSub" id="hSubTop">${c.topics??0} topics &middot; ${c.partitions??0} partitions</div></div>
+      <div><div class="kicker">Consumer Lag</div><div class="statXL"><span id="hLag">${c.lag??0}</span><small>total</small></div><div class="statSub" id="hSubLag">max partition lag ${c.maxPartitionLag??0}</div></div>
+      <div><div class="kicker">Disk</div><div class="statXL"><span id="hDisk">${(c.diskUsagePct||0).toFixed(1)}</span><small>%</small></div><div class="statSub" id="hSubDisk">uptime ${Math.floor((c.uptimeSeconds||0)/60)}m</div></div>
+    </div>
+  </div>
+  <div class="card"><div class="kicker">History</div>
+    <div class="row" style="gap:24px;align-items:flex-start">
+      <div style="flex:1;min-width:220px"><div class="statSub">Messages per second, last ${samp.windowSeconds||healthWindow}s</div><span id="hRateSpark">${rateSpark}</span></div>
+      <div style="flex:1;min-width:220px"><div class="statSub">Total consumer lag, last ${samp.windowSeconds||healthWindow}s</div><span id="hLagSpark">${lagSpark}</span></div>
+    </div>
+  </div>
+  <div class="card"><h3 style="margin-bottom:10px">Attention</h3><span id="hAttList">${attList}</span></div>
+  <div class="card"><h3 style="margin-bottom:10px">Topics</h3><table><thead><tr>
+    <th>Status</th>
+    <th class="sortable" onclick="sortRows('health','name')">Topic<span class="sortInd">${sortInd('health','name')}</span></th>
+    <th class="sortable" onclick="sortRows('health','partitions')">Partitions<span class="sortInd">${sortInd('health','partitions')}</span></th>
+    <th class="sortable" onclick="sortRows('health','msgs')">Msgs/s<span class="sortInd">${sortInd('health','msgs')}</span></th>
+    <th class="sortable" onclick="sortRows('health','bytes')">Bytes/s<span class="sortInd">${sortInd('health','bytes')}</span></th>
+    <th class="sortable" onclick="sortRows('health','messages')">Messages<span class="sortInd">${sortInd('health','messages')}</span></th>
+    <th class="sortable" onclick="sortRows('health','size')">Size<span class="sortInd">${sortInd('health','size')}</span></th>
+    <th class="sortable" onclick="sortRows('health','lag')">Lag<span class="sortInd">${sortInd('health','lag')}</span></th>
+    <th class="sortable" onclick="sortRows('health','lagps')">Lag/s<span class="sortInd">${sortInd('health','lagps')}</span></th>
+    <th>Trend</th>
+    <th class="sortable" onclick="sortRows('health','age')">Last msg<span class="sortInd">${sortInd('health','age')}</span></th>
+    <th>Series</th>
+  </tr></thead><tbody id="hTopicsBody">${topicRows}</tbody></table></div>
+  <div class="card"><h3 style="margin-bottom:10px">Consumer Groups</h3><table><thead><tr><th>Group</th><th>State</th><th>Members</th><th>Topics</th><th>Lag</th><th>Lag/s</th></tr></thead><tbody id="hGroupsBody">${groupRows}</tbody></table></div>
+</div>`;
+}
+/* Refresh TANPA membangun ulang view. Sebelumnya setiap poll memanggil render()
+   yang mengganti seluruh #view dengan innerHTML: itulah kedipan, plus scroll dan
+   fokus ikut hilang tiap refreshMs. Sekarang markup baru dibangun di node
+   terlepas (tidak di-paint) lalu hanya bagian yang benar-benar berubah disalin
+   ke DOM hidup, sehingga tabel, kontrol, dan posisi scroll tetap utuh. */
+const HEALTH_PATCH=[['hMsgsRate','text'],['hLag','text'],['hDisk','text'],['hSubTop','text'],['hSubLag','text'],['hSubDisk','text'],
+  ['hClusterStatus','html'],['hNotes','html'],['hRateSpark','html'],['hLagSpark','html'],['hAttList','html'],['hTopicsBody','html'],['hGroupsBody','html']];
+function patchHealth(){
+  if(!document.getElementById('hTopicsBody'))return false;   // view belum tampil (atau sedang error/loading)
+  const tmp=document.createElement('div'); tmp.innerHTML=viewHealth();
+  HEALTH_PATCH.forEach(pair=>{
+    const src=tmp.querySelector('#'+pair[0]),dst=document.getElementById(pair[0]);
+    if(!src||!dst)return;
+    if(pair[1]==='text'){ if(dst.textContent!==src.textContent)dst.textContent=src.textContent; }
+    else if(dst.innerHTML!==src.innerHTML){ dst.innerHTML=src.innerHTML; }
+  });
+  return true;
+}
+async function loadHealth(){
+  try{ healthData=await api('/api/v1/health/overview?window='+healthWindow); healthErr=null; }
+  catch(e){ healthErr=e.message; }
+  if(state.view!=='health')return;
+  if(!patchHealth())render();   // paint pertama, atau kartu error/loading yang tak punya target patch
+}
+window.loadHealth=loadHealth;
+window.setHealthWindow=function(v){ healthWindow=parseInt(v,10)||60; loadHealth(); };
+window.toggleHealthTopic=function(n){ if(healthOpenTopics.has(n))healthOpenTopics.delete(n); else healthOpenTopics.add(n); render(); };
+/* polling hanya berjalan saat view health aktif; startHealthPoll idempoten (guard healthTimer)
+   supaya render() berulang (dipanggil bindView() setiap render) tidak membuat interval ganda */
+function startHealthPoll(){ if(healthTimer)return; loadHealth(); healthTimer=setInterval(loadHealth,state.refreshMs); }
+function stopHealthPoll(){ if(healthTimer){clearInterval(healthTimer);healthTimer=null;} }
+
 /* ---- Broker logs viewer ---- */
 function viewLogs(){ return `<div class="card"><div class="kicker">Diagnostics</div><h3 style="margin-bottom:10px">Broker Logs</h3>
   <div class="row" style="margin-bottom:10px"><select id="logLvl" style="width:auto" onchange="loadLogs()"><option value="">Semua level</option><option value="warn">Warn ke atas</option><option value="err">Error saja</option></select><button class="btn ghost" onclick="loadLogs()">Refresh</button><span class="updatedAgo">ring 500 baris terakhir</span></div>
@@ -1486,7 +1629,7 @@ window.resumeTail=function(){ state.tailPaused=false; state.pendingTail=0; updat
 function bindTailPause(){ const mainEl=$('main'); if(!mainEl||mainEl._tailBind)return; mainEl._tailBind=1;
   mainEl.addEventListener('scroll',()=>{ if(state.view==='databrowser'&&state.tail&&!state.tailPaused&&mainEl.scrollTop>40){ state.tailPaused=true; updateTailBar(); } }); }
 
-function bindView(){ if(state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();} if(state.view==='groups'&&state.group)loadGroupDetail(); if(state.view==='security'){loadACLs();loadAudit();} if(state.view==='metrics')loadThroughput(); if(state.view==='logs')loadLogs(); if(state.view==='topology')renderTopoSvg(); if(state.view==='databrowser')bindTailPause(); }
+function bindView(){ if(state.view==='health')startHealthPoll(); else stopHealthPoll(); if(state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();} if(state.view==='groups'&&state.group)loadGroupDetail(); if(state.view==='security'){loadACLs();loadAudit();} if(state.view==='metrics')loadThroughput(); if(state.view==='logs')loadLogs(); if(state.view==='topology')renderTopoSvg(); if(state.view==='databrowser')bindTailPause(); }
 initTheme();
 (async function(){await refresh();applyHash();})();
 </script>

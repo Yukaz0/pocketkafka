@@ -13,7 +13,6 @@ package web
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -22,7 +21,6 @@ import (
 
 	"github.com/Yukaz0/pocketkafka/internal/coordinator"
 	"github.com/Yukaz0/pocketkafka/internal/storage"
-	webui "github.com/Yukaz0/pocketkafka/web"
 )
 
 // Topic/cluster verdicts. "idle" is not a fault: the topic is simply not
@@ -905,7 +903,8 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 // HTTP
 // ---------------------------------------------------------------------------
 
-// handleHealthOverview serves the monitoring report consumed by /monitor.
+// handleHealthOverview serves the monitoring report rendered by the dashboard
+// Health view.
 func (s *Server) handleHealthOverview(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
 		writeErr(w, http.StatusServiceUnavailable, "storage unavailable")
@@ -946,27 +945,6 @@ func (s *Server) StartSampler(ctx context.Context, store *storage.Store, gm *coo
 		return
 	}
 	s.monitor.StartSampler(ctx, store, gm, interval)
-}
-
-// handleMonitorPage serves the standalone monitoring dashboard from the
-// embedded assets. Status code and content type are set explicitly so a
-// missing asset fails loudly instead of returning the SPA shell.
-func (s *Server) handleMonitorPage(w http.ResponseWriter, r *http.Request) {
-	f, err := webui.FS().Open("monitor.html")
-	if err != nil {
-		writeErr(w, http.StatusNotFound, "monitor page not embedded")
-		return
-	}
-	defer f.Close()
-	page, err := io.ReadAll(f)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store, max-age=0")
-	w.WriteHeader(http.StatusOK)
-	w.Write(page)
 }
 
 // ---------------------------------------------------------------------------
