@@ -26,6 +26,9 @@ func TestBuildWebServerEnabled(t *testing.T) {
 	cfg := config.Default()
 	cfg.Web.Enabled = true
 	cfg.Web.Auth = false
+	// A data dir inside the repo would make the server create its state files
+	// (including the secrets key that seals stored tokens) in the source tree.
+	cfg.Storage.DataDir = t.TempDir()
 	ws, srv := buildWebServer(cfg, nil, nil, nil, nil, "test")
 	if ws == nil || srv == nil {
 		t.Fatal("buildWebServer(enabled) returned a nil server")
