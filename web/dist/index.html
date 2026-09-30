@@ -377,7 +377,7 @@ const I={server:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" str
   gear:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   pulse:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="2 12 7 12 10 5 14 19 17 12 22 12"/></svg>'};
 
-const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,alarmsDismissed:new Set((()=>{try{return JSON.parse(sessionStorage.getItem('pk_dismissed')||'[]');}catch(e){return [];}})()),
+const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,healthCluster:'local',alarmsDismissed:new Set((()=>{try{return JSON.parse(sessionStorage.getItem('pk_dismissed')||'[]');}catch(e){return [];}})()),
   /* pengaturan persisten */
   refreshMs:+(localStorage.getItem('pk_refreshMs')||5000)||5000,
   density:localStorage.getItem('pk_density')||'comfortable',
@@ -391,7 +391,7 @@ const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],sc
   /* Fitur 3.4 message diff */
   diffSel:[], diffOpen:false,
 };
-const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.users],['schemas','Schemas',I.code],['producer','Producer Studio',I.send],['devstudio','Dev Studio',I.code],['topology','Topology',I.layers],['storage','Storage',I.table],['health','Health',I.pulse],['metrics','Metrics',I.layers],['logs','Broker Logs',I.code],['security','Security & ACL',I.users]];
+const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.users],['schemas','Schemas',I.code],['producer','Producer Studio',I.send],['devstudio','Dev Studio',I.code],['topology','Topology',I.layers],['storage','Storage',I.table],['clusters','Clusters',I.layers],['health','Health',I.pulse],['metrics','Metrics',I.layers],['logs','Broker Logs',I.code],['security','Security & ACL',I.users]];
 
 /* ---- Fitur 15: auto theme detection (prefers-color-scheme) ---- */
 function initTheme(){
@@ -687,6 +687,7 @@ function render(){
   else if(state.view==='devstudio')v.innerHTML=viewDevStudio();
   else if(state.view==='topology')v.innerHTML=viewTopology();
   else if(state.view==='storage')v.innerHTML=viewStorage();
+  else if(state.view==='clusters')v.innerHTML=viewClusters();
   else if(state.view==='health')v.innerHTML=viewHealth();
   else if(state.view==='metrics')v.innerHTML=viewMetrics();
   else if(state.view==='logs')v.innerHTML=viewLogs();
@@ -1465,8 +1466,8 @@ function viewHealth(){
   return `<div>
   <div class="card">
     <div class="row" style="justify-content:space-between">
-      <div><div class="kicker">Cluster</div><h3 style="display:flex;align-items:center;gap:8px">${esc(c.clusterId||'broker')} <span id="hClusterStatus">${hStatusBadge(c.status)}</span></h3></div>
-      <div class="row"><select id="healthWinSel" onchange="setHealthWindow(this.value)"><option value="60" ${healthWindow==60?'selected':''}>60s</option><option value="300" ${healthWindow==300?'selected':''}>5m</option><option value="900" ${healthWindow==900?'selected':''}>15m</option></select><button class="btn ghost" onclick="loadHealth()">Refresh</button></div>
+      <div><div class="kicker">Cluster &middot; ${esc(healthClusterLabel())}</div><h3 style="display:flex;align-items:center;gap:8px">${esc(c.clusterId||'broker')} <span id="hClusterStatus">${hStatusBadge(c.status)}</span></h3></div>
+      <div class="row"><label class="muted" for="healthClusterSel" style="font-size:11px">Broker</label><select id="healthClusterSel" onchange="setHealthCluster(this.value)">${clusterOptions()}</select><label class="muted" for="healthWinSel" style="font-size:11px">Window</label><select id="healthWinSel" onchange="setHealthWindow(this.value)"><option value="60" ${healthWindow==60?'selected':''}>60s</option><option value="300" ${healthWindow==300?'selected':''}>5m</option><option value="900" ${healthWindow==900?'selected':''}>15m</option></select><button class="btn ghost" onclick="loadHealth()">Refresh</button></div>
     </div>
     <span id="hNotes">${warmupNote}${rateNote}</span>
     <div class="row" style="gap:32px;margin-top:14px">
@@ -1518,7 +1519,8 @@ function patchHealth(){
   return true;
 }
 async function loadHealth(){
-  try{ healthData=await api('/api/v1/health/overview?window='+healthWindow); healthErr=null; }
+  const cl=state.healthCluster||'local';
+  try{ healthData=await api('/api/v1/health/overview?window='+healthWindow+'&cluster='+encodeURIComponent(cl)); healthErr=null; }
   catch(e){ healthErr=e.message; }
   if(state.view!=='health')return;
   if(!patchHealth())render();   // paint pertama, atau kartu error/loading yang tak punya target patch
@@ -1528,8 +1530,166 @@ window.setHealthWindow=function(v){ healthWindow=parseInt(v,10)||60; loadHealth(
 window.toggleHealthTopic=function(n){ if(healthOpenTopics.has(n))healthOpenTopics.delete(n); else healthOpenTopics.add(n); render(); };
 /* polling hanya berjalan saat view health aktif; startHealthPoll idempoten (guard healthTimer)
    supaya render() berulang (dipanggil bindView() setiap render) tidak membuat interval ganda */
-function startHealthPoll(){ if(healthTimer)return; loadHealth(); healthTimer=setInterval(loadHealth,state.refreshMs); }
+function startHealthPoll(){ if(healthTimer)return; loadClusterList(); loadHealth(); healthTimer=setInterval(loadHealth,state.refreshMs); }
 function stopHealthPoll(){ if(healthTimer){clearInterval(healthTimer);healthTimer=null;} }
+
+/* ---- Multi-cluster: registry + pemilihan broker di view Health ----
+   Daftar cluster adalah SATU-SATUNYA sumber URL yang boleh diambil broker,
+   jadi yang ditampilkan di sini hanyalah apa yang dilaporkan /api/v1/clusters
+   dan /api/v1/health/clusters. Token tidak pernah dikirim balik oleh broker:
+   yang tersedia hanya penanda hasToken. */
+let clusterRegistry=null;              /* [{name,url,hasToken}] dari /api/v1/clusters */
+async function loadClusterList(){
+  try{ const d=await api('/api/v1/clusters'); clusterRegistry=d.clusters||[]; }
+  catch(e){ clusterRegistry=clusterRegistry||[]; return; }
+  /* cluster yang sedang dilihat sudah dihapus -> kembali ke broker ini */
+  if(state.healthCluster!=='local'&&!(clusterRegistry||[]).some(c=>c.name===state.healthCluster))state.healthCluster='local';
+}
+function clusterOptions(){
+  const sel=state.healthCluster||'local';
+  let opts=`<option value="local"${sel==='local'?' selected':''}>local (this broker)</option>`;
+  (clusterRegistry||[]).forEach(c=>{ opts+=`<option value="${esc(c.name)}"${sel===c.name?' selected':''}>${esc(c.name)}</option>`; });
+  /* nama terpilih tetap terlihat walau daftarnya belum sempat termuat */
+  if(sel!=='local'&&!(clusterRegistry||[]).some(c=>c.name===sel))opts+=`<option value="${esc(sel)}" selected>${esc(sel)}</option>`;
+  return opts;
+}
+function healthClusterLabel(){ return (state.healthCluster||'local')==='local'?'local (this broker)':state.healthCluster; }
+window.setHealthCluster=function(v){
+  state.healthCluster=v||'local';
+  /* buang laporan lama supaya angka broker sebelumnya tidak tampil di bawah nama broker baru */
+  healthData=null; healthErr=null;
+  render(); loadHealth();
+};
+
+/* ---- Clusters view: memantau banyak broker (GET /api/v1/health/clusters) ----
+   Satu tabel untuk semua broker yang dipantau, termasuk broker ini sendiri
+   sebagai baris "local". Polling memakai pola yang sama dengan Health: markup
+   dibangun di node terlepas lalu hanya bagian yang berubah disalin ke DOM
+   hidup, jadi tabel tidak berkedip dan isian form yang sedang diketik tidak
+   hilang. Hanya URL dari daftar ini yang pernah diambil broker. */
+let clusterTimer=null,clusterData=null,clusterErr=null,editingCluster=null;
+
+/* Argumen untuk atribut onclick: esc(JSON.stringify(x)) menjaga tanda kutip
+   ganda tetap utuh sebagai atribut, dan nama yang mengandung kutip tunggal
+   tetap sah sebagai string JavaScript. */
+function jsArg(s){ return esc(JSON.stringify(String(s))); }
+function clLabel(r){ return r.self?r.name+' (this broker)':r.name; }
+
+function clusterSummaryHtml(){
+  if(!clusterData)return skel(180);
+  const rows=clusterData.clusters||[],unreach=clusterData.unreachable||0;
+  return `${rows.length} cluster(s) &middot; worst ${esc(clusterData.worst||'-')}${unreach?` &middot; <span style="color:var(--warn)">${unreach} tidak terjawab</span>`:''}`;
+}
+
+function clusterFormCard(){
+  const ed=editingCluster;
+  return `<div class="card"><h3 style="margin-bottom:10px">${ed?'Edit cluster':'Add cluster'}</h3>
+    <form onsubmit="event.preventDefault();saveCluster();">
+      <div class="row" style="gap:10px;align-items:flex-end">
+        <div><label class="muted" for="clName" style="font-size:11px;display:block;margin-bottom:4px">Name</label><input id="clName" style="width:170px" placeholder="staging" autocomplete="off" value="${ed?esc(ed.name):''}" ${ed?'readonly':''}></div>
+        <div style="flex:1;min-width:230px"><label class="muted" for="clUrl" style="font-size:11px;display:block;margin-bottom:4px">Dashboard URL</label><input id="clUrl" placeholder="http://10.0.0.26:8080" autocomplete="off" value="${ed?esc(ed.url):''}"></div>
+        <div><label class="muted" for="clToken" style="font-size:11px;display:block;margin-bottom:4px">Cluster token</label><input id="clToken" type="password" autocomplete="new-password" style="width:210px" placeholder="${ed&&ed.hasToken?'unchanged':'optional'}"></div>
+        <button class="btn" type="submit">${ed?'Save changes':'Add cluster'}</button>
+        ${ed?'<button class="btn ghost" type="button" onclick="cancelEditCluster()">Cancel</button>':''}
+      </div>
+      ${ed?'<label class="row" style="gap:6px;margin-top:10px;font-size:11px"><input type="checkbox" id="clClearToken" style="width:auto"> remove the stored token</label>':''}
+    </form>
+    <div class="muted" style="font-size:11px;margin-top:10px">${ed?'Leave the token empty to keep the stored one.':'A token is needed only when the other broker has web login enabled; it is stored write-only and never shown again.'} The broker only ever fetches URLs listed here.</div>
+  </div>`;
+}
+
+function clusterRow(r){
+  const status=r.ok?hStatusBadge(r.status):'<span class="badge b-amber">unreachable</span>';
+  const err=r.error?`<div class="muted" style="font-size:11px;margin-top:3px">${esc(r.error)}</div>`:'';
+  const tok=r.hasToken?' <span class="badge muted">token</span>':'';
+  const acts=r.self
+    ?'<button class="btn ghost" onclick="openClusterHealth(\'local\')">Open</button>'
+    :`<button class="btn ghost" onclick="openClusterHealth(${jsArg(r.name)})">Open</button><button class="btn ghost" onclick="editCluster(${jsArg(r.name)})">Edit</button><button class="btn ghost" onclick="deleteCluster(${jsArg(r.name)})">Remove</button>`;
+  const n=v=>r.ok?(v??0):'-';
+  return `<tr><td class="mono">${esc(clLabel(r))}${tok}${err}<div class="muted" style="font-size:11px">${r.self?'served by this broker':esc(r.url)}</div></td>`
+    +`<td>${status}</td><td>${n(r.topics)}</td>`
+    +`<td>${r.ok?hRate(r.rateReliable,r.messagesPerSec):'-'}</td>`
+    +`<td>${n(r.lag)}</td>`
+    +`<td>${r.ok?(r.diskUsagePct||0).toFixed(1)+'%':'-'}</td>`
+    +`<td>${n(r.attention)}</td>`
+    +`<td class="mono" style="font-size:11px">${r.ok?r.latencyMs+' ms':'-'}</td>`
+    +`<td>${acts}</td></tr>`;
+}
+
+function viewClusters(){
+  const head=`<div class="card"><div class="row" style="justify-content:space-between">
+      <div><div class="kicker">Multi-cluster</div><h3>Clusters</h3><div class="statSub" id="clSummary">${clusterSummaryHtml()}</div></div>
+      <div class="row"><button class="btn ghost" onclick="loadClusterList();loadClusters()">Refresh</button><span class="updatedAgo" id="clUpdated">${clusterData?'updated '+rel(clusterData.generatedAtMs):''}</span></div>
+    </div></div>`;
+  if(clusterErr)return head+`<div class="card"><h3 style="margin-bottom:10px">Cannot load clusters</h3><div class="muted">${esc(clusterErr)}</div><button class="btn" style="margin-top:12px" onclick="loadClusters()">Retry</button></div>`+clusterFormCard();
+  if(!clusterData)return head+`<div class="card">${skel(260)}<div style="margin-top:8px">${skel(190)}</div></div>`+clusterFormCard();
+  const rows=clusterData.clusters||[],peers=rows.filter(r=>!r.self);
+  const note=peers.length?'':'<div class="muted" style="font-size:11px;margin-top:10px">No other broker is monitored yet. Add one above with its dashboard URL to see its health here.</div>';
+  const unreach=clusterData.unreachable?`<div class="muted" style="font-size:11px;margin-top:10px">${clusterData.unreachable} cluster(s) did not answer. A broker that cannot be reached keeps its row and shows the error instead of its numbers.</div>`:'';
+  return head+clusterFormCard()+`<div class="card"><h3 style="margin-bottom:10px">Monitored clusters</h3>
+    <table><thead><tr><th>Cluster</th><th>Status</th><th>Topics</th><th>Msgs/s</th><th>Lag</th><th>Disk</th><th>Attention</th><th>Reply</th><th></th></tr></thead>
+    <tbody id="clBody">${rows.map(clusterRow).join('')}</tbody></table>${note}${unreach}</div>`;
+}
+
+const CLUSTER_PATCH=[['clSummary','html'],['clUpdated','text'],['clBody','html']];
+function patchClusters(){
+  if(!document.getElementById('clBody'))return false;   // view belum tampil (atau sedang error/loading)
+  const tmp=document.createElement('div'); tmp.innerHTML=viewClusters();
+  CLUSTER_PATCH.forEach(pair=>{
+    const src=tmp.querySelector('#'+pair[0]),dst=document.getElementById(pair[0]);
+    if(!src||!dst)return;
+    if(pair[1]==='text'){ if(dst.textContent!==src.textContent)dst.textContent=src.textContent; }
+    else if(dst.innerHTML!==src.innerHTML){ dst.innerHTML=src.innerHTML; }
+  });
+  return true;
+}
+
+async function loadClusters(){
+  try{ clusterData=await api('/api/v1/health/clusters?window='+healthWindow); clusterErr=null; }
+  catch(e){ clusterErr=e.message; }
+  if(state.view!=='clusters')return;
+  if(!patchClusters())render();
+}
+window.loadClusters=loadClusters;
+function startClusterPoll(){ if(clusterTimer)return; loadClusterList(); loadClusters(); clusterTimer=setInterval(loadClusters,state.refreshMs); }
+function stopClusterPoll(){ if(clusterTimer){clearInterval(clusterTimer);clusterTimer=null;} }
+
+window.openClusterHealth=function(name){ state.healthCluster=name||'local'; healthData=null; healthErr=null; goView('health'); };
+window.editCluster=function(name){
+  const r=((clusterData&&clusterData.clusters)||[]).find(c=>c.name===name);
+  if(!r)return;
+  editingCluster={name:r.name,url:r.url,hasToken:!!r.hasToken};
+  render();
+  const el=document.getElementById('clUrl'); if(el)el.focus();
+};
+window.cancelEditCluster=function(){ editingCluster=null; render(); };
+window.saveCluster=async function(){
+  const name=($('#clName')?.value||'').trim(),url=($('#clUrl')?.value||'').trim(),token=($('#clToken')?.value||'').trim();
+  const clearEl=document.getElementById('clClearToken');
+  const clear=!!(clearEl&&clearEl.checked);
+  if(!name||!url){ toast('Name and URL are required'); return; }
+  const body={name,url};
+  if(token)body.token=token;          /* kosong = token lama dipertahankan */
+  if(clear)body.clearToken=true;
+  try{
+    await api('/api/v1/clusters',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    toast(editingCluster?'Cluster updated':'Cluster added');
+    editingCluster=null; clusterRegistry=null;
+    await loadClusterList(); await loadClusters(); render();
+  }catch(e){ toast('Error: '+e.message); }
+};
+window.deleteCluster=async function(name){
+  if(!name)return;
+  if(!confirm('Stop monitoring "'+name+'"? Its stored token is removed too.'))return;
+  try{
+    await api('/api/v1/clusters/'+encodeURIComponent(name),{method:'DELETE'});
+    toast('Cluster removed');
+    if(state.healthCluster===name)state.healthCluster='local';
+    if(editingCluster&&editingCluster.name===name)editingCluster=null;
+    clusterRegistry=null;
+    await loadClusterList(); await loadClusters(); render();
+  }catch(e){ toast('Error: '+e.message); }
+};
 
 /* ---- Broker logs viewer ---- */
 function viewLogs(){ return `<div class="card"><div class="kicker">Diagnostics</div><h3 style="margin-bottom:10px">Broker Logs</h3>
@@ -1629,7 +1789,7 @@ window.resumeTail=function(){ state.tailPaused=false; state.pendingTail=0; updat
 function bindTailPause(){ const mainEl=$('main'); if(!mainEl||mainEl._tailBind)return; mainEl._tailBind=1;
   mainEl.addEventListener('scroll',()=>{ if(state.view==='databrowser'&&state.tail&&!state.tailPaused&&mainEl.scrollTop>40){ state.tailPaused=true; updateTailBar(); } }); }
 
-function bindView(){ if(state.view==='health')startHealthPoll(); else stopHealthPoll(); if(state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();} if(state.view==='groups'&&state.group)loadGroupDetail(); if(state.view==='security'){loadACLs();loadAudit();} if(state.view==='metrics')loadThroughput(); if(state.view==='logs')loadLogs(); if(state.view==='topology')renderTopoSvg(); if(state.view==='databrowser')bindTailPause(); }
+function bindView(){ if(state.view==='health')startHealthPoll(); else stopHealthPoll(); if(state.view==='clusters')startClusterPoll(); else stopClusterPoll(); if(state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();} if(state.view==='groups'&&state.group)loadGroupDetail(); if(state.view==='security'){loadACLs();loadAudit();} if(state.view==='metrics')loadThroughput(); if(state.view==='logs')loadLogs(); if(state.view==='topology')renderTopoSvg(); if(state.view==='databrowser')bindTailPause(); }
 initTheme();
 (async function(){await refresh();applyHash();})();
 </script>
