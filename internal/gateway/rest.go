@@ -169,7 +169,8 @@ type restRecord struct {
 }
 
 func decodeRecords(topic string, partition int32, raw []byte) []restRecord {
-	var out []restRecord
+	// Non-nil so an empty read serialises as [] rather than null.
+	out := []restRecord{}
 	pos := 0
 	for pos < len(raw) {
 		h, err := storage.ParseRecordBatchHeader(raw[pos:])

@@ -905,7 +905,10 @@ async function loadMsgs(){ if(!state.topic)return; try{
   if(state.toTs)qs.set('to_ts',state.toTs);
   if(state.off)qs.set('offset',state.off);
   const res=await api(`/api/v1/topics/${encodeURIComponent(state.topic)}/messages?${qs.toString()}`);
-  state.msgs=res.records||res||[];
+  /* Bentuk respons divalidasi: `records` bisa null (hasil kosong), dan tanpa
+     penjagaan ini yang tersimpan adalah objek respons - bukan daftar - sehingga
+     pemakai berikutnya (handler live tail) meledak saat menyebarnya. */
+  state.msgs=Array.isArray(res)?res:(Array.isArray(res&&res.records)?res.records:[]);
   syncHash();
   refreshFieldHints();
   const pi=$('#pageInfo'); if(pi)pi.textContent=res.count!=null?`${res.count} shown`:'';
@@ -918,7 +921,10 @@ function prevPage(){ if(!state.msgs.length)return; const first=Math.min(...state
 window.prevPage=prevPage;
 function nextPage(){ if(!state.msgs.length)return; const last=Math.max(...state.msgs.map(m=>m.offset)); state.off=last+1; loadMsgs(); }
 window.nextPage=nextPage;
-function filteredMsgs(){ if(!state.filters.length)return state.msgs; const o={}; return state.msgs.filter(m=>{ const v=jsonOf(m); return state.filters.every(f=>evalFilter(f,v)); }); }
+function filteredMsgs(){ return state.msgs.filter(passesFilters); }
+// passesFilters dipakai juga saat tail menyisipkan baris satu per satu, supaya
+// baris yang difilter tidak pernah masuk DOM.
+function passesFilters(m){ if(!state.filters.length)return true; const v=jsonOf(m); return state.filters.every(f=>evalFilter(f,v)); }
 function rowHtml(m){const val=fmtValue(m);const sel=state.diffSel.includes(m.offset);return `<td class="chkCell"><input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleDiffSel(${m.offset})"></td><td>${timeCell(m.timestamp)}</td><td><span class="chip">P${m.partition}</span></td><td>${m.offset}</td><td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td><td><div class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</div></td>${state.projCols.map(c=>`<td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(getPath(jsonOf(m),c))}</td>`).join('')}<td style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td><td style="white-space:nowrap"><button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();replayOne(${m.offset})">Replay</button></td>`;}
 function renderMsgRows(){ const rows=$('#rows'); if(!rows)return; const all=filteredMsgs(); if(!all.length){rows.innerHTML='<tr><td colspan="'+(8+state.projCols.length)+'" class="muted" style="padding:20px">'+(state.filters.length?'No messages match filters.':'No messages.')+'</td></tr>';return;}
 rows.innerHTML=all.slice().reverse().map(m=>'<tr class="rowclick" onclick="insp('+JSON.stringify(m).replace(/"/g,'&quot;')+')">'+rowHtml(m)+'</tr>').join(''); }
@@ -1064,6 +1070,7 @@ function updatePosInfo(){
   el.textContent=txt;
 }
 function toggleTail(){ state.tail=!state.tail; const b=$('#liveBtn'); if(b)b.innerHTML=state.tail?'<span class="live-dot"></span> Pause':'Live Tail'; if(!state.topic){state.tail=false;return;}
+  state.tailSkipped=0; state.pendingTail=0;
   if(state.ws)state.ws.close();
   if(!state.tail)return;
   connectTail(); }
@@ -1077,9 +1084,23 @@ function connectTail(){
   const ws=new WebSocket(`${proto}://${location.host}/api/v1/topics/${encodeURIComponent(state.topic)}/tail?partition=${encodeURIComponent(part)}`);
   state.ws=ws; state.retryCount=state.retryCount||0;
   ws.onopen=()=>{state.retryCount=0;};
-  ws.onmessage=e=>{ const recs=JSON.parse(e.data); if(!recs.length)return;
+  ws.onmessage=e=>{ const data=JSON.parse(e.data);
+    /* Bukan array = frame pemberitahuan: broker melewati pesan karena satu tick
+       memuat lebih banyak daripada yang layak dikirim/ditampilkan. */
+    if(!Array.isArray(data)){ if(data&&data.skipped){ state.tailSkipped=(state.tailSkipped||0)+data.skipped; updateTailBar(); } return; }
+    const recs=data; if(!recs.length)return;
     if(state.tailPaused){ state.pendingTail+=recs.length; updateTailBar(); return; }
-    state.msgs=[...recs.slice().reverse(),...state.msgs]; if(state.msgs.length>200)state.msgs=state.msgs.slice(0,200); recs.slice().reverse().forEach(prependMsgRow); };
+    const fresh=recs.slice().reverse();
+    state.msgs=[...fresh,...state.msgs]; if(state.msgs.length>MSGS_MAX)state.msgs=state.msgs.slice(0,MSGS_MAX);
+    const rows=$('#rows');
+    if(rows){
+      fresh.forEach(m=>{ if(passesFilters(m))prependMsgRow(m); });
+      /* DOM dijaga sepadan dengan yang ditahan: baris terlama dibuang, jadi
+         jumlah baris tidak pernah melewati MSGS_MAX betapapun deras datanya. */
+      const want=filteredMsgs().length;
+      while(rows.children.length>want)rows.removeChild(rows.lastElementChild);
+    }
+    updateTailBar(); };
   ws.onclose=()=>{ if(!state.tail)return; const delay=Math.min(1000*Math.pow(1.5,state.retryCount++),10000); state.wsRetry=setTimeout(connectTail,delay); };
   ws.onerror=()=>{ ws.close(); };
 }
@@ -1809,9 +1830,16 @@ window.toggleTopicCompact=async function(){ const next=!(state.topicCfg&&state.t
   }catch(e){toast(e.message);} };
 
 /* ---- Live tail: pause on scroll-up ---- */
+/* Jumlah pesan terbaru yang ditahan di view selama tail. DOM dijaga sepadan
+   dengan angka ini: sebelum ini baris lama tidak pernah dibuang sehingga DOM
+   tumbuh tanpa batas selama tail menyala, dan itulah yang membuat halaman
+   berat saat broker menerima data terus-menerus. */
+const MSGS_MAX=200;
 function updateTailBar(){ const bar=document.getElementById('tailBar'); if(!bar)return;
-  bar.innerHTML=state.tailPaused?`<div class="tailPausedBar" onclick="resumeTail()"><b>${state.pendingTail}</b> pesan baru ditahan - klik untuk ikut lagi</div>`:''; }
-window.resumeTail=function(){ state.tailPaused=false; state.pendingTail=0; updateTailBar(); renderMsgRows(); const mainEl=$('main'); if(mainEl)mainEl.scrollTop=0; };
+  if(state.tailPaused){ bar.innerHTML=`<div class="tailPausedBar" onclick="resumeTail()"><b>${state.pendingTail}</b> pesan baru ditahan - klik untuk ikut lagi</div>`; return; }
+  if(state.tailSkipped){ bar.innerHTML=`<div class="tailPausedBar" style="cursor:default"><b>${state.tailSkipped}</b> pesan dilewati: broker menerima data lebih cepat daripada yang bisa ditampilkan. Pause atau matikan tail untuk menelusuri riwayat.</div>`; return; }
+  bar.innerHTML=''; }
+window.resumeTail=function(){ state.tailPaused=false; state.pendingTail=0; state.tailSkipped=0; updateTailBar(); renderMsgRows(); const mainEl=$('main'); if(mainEl)mainEl.scrollTop=0; };
 function bindTailPause(){ const mainEl=$('main'); if(!mainEl||mainEl._tailBind)return; mainEl._tailBind=1;
   mainEl.addEventListener('scroll',()=>{ if(state.view==='databrowser'&&state.tail&&!state.tailPaused&&mainEl.scrollTop>40){ state.tailPaused=true; updateTailBar(); } }); }
 

@@ -380,6 +380,35 @@ func TestClusterFanoutCacheIsUsed(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
+// TestSearchMessagesEmptyResultIsAnArray: an empty result must serialise as []
+// and never as null. A client doing `records || fallback` otherwise keeps the
+// response object as its message list, and the next consumer of that list (the
+// live-tail handler spreading it) fails on a non-array.
+func TestSearchMessagesEmptyResultIsAnArray(t *testing.T) {
+	s, store, _ := newHealthTestServer(t)
+	if _, err := store.CreateTopic("kosong", 1); err != nil {
+		t.Fatal(err)
+	}
+	code, body := getJSON(t, s.Handler(), "/api/v1/topics/kosong/messages?limit=10", nil)
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", code, body)
+	}
+	if !strings.Contains(body, `"records":[]`) {
+		t.Fatalf("an empty result must be an empty array: %s", body)
+	}
+}
+
+// TestDecodeRecordsIsNeverNil covers the source of the null: the decoder starts
+// with a non-nil slice.
+func TestDecodeRecordsIsNeverNil(t *testing.T) {
+	if got := decodeRecords("t", 0, nil); got == nil {
+		t.Fatal("decodeRecords(nil) returned nil, which serialises as null")
+	}
+	if got := decodeRecords("t", 0, []byte{}); got == nil {
+		t.Fatal("decodeRecords(empty) returned nil, which serialises as null")
+	}
+}
+
 // TestClusterTokensAreSealedAtRest: the token file is a credential store, so a
 // wrong or missing key must fail loudly instead of degrading to plaintext.
 func TestClusterTokensAreSealedAtRest(t *testing.T) {

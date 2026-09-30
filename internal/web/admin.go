@@ -268,8 +268,11 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Scan forward from the requested offset, applying filters, until we have
-	// `limit` matches or reach the high watermark.
-	var matches []messageRecord
+	// `limit` matches or reach the high watermark. The slice starts non-nil so an
+	// empty result serialises as [] and not as null: a client that does
+	// `records || (fallback)` otherwise stores the whole response object, and the
+	// next consumer of that list breaks on a non-array.
+	matches := []messageRecord{}
 	next := offset
 	if next < p.EarliestOffset() {
 		next = p.EarliestOffset()

@@ -489,7 +489,8 @@ func (s *Server) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeRecords(topic string, partition int32, raw []byte) []messageRecord {
-	var out []messageRecord
+	// Non-nil: an empty decode must serialise as [] rather than null.
+	out := []messageRecord{}
 	pos := 0
 	for pos < len(raw) {
 		h, err := storage.ParseRecordBatchHeader(raw[pos:])
@@ -625,19 +626,41 @@ func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 		readWSPing(conn)
 
 		var pending []messageRecord
+		var unread int64
 		for i := range parts {
 			tp := &parts[i]
 			if hwm := tp.part.HighWatermark(); hwm > tp.next {
+				want := hwm - tp.next
+				got := int64(0)
 				raw, _, err := tp.part.Read(tp.next, 1<<20)
 				if err == nil && len(raw) > 0 {
-					pending = append(pending, decodeRecords(topic, tp.id, raw)...)
+					recs := decodeRecords(topic, tp.id, raw)
+					got = int64(len(recs))
+					pending = append(pending, recs...)
+				}
+				if got < want {
+					// The read window did not cover every offset this tick, so
+					// those messages are being passed over. Counting them here is
+					// what makes the notice the dashboard shows the truth rather
+					// than only the part the frame cap dropped.
+					unread += want - got
 				}
 				tp.next = hwm
 			}
 		}
 		if len(pending) > 0 {
 			// Oldest first; tag each record with its partition (already set).
-			if err := writeWSFrame(conn, mustJSON(pending)); err != nil {
+			frame, capped := capTailFrame(pending, tailMaxPerFrame)
+			if err := writeWSFrame(conn, mustJSON(frame)); err != nil {
+				return
+			}
+			unread += int64(capped)
+		}
+		if unread > 0 {
+			// A notice frame, not records: the dashboard keeps its view bounded
+			// and tells the operator how much it passed over instead of silently
+			// falling behind under heavy ingest.
+			if err := writeWSFrame(conn, mustJSON(map[string]int64{"skipped": unread})); err != nil {
 				return
 			}
 		}
@@ -647,6 +670,21 @@ func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// tailMaxPerFrame bounds one live-tail frame. A browser cannot usefully render
+// forty thousand rows in a tick, so the newest are sent and the rest reported as
+// skipped: a live tail shows what just happened rather than replaying a backlog
+// it cannot display.
+const tailMaxPerFrame = 2000
+
+// capTailFrame keeps at most max records, preferring the newest, and returns how
+// many were dropped.
+func capTailFrame(pending []messageRecord, max int) ([]messageRecord, int) {
+	if max <= 0 || len(pending) <= max {
+		return pending, 0
+	}
+	return pending[len(pending)-max:], len(pending) - max
 }
 
 // mustJSON marshals or returns an empty array on failure.
