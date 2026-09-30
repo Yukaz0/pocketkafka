@@ -104,9 +104,18 @@ func main() {
 		if a == "--to-latest" {
 			*toLatest = true
 		}
+		// Both forms are advertised by the usage text, so both must work: the
+		// space-separated one used to be dropped silently, which read as a
+		// successful reset that reset nothing.
 		if strings.HasPrefix(a, "--to-offset=") {
 			if v, err := strconv.ParseInt(strings.TrimPrefix(a, "--to-offset="), 10, 64); err == nil {
 				*toOffset = v
+			}
+		}
+		if a == "--to-offset" && i+1 < len(rest) {
+			if v, err := strconv.ParseInt(rest[i+1], 10, 64); err == nil {
+				*toOffset = v
+				i++
 			}
 		}
 	}
