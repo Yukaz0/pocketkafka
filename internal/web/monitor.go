@@ -1,0 +1,1264 @@
+package web
+
+// Health monitoring for the embedded dashboard.
+//
+// The monitor keeps a small bounded ring of samples per topic and for the
+// cluster as a whole. Rates are derived from log-end-offset deltas instead of
+// producer counters, so they cover every ingress path (Kafka wire protocol,
+// REST proxy, MQTT bridge, dashboard produce) and remain accurate no matter
+// which client happens to be polling.
+//
+// Everything here is additive: no existing endpoint or behaviour changes.
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"sort"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/Yukaz0/pocketkafka/internal/coordinator"
+	"github.com/Yukaz0/pocketkafka/internal/storage"
+	webui "github.com/Yukaz0/pocketkafka/web"
+)
+
+// Topic/cluster verdicts. "idle" is not a fault: the topic is simply not
+// receiving data right now.
+const (
+	StatusCritical = "critical"
+	StatusDegraded = "degraded"
+	StatusHealthy  = "healthy"
+	StatusIdle     = "idle"
+)
+
+const (
+	// monitorInterval is the minimum gap between two recorded samples. A
+	// client polling faster than this reuses the newest sample instead of
+	// diluting the history.
+	monitorInterval = 2 * time.Second
+	// monitorCapacity is how many samples are retained (120 x 2s = 4 minutes).
+	monitorCapacity = 120
+	// defaultWindow is the rate window when the request does not ask for one.
+	defaultWindow = 60 * time.Second
+	// sparklinePoints caps the per-topic series returned to the UI.
+	sparklinePoints = 60
+)
+
+// healthThresholds configures the verdict rules. Defaults target small
+// single-node deployments; every value can be overridden per request.
+type healthThresholds struct {
+	LagWarn     int64
+	LagCritical int64
+	LagRateWarn float64
+	LagRateCrit float64
+	SkewWarn    float64
+	IdleAfter   time.Duration
+	DiskWarnPct float64
+	DiskCritPct float64
+}
+
+func defaultThresholds() healthThresholds {
+	return healthThresholds{
+		LagWarn:     1000,
+		LagCritical: 10000,
+		LagRateWarn: 50,
+		LagRateCrit: 500,
+		SkewWarn:    3,
+		IdleAfter:   5 * time.Minute,
+		DiskWarnPct: 85,
+		DiskCritPct: 95,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Samples
+// ---------------------------------------------------------------------------
+
+type partitionSample struct {
+	Partition int32
+	LogEnd    int64
+	Bytes     int64
+	Messages  int64 // logEnd - earliest
+	Lag       int64 // max over consumer groups
+}
+
+type topicSample struct {
+	At         time.Time
+	Partitions []partitionSample
+	Messages   int64
+	Bytes      int64
+	Lag        int64
+	MaxLag     int64
+	// GroupLag is the per-group total backlog on this topic at sample time, so
+	// a group's trend can be read from the same series as the topic.
+	GroupLag map[string]int64
+}
+
+type clusterSample struct {
+	At       time.Time
+	Messages int64
+	Bytes    int64
+	Lag      int64
+	DiskPct  float64
+}
+
+// Monitor accumulates samples and answers "is this flowing?" questions.
+type Monitor struct {
+	mu       sync.Mutex
+	topics   map[string][]topicSample
+	cluster  []clusterSample
+	lastSeen map[string]time.Time // topic -> last observed log growth
+	lastAt   time.Time
+	started  time.Time
+	interval time.Duration
+	capacity int
+}
+
+// NewMonitor builds an empty monitor.
+func NewMonitor() *Monitor {
+	return &Monitor{
+		topics:   make(map[string][]topicSample),
+		lastSeen: make(map[string]time.Time),
+		started:  time.Now(),
+		interval: monitorInterval,
+		capacity: monitorCapacity,
+	}
+}
+
+// Record takes one sample of the live store. It returns false without
+// sampling when the previous sample is younger than the monitor interval and
+// force is false. force=true is used by the background sampler so the cadence
+// stays exact regardless of client polling.
+func (m *Monitor) Record(store *storage.Store, gm *coordinator.GroupManager, now time.Time, force bool) bool {
+	if store == nil {
+		return false
+	}
+	lagByTopic, groupLag := lagMaps(mergedGroupViews(gm), store)
+
+	topics := store.TopicsSnapshot()
+	topicSamples := make(map[string]topicSample, len(topics))
+	cs := clusterSample{At: now, DiskPct: store.DiskUsagePct()}
+	for name, t := range topics {
+		ts := topicSample{At: now}
+		for _, pid := range sortedPartitionIDs(t) {
+			p := t.Partitions[pid]
+			if p == nil {
+				continue
+			}
+			leo := p.LogEndOffset()
+			earliest := p.EarliestOffset()
+			lag := int64(0)
+			if l, ok := lagByTopic[name]; ok {
+				lag = l[pid]
+			}
+			ps := partitionSample{
+				Partition: pid,
+				LogEnd:    leo,
+				Bytes:     p.SizeBytes(),
+				Messages:  nonNegative(leo - earliest),
+				Lag:       lag,
+			}
+			ts.Partitions = append(ts.Partitions, ps)
+			ts.Messages += ps.Messages
+			ts.Bytes += ps.Bytes
+			ts.Lag += lag
+			if lag > ts.MaxLag {
+				ts.MaxLag = lag
+			}
+		}
+		ts.GroupLag = groupLag[name]
+		topicSamples[name] = ts
+		cs.Messages += ts.Messages
+		cs.Bytes += ts.Bytes
+		cs.Lag += ts.Lag
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !force && !m.lastAt.IsZero() && now.Sub(m.lastAt) < m.interval {
+		return false
+	}
+	m.lastAt = now
+
+	for name, ts := range topicSamples {
+		prev, hadPrev := m.latest(name)
+		switch {
+		case hadPrev && ts.Messages > prev.Messages:
+			m.lastSeen[name] = now
+		case !hadPrev && ts.Messages > 0:
+			// First sight of an already-populated topic: start the staleness
+			// clock now rather than leaving it unknown forever. This can only
+			// overstate activity right after startup; it never hides silence.
+			m.lastSeen[name] = now
+		}
+		m.topics[name] = appendBounded(m.topics[name], ts, m.capacity)
+	}
+	// Drop series for topics that no longer exist.
+	for name := range m.topics {
+		if _, ok := topics[name]; !ok {
+			delete(m.topics, name)
+			delete(m.lastSeen, name)
+		}
+	}
+	m.cluster = appendBounded(m.cluster, cs, m.capacity)
+	return true
+}
+
+func (m *Monitor) latest(topic string) (topicSample, bool) {
+	s := m.topics[topic]
+	if len(s) == 0 {
+		return topicSample{}, false
+	}
+	return s[len(s)-1], true
+}
+
+// StartSampler records a sample on every tick until ctx is done. Callers use
+// it from the broker so history exists even before the dashboard is opened.
+func (m *Monitor) StartSampler(ctx context.Context, store *storage.Store, gm *coordinator.GroupManager, interval time.Duration) {
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	m.mu.Lock()
+	m.interval = interval
+	m.mu.Unlock()
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		m.Record(store, gm, time.Now(), true)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				m.Record(store, gm, time.Now(), true)
+			}
+		}
+	}()
+}
+
+// ---------------------------------------------------------------------------
+// Response model
+// ---------------------------------------------------------------------------
+
+type healthReason struct {
+	Code     string `json:"code"`
+	Severity string `json:"severity"` // info | warn | critical
+	Message  string `json:"message"`
+}
+
+type groupLagRow struct {
+	Group     string  `json:"group"`
+	State     string  `json:"state"`
+	Members   int     `json:"members"`
+	Lag       int64   `json:"lag"`
+	LagPerSec float64 `json:"lagPerSec"`
+	Stalled   bool    `json:"stalled"`
+}
+
+type partitionHealth struct {
+	Partition      int32   `json:"partition"`
+	Leader         int32   `json:"leader"`
+	LogEnd         int64   `json:"logEndOffset"`
+	Earliest       int64   `json:"earliestOffset"`
+	Messages       int64   `json:"messages"`
+	Bytes          int64   `json:"bytes"`
+	Lag            int64   `json:"lag"`
+	MessagesPerSec float64 `json:"messagesPerSec"`
+	BytesPerSec    float64 `json:"bytesPerSec"`
+	SkewRatio      float64 `json:"skewRatio"`
+}
+
+type topicHealth struct {
+	Name              string            `json:"name"`
+	Status            string            `json:"status"`
+	Partitions        int               `json:"partitions"`
+	ReplicationFactor int               `json:"replicationFactor"`
+	Messages          int64             `json:"messages"`
+	Bytes             int64             `json:"bytes"`
+	MessagesPerSec    float64           `json:"messagesPerSec"`
+	BytesPerSec       float64           `json:"bytesPerSec"`
+	RateSpanSeconds   float64           `json:"rateSpanSeconds"`
+	RateReliable      bool              `json:"rateReliable"`
+	Lag               int64             `json:"lag"`
+	MaxPartitionLag   int64             `json:"maxPartitionLag"`
+	LagPerSec         float64           `json:"lagPerSec"`
+	Trend             string            `json:"trend"` // rising | falling | flat
+	SkewRatio         float64           `json:"skewRatio"`
+	LastAppendAgeMs   *int64            `json:"lastAppendAgeMs"`
+	Groups            []groupLagRow     `json:"groups"`
+	Reasons           []healthReason    `json:"reasons"`
+	PartitionsDetail  []partitionHealth `json:"partitionsDetail"`
+	Sparkline         []float64         `json:"sparkline"` // msg/s, oldest first
+}
+
+type clusterHealth struct {
+	ClusterID       string         `json:"clusterId"`
+	BrokerID        int32          `json:"brokerId"`
+	Version         string         `json:"version"`
+	Status          string         `json:"status"`
+	UptimeSeconds   float64        `json:"uptimeSeconds"`
+	Topics          int            `json:"topics"`
+	Partitions      int            `json:"partitions"`
+	Groups          int            `json:"groups"`
+	TotalBytes      int64          `json:"totalBytes"`
+	TotalMessages   int64          `json:"totalMessages"`
+	Lag             int64          `json:"lag"`
+	MaxPartitionLag int64          `json:"maxPartitionLag"`
+	MessagesPerSec  float64        `json:"messagesPerSec"`
+	BytesPerSec     float64        `json:"bytesPerSec"`
+	DiskUsagePct    float64        `json:"diskUsagePct"`
+	Listeners       []string       `json:"listeners"`
+	Advertised      string         `json:"advertised"`
+	Security        string         `json:"security"`
+	Reasons         []healthReason `json:"reasons"`
+}
+
+type historyPoint struct {
+	T              int64   `json:"t"` // unix ms
+	MessagesPerSec float64 `json:"messagesPerSec"`
+	BytesPerSec    float64 `json:"bytesPerSec"`
+	Lag            int64   `json:"lag"`
+	DiskUsagePct   float64 `json:"diskUsagePct"`
+}
+
+type samplingInfo struct {
+	IntervalMs    int64   `json:"intervalMs"`
+	Samples       int     `json:"samples"`
+	WindowSeconds int     `json:"windowSeconds"`
+	Warmup        bool    `json:"warmup"`
+	RateReliable  bool    `json:"rateReliable"`
+	StartedAtMs   int64   `json:"startedAtMs"`
+	AgeSeconds    float64 `json:"ageSeconds"`
+}
+
+// reportCtx carries the per-request settings the report builders need.
+type reportCtx struct {
+	th       healthThresholds
+	window   time.Duration
+	now      time.Time
+	interval time.Duration
+	capacity int
+}
+
+// rateReliable reports whether the sample series covers the requested window,
+// making the derived rate exact. While a topic (or the broker itself) has been
+// observed for less than the window, the baseline sample already contains the
+// traffic that arrived before monitoring started, so the rate understates
+// reality and must be presented as not yet measurable rather than as zero.
+func (c reportCtx) rateReliable(first, last time.Time, n int) bool {
+	if n < 2 {
+		return false
+	}
+	if first.Before(c.now.Add(-c.window)) {
+		return true
+	}
+	// The window is longer than the retained ring: a full ring is the best
+	// history that can exist, so treat it as good enough.
+	return c.capacity > 0 && n >= c.capacity
+}
+
+// topicRateReliable adapts rateReliable to a topic series.
+func (c reportCtx) topicRateReliable(series []topicSample) bool {
+	if len(series) == 0 {
+		return false
+	}
+	return c.rateReliable(series[0].At, series[len(series)-1].At, len(series))
+}
+
+// clusterRateReliable adapts rateReliable to the cluster series.
+func (c reportCtx) clusterRateReliable(series []clusterSample) bool {
+	if len(series) == 0 {
+		return false
+	}
+	return c.rateReliable(series[0].At, series[len(series)-1].At, len(series))
+}
+
+// groupSummary is one consumer group as reported by the dashboard.
+type groupSummary struct {
+	Name      string   `json:"name"`
+	State     string   `json:"state"`
+	Members   int      `json:"members"`
+	Topics    []string `json:"topics"`
+	Lag       int64    `json:"lag"`
+	LagPerSec float64  `json:"lagPerSec"`
+	Stalled   bool     `json:"stalled"`
+}
+
+type overviewResponse struct {
+	GeneratedAtMs int64          `json:"generatedAtMs"`
+	Thresholds    map[string]any `json:"thresholds"`
+	Sampling      samplingInfo   `json:"sampling"`
+	Cluster       clusterHealth  `json:"cluster"`
+	Topics        []topicHealth  `json:"topics"`
+	Attention     []topicHealth  `json:"attention"`
+	Groups        []groupSummary `json:"groups"`
+	History       []historyPoint `json:"history"`
+}
+
+// ---------------------------------------------------------------------------
+// Verdict rules (pure, unit-tested)
+// ---------------------------------------------------------------------------
+
+// topicMetrics is the numeric view of one topic that the verdict depends on.
+type topicMetrics struct {
+	Partitions     int
+	Messages       int64
+	MessagesPerSec float64
+	Lag            int64
+	LagPerSec      float64
+	SkewRatio      float64
+	LastAppendAge  time.Duration
+	HasActivity    bool
+	StalledGroups  []string
+}
+
+// evaluateTopic turns metrics into a status plus the reasons behind it. The
+// rule order matters: the first matching rule sets the base status, then the
+// secondary warnings are appended.
+func evaluateTopic(th healthThresholds, m topicMetrics) (string, []healthReason) {
+	// Always non-nil: a healthy topic must serialize as [] rather than null so
+	// API consumers can iterate unconditionally.
+	reasons := []healthReason{}
+	status := StatusHealthy
+	rising := m.LagPerSec > 0.5
+	falling := m.LagPerSec < -0.5
+
+	switch {
+	case m.LagPerSec >= th.LagRateCrit || (m.Lag >= th.LagCritical && !falling):
+		status = StatusCritical
+		reasons = append(reasons, healthReason{
+			Code:     "lag_growth_critical",
+			Severity: "critical",
+			Message:  fmt.Sprintf("consumer lag is growing by %.0f msgs/s (total %d)", m.LagPerSec, m.Lag),
+		})
+	case m.LagPerSec >= th.LagRateWarn:
+		status = StatusDegraded
+		reasons = append(reasons, healthReason{
+			Code:     "lag_growth",
+			Severity: "warn",
+			Message:  fmt.Sprintf("consumer lag is growing by %.0f msgs/s (total %d)", m.LagPerSec, m.Lag),
+		})
+	case m.Lag >= th.LagWarn && !falling:
+		status = StatusDegraded
+		reasons = append(reasons, healthReason{
+			Code:     "lag_backlog",
+			Severity: "warn",
+			Message:  fmt.Sprintf("backlog of %d messages is not draining", m.Lag),
+		})
+	case m.Lag > 0 && falling:
+		reasons = append(reasons, healthReason{
+			Code:     "lag_recovering",
+			Severity: "info",
+			Message:  fmt.Sprintf("backlog draining at %.0f msgs/s (%d left)", -m.LagPerSec, m.Lag),
+		})
+	}
+
+	if m.Partitions >= 2 && m.SkewRatio >= th.SkewWarn {
+		status = worseStatus(status, StatusDegraded)
+		reasons = append(reasons, healthReason{
+			Code:     "partition_skew",
+			Severity: "warn",
+			Message:  fmt.Sprintf("hot partition: the busiest partition holds %.1fx the average", m.SkewRatio),
+		})
+	}
+	for _, g := range m.StalledGroups {
+		status = worseStatus(status, StatusDegraded)
+		reasons = append(reasons, healthReason{
+			Code:     "group_stalled",
+			Severity: "warn",
+			Message:  fmt.Sprintf("group %q has a backlog but no active members", g),
+		})
+	}
+
+	if status == StatusHealthy && rising {
+		status = StatusDegraded
+	}
+	if status == StatusHealthy && m.Messages == 0 {
+		status = StatusIdle
+		reasons = append(reasons, healthReason{
+			Code:     "empty",
+			Severity: "info",
+			Message:  "topic has no messages yet",
+		})
+	}
+	if status == StatusHealthy && m.HasActivity && m.LastAppendAge >= th.IdleAfter {
+		status = StatusIdle
+		reasons = append(reasons, healthReason{
+			Code:     "no_recent_produce",
+			Severity: "info",
+			Message:  fmt.Sprintf("no new messages for %s", humanDuration(m.LastAppendAge)),
+		})
+	}
+	return status, reasons
+}
+
+func clusterStatus(th healthThresholds, diskPct float64, topics []topicHealth) (string, []healthReason) {
+	reasons := []healthReason{}
+	status := StatusHealthy
+	allIdle := len(topics) > 0
+	for _, t := range topics {
+		status = worseStatus(status, t.Status)
+		if t.Status != StatusIdle {
+			allIdle = false
+		}
+	}
+	if len(topics) == 0 {
+		allIdle = false
+	}
+	switch {
+	case diskPct >= th.DiskCritPct:
+		status = worseStatus(status, StatusCritical)
+		reasons = append(reasons, healthReason{
+			Code:     "disk_critical",
+			Severity: "critical",
+			Message:  fmt.Sprintf("data dir filesystem is %.1f%% full", diskPct),
+		})
+	case diskPct >= th.DiskWarnPct:
+		status = worseStatus(status, StatusDegraded)
+		reasons = append(reasons, healthReason{
+			Code:     "disk_pressure",
+			Severity: "warn",
+			Message:  fmt.Sprintf("data dir filesystem is %.1f%% full", diskPct),
+		})
+	}
+	if allIdle && status == StatusHealthy {
+		status = StatusIdle
+	}
+	for _, t := range topics {
+		if t.Status == StatusCritical || t.Status == StatusDegraded {
+			reasons = append(reasons, healthReason{
+				Code:     "topic_attention",
+				Severity: t.Status,
+				Message:  fmt.Sprintf("topic %q is %s", t.Name, t.Status),
+			})
+			if len(reasons) >= 6 {
+				break
+			}
+		}
+	}
+	return status, reasons
+}
+
+func worseStatus(a, b string) string {
+	if statusRank(b) > statusRank(a) {
+		return b
+	}
+	return a
+}
+
+func statusRank(s string) int {
+	switch s {
+	case StatusCritical:
+		return 3
+	case StatusDegraded:
+		return 2
+	case StatusHealthy:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Report builder
+// ---------------------------------------------------------------------------
+
+// buildOverview renders the current health report. It never mutates anything
+// except the sample ring.
+func (s *Server) buildOverview(th healthThresholds, window time.Duration, now time.Time) overviewResponse {
+	samples, clusterSeries, lastAt := s.monitor.snapshot()
+	interval, capacity := s.monitor.limits()
+	ctx := reportCtx{th: th, window: window, now: now, interval: interval, capacity: capacity}
+
+	views := mergedGroupViews(s.gm)
+	lagByTopic, _ := lagMaps(views, s.store)
+
+	topics := s.store.TopicsSnapshot()
+	names := make([]string, 0, len(topics))
+	for name := range topics {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	report := overviewResponse{
+		GeneratedAtMs: now.UnixMilli(),
+		Thresholds: map[string]any{
+			"lagWarn":     th.LagWarn,
+			"lagCritical": th.LagCritical,
+			"lagRateWarn": th.LagRateWarn,
+			"lagRateCrit": th.LagRateCrit,
+			"skewWarn":    th.SkewWarn,
+			"idleAfterMs": th.IdleAfter.Milliseconds(),
+			"diskWarnPct": th.DiskWarnPct,
+			"diskCritPct": th.DiskCritPct,
+		},
+	}
+	// Sampling info: the cluster series is the sampling heartbeat, so it tells
+	// us how much history the current window actually holds.
+	samplesInWindow := 0
+	for _, cs := range clusterSeries {
+		if !cs.At.Before(now.Add(-window)) {
+			samplesInWindow++
+		}
+	}
+	warmup := samplesInWindow < 2
+	intervalMs := ctx.interval.Milliseconds()
+	age := 0.0
+	if !lastAt.IsZero() {
+		age = now.Sub(lastAt).Seconds()
+	}
+	report.Sampling = samplingInfo{
+		IntervalMs:    intervalMs,
+		Samples:       samplesInWindow,
+		WindowSeconds: int(window.Seconds()),
+		Warmup:        warmup,
+		RateReliable:  ctx.clusterRateReliable(clusterSeries),
+		StartedAtMs:   s.monitor.started.UnixMilli(),
+		AgeSeconds:    age,
+	}
+
+	// Cluster totals.
+	var totalMessages, totalBytes, maxLag int64
+	clusterPartitions := 0
+	for _, name := range names {
+		t := topics[name]
+		clusterPartitions += len(t.Partitions)
+	}
+	cur, hasCur := lastCluster(clusterSeries)
+	if hasCur {
+		totalMessages, totalBytes = cur.Messages, cur.Bytes
+	}
+	old, dt := clusterBaseline(clusterSeries, window, now)
+	var msgRate, byteRate float64
+	if dt > 0 {
+		msgRate = rate(float64(cur.Messages-old.Messages), dt)
+		byteRate = rate(float64(cur.Bytes-old.Bytes), dt)
+	}
+
+	topicReports := make([]topicHealth, 0, len(names))
+	for _, name := range names {
+		tr := s.buildTopicHealth(ctx, name, topics[name], samples[name], lagByTopic[name], views)
+		if tr.MaxPartitionLag > maxLag {
+			maxLag = tr.MaxPartitionLag
+		}
+		topicReports = append(topicReports, tr)
+	}
+
+	diskPct := 0.0
+	if hasCur {
+		diskPct = cur.DiskPct
+	} else if s.store != nil {
+		diskPct = s.store.DiskUsagePct()
+	}
+	report.Groups = groupSummariesOf(topicReports, views)
+	status, reasons := clusterStatus(ctx.th, diskPct, topicReports)
+	report.Cluster = clusterHealth{
+		ClusterID:       s.clusterID,
+		BrokerID:        s.brokerID,
+		Version:         s.version,
+		Status:          status,
+		UptimeSeconds:   now.Sub(s.startTime).Seconds(),
+		Topics:          len(names),
+		Partitions:      clusterPartitions,
+		Groups:          len(report.Groups),
+		TotalBytes:      totalBytes,
+		TotalMessages:   totalMessages,
+		Lag:             totalLagWithTopics(topicReports),
+		MaxPartitionLag: maxLag,
+		MessagesPerSec:  msgRate,
+		BytesPerSec:     byteRate,
+		DiskUsagePct:    diskPct,
+		Listeners:       s.listeners,
+		Advertised:      s.advertised,
+		Security:        s.securityMode,
+		Reasons:         reasons,
+	}
+	report.Topics = topicReports
+
+	// Attention list: worst first, then by name.
+	attention := make([]topicHealth, 0, len(topicReports))
+	for _, t := range topicReports {
+		if t.Status == StatusDegraded || t.Status == StatusCritical {
+			attention = append(attention, t)
+		}
+	}
+	sort.SliceStable(attention, func(i, j int) bool {
+		if statusRank(attention[i].Status) != statusRank(attention[j].Status) {
+			return statusRank(attention[i].Status) > statusRank(attention[j].Status)
+		}
+		return attention[i].Lag > attention[j].Lag
+	})
+	report.Attention = attention
+
+	// Cluster history.
+	history := make([]historyPoint, 0, len(clusterSeries))
+	for i := 1; i < len(clusterSeries); i++ {
+		prev, cur := clusterSeries[i-1], clusterSeries[i]
+		d := cur.At.Sub(prev.At)
+		if d <= 0 {
+			continue
+		}
+		history = append(history, historyPoint{
+			T:              cur.At.UnixMilli(),
+			MessagesPerSec: rate(float64(cur.Messages-prev.Messages), d),
+			BytesPerSec:    rate(float64(cur.Bytes-prev.Bytes), d),
+			Lag:            cur.Lag,
+			DiskUsagePct:   cur.DiskPct,
+		})
+	}
+	if len(history) > monitorCapacity {
+		history = history[len(history)-monitorCapacity:]
+	}
+	report.History = history
+	return report
+}
+
+// buildTopicHealth derives one topic's row from its samples plus live state.
+func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, series []topicSample, lagByPart map[int32]int64, groups []groupView) topicHealth {
+	window, now := ctx.window, ctx.now
+	th := ctx.th
+	row := topicHealth{
+		Name:              name,
+		ReplicationFactor: 1,
+		Groups:            []groupLagRow{},
+		Reasons:           []healthReason{},
+		PartitionsDetail:  []partitionHealth{},
+		Sparkline:         []float64{},
+	}
+	if t != nil {
+		row.Partitions = len(t.Partitions)
+	}
+
+	// Parallel live snapshot (authoritative for offsets/bytes).
+	type live struct {
+		pid      int32
+		leo      int64
+		earliest int64
+		bytes    int64
+	}
+	var lives []live
+	if t != nil {
+		for _, pid := range sortedPartitionIDs(t) {
+			p := t.Partitions[pid]
+			if p == nil {
+				continue
+			}
+			lives = append(lives, live{pid: pid, leo: p.LogEndOffset(), earliest: p.EarliestOffset(), bytes: p.SizeBytes()})
+		}
+	}
+
+	var messages, bytes int64
+	for _, l := range lives {
+		messages += nonNegative(l.leo - l.earliest)
+		bytes += l.bytes
+	}
+	row.Messages = messages
+	row.Bytes = bytes
+
+	cur, hasCur := lastTopic(series)
+	base, dt := topicBaseline(series, window, now)
+	row.RateSpanSeconds = round2(dt.Seconds())
+	row.RateReliable = ctx.topicRateReliable(series)
+	if hasCur && dt > 0 {
+		row.MessagesPerSec = rate(float64(cur.Messages-base.Messages), dt)
+		row.BytesPerSec = rate(float64(cur.Bytes-base.Bytes), dt)
+		row.LagPerSec = rate(float64(cur.Lag-base.Lag), dt)
+	}
+	if hasCur {
+		row.Lag = cur.Lag
+		row.MaxPartitionLag = cur.MaxLag
+	}
+	switch {
+	case row.LagPerSec > 0.5:
+		row.Trend = "rising"
+	case row.LagPerSec < -0.5:
+		row.Trend = "falling"
+	default:
+		row.Trend = "flat"
+	}
+
+	// Per-partition view with skew.
+	var maxBytes, sumBytes int64
+	for _, l := range lives {
+		if l.bytes > maxBytes {
+			maxBytes = l.bytes
+		}
+		sumBytes += l.bytes
+	}
+	mean := float64(0)
+	if len(lives) > 0 {
+		mean = float64(sumBytes) / float64(len(lives))
+	}
+	if mean > 0 {
+		row.SkewRatio = round2(float64(maxBytes) / mean)
+	}
+
+	for _, l := range lives {
+		ph := partitionHealth{
+			Partition: l.pid,
+			Leader:    s.brokerID,
+			LogEnd:    l.leo,
+			Earliest:  l.earliest,
+			Messages:  nonNegative(l.leo - l.earliest),
+			Bytes:     l.bytes,
+		}
+		if m, ok := lagByPart[l.pid]; ok {
+			ph.Lag = m
+		}
+		if mean > 0 {
+			ph.SkewRatio = round2(float64(l.bytes) / mean)
+		}
+		// Per-partition rates from the sample series.
+		if pcur, pok := lastPartition(series, l.pid); pok && dt > 0 {
+			if pbase, bok := partitionBaseline(series, l.pid, window, now); bok {
+				ph.MessagesPerSec = rate(float64(pcur.Messages-pbase.Messages), dt)
+				ph.BytesPerSec = rate(float64(pcur.Bytes-pbase.Bytes), dt)
+			}
+		}
+		row.PartitionsDetail = append(row.PartitionsDetail, ph)
+	}
+
+	// Last observed append.
+	if seen, ok := s.monitor.lastSeenAt(name); ok {
+		ageMs := now.Sub(seen).Milliseconds()
+		if ageMs < 0 {
+			ageMs = 0
+		}
+		row.LastAppendAgeMs = &ageMs
+	}
+
+	// Consumer groups attached to this topic, including groups that stopped
+	// consuming but still hold committed offsets. A group with no offsets on
+	// this topic is not a consumer of it and must not appear here (otherwise
+	// every topic would list every group).
+	stalled := []string{}
+	for _, g := range groups {
+		parts, ok := g.Offsets[name]
+		if !ok || len(parts) == 0 {
+			continue
+		}
+		gl := groupLagRow{Group: g.Name, State: g.State, Members: g.Members}
+		for part, committed := range parts {
+			leo := int64(0)
+			if t != nil {
+				if p := t.Partitions[part]; p != nil {
+					leo = p.LogEndOffset()
+				}
+			}
+			gl.Lag += nonNegative(leo - committed)
+		}
+		// Per-group trend comes from the same sample series as the topic.
+		if dt > 0 && hasCur {
+			if curLag, ok := cur.GroupLag[g.Name]; ok {
+				gl.LagPerSec = rate(float64(curLag-base.GroupLag[g.Name]), dt)
+			}
+		}
+		if gl.Lag > 0 && g.Members == 0 {
+			gl.Stalled = true
+			stalled = append(stalled, g.Name)
+		}
+		row.Groups = append(row.Groups, gl)
+	}
+
+	// Sparkline: msg/s per sample in the window, oldest first.
+	spark := make([]float64, 0, len(series))
+	for i := 1; i < len(series); i++ {
+		d := series[i].At.Sub(series[i-1].At)
+		if d <= 0 {
+			continue
+		}
+		if series[i].At.Before(now.Add(-window)) {
+			continue
+		}
+		spark = append(spark, rate(float64(series[i].Messages-series[i-1].Messages), d))
+	}
+	if len(spark) > sparklinePoints {
+		spark = spark[len(spark)-sparklinePoints:]
+	}
+	row.Sparkline = spark
+
+	hasActivity := row.LastAppendAgeMs != nil
+	var age time.Duration
+	if hasActivity {
+		age = time.Duration(*row.LastAppendAgeMs) * time.Millisecond
+	}
+	row.Status, row.Reasons = evaluateTopic(th, topicMetrics{
+		Partitions:     row.Partitions,
+		Messages:       row.Messages,
+		MessagesPerSec: row.MessagesPerSec,
+		Lag:            row.Lag,
+		LagPerSec:      row.LagPerSec,
+		SkewRatio:      row.SkewRatio,
+		LastAppendAge:  age,
+		HasActivity:    hasActivity,
+		StalledGroups:  stalled,
+	})
+	// An empty topic with a consumer group that has nothing to read is still
+	// idle, never a fault.
+	return row
+}
+
+// ---------------------------------------------------------------------------
+// HTTP
+// ---------------------------------------------------------------------------
+
+// handleHealthOverview serves the monitoring report consumed by /monitor.
+func (s *Server) handleHealthOverview(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		writeErr(w, http.StatusServiceUnavailable, "storage unavailable")
+		return
+	}
+	th := defaultThresholds()
+	window := defaultWindow
+	q := r.URL.Query()
+	if v := q.Get("window"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 5 && n <= 3600 {
+			window = time.Duration(n) * time.Second
+		}
+	}
+	if v := q.Get("lag_warn"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+			th.LagWarn = n
+		}
+	}
+	if v := q.Get("lag_crit"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+			th.LagCritical = n
+		}
+	}
+	if v := q.Get("idle_s"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 10 {
+			th.IdleAfter = time.Duration(n) * time.Second
+		}
+	}
+	now := time.Now()
+	s.monitor.Record(s.store, s.gm, now, false)
+	writeJSON(w, http.StatusOK, s.buildOverview(th, window, now))
+}
+
+// StartSampler runs the background health sampler on this server's monitor, so
+// the report has history even when nothing is polling the API.
+func (s *Server) StartSampler(ctx context.Context, store *storage.Store, gm *coordinator.GroupManager, interval time.Duration) {
+	if s.monitor == nil {
+		return
+	}
+	s.monitor.StartSampler(ctx, store, gm, interval)
+}
+
+// handleMonitorPage serves the standalone monitoring dashboard from the
+// embedded assets. Status code and content type are set explicitly so a
+// missing asset fails loudly instead of returning the SPA shell.
+func (s *Server) handleMonitorPage(w http.ResponseWriter, r *http.Request) {
+	f, err := webui.FS().Open("monitor.html")
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "monitor page not embedded")
+		return
+	}
+	defer f.Close()
+	page, err := io.ReadAll(f)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	w.WriteHeader(http.StatusOK)
+	w.Write(page)
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func nonNegative(v int64) int64 {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+func rate(delta float64, dt time.Duration) float64 {
+	if dt <= 0 {
+		return 0
+	}
+	return round2(delta / dt.Seconds())
+}
+
+func round2(v float64) float64 {
+	return float64(int64(v*100+sign(v)*0.5)) / 100
+}
+
+func sign(v float64) float64 {
+	if v < 0 {
+		return -1
+	}
+	return 1
+}
+
+func humanDuration(d time.Duration) string {
+	switch {
+	case d >= time.Hour:
+		return fmt.Sprintf("%.1fh", d.Hours())
+	case d >= time.Minute:
+		return fmt.Sprintf("%.0fm", d.Minutes())
+	default:
+		return fmt.Sprintf("%.0fs", d.Seconds())
+	}
+}
+
+// appendBounded appends v and trims the slice to cap entries.
+func appendBounded[T any](s []T, v T, cap int) []T {
+	s = append(s, v)
+	if len(s) > cap {
+		s = s[len(s)-cap:]
+	}
+	return s
+}
+
+func sortedPartitionIDs(t *storage.Topic) []int32 {
+	ids := make([]int32, 0, len(t.Partitions))
+	for pid := range t.Partitions {
+		ids = append(ids, pid)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
+// groupView is the merged view of one consumer group: liveness comes from the
+// in-memory manager, backlog from the persistent offset store. Merging is what
+// makes a stopped consumer visible.
+type groupView struct {
+	Name    string
+	State   string
+	Members int
+	Offsets map[string]map[int32]int64
+}
+
+// mergedGroupViews unions the live groups with every group that holds a
+// committed offset, so a consumer that stopped (no members, backlog left
+// behind) still shows up in the dashboard.
+func mergedGroupViews(gm *coordinator.GroupManager) []groupView {
+	if gm == nil {
+		return nil
+	}
+	out := []groupView{}
+	seen := map[string]bool{}
+	for _, g := range gm.ListGroups() {
+		out = append(out, groupView{Name: g.Name, State: g.State, Members: len(g.Members), Offsets: g.Offsets})
+		seen[g.Name] = true
+	}
+	for name, offsets := range gm.CommittedGroups() {
+		if seen[name] {
+			continue
+		}
+		out = append(out, groupView{Name: name, State: "Empty", Members: 0, Offsets: offsets})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// lagMaps derives, in one pass over the group views:
+//   - byTopicPart: topic -> partition -> lag of the worst group on it
+//   - byTopicGroup: topic -> group -> total lag, so a sample can carry the
+//     per-group backlog alongside the topic totals.
+func lagMaps(views []groupView, store *storage.Store) (map[string]map[int32]int64, map[string]map[string]int64) {
+	byTopicPart := map[string]map[int32]int64{}
+	byTopicGroup := map[string]map[string]int64{}
+	if store == nil {
+		return byTopicPart, byTopicGroup
+	}
+	for _, g := range views {
+		for topic, parts := range g.Offsets {
+			var total int64
+			for part, committed := range parts {
+				leo := int64(0)
+				if p := store.GetPartition(topic, part); p != nil {
+					leo = p.LogEndOffset()
+				}
+				lag := nonNegative(leo - committed)
+				total += lag
+				m := byTopicPart[topic]
+				if m == nil {
+					m = map[int32]int64{}
+					byTopicPart[topic] = m
+				}
+				if lag > m[part] {
+					m[part] = lag
+				}
+			}
+			gm := byTopicGroup[topic]
+			if gm == nil {
+				gm = map[string]int64{}
+				byTopicGroup[topic] = gm
+			}
+			gm[g.Name] = total
+		}
+	}
+	return byTopicPart, byTopicGroup
+}
+
+// groupSummariesOf merges the per-topic group rows into one cluster-level list.
+func groupSummariesOf(topics []topicHealth, views []groupView) []groupSummary {
+	idx := map[string]*groupSummary{}
+	order := []string{}
+	for _, t := range topics {
+		for _, g := range t.Groups {
+			s := idx[g.Group]
+			if s == nil {
+				s = &groupSummary{Name: g.Group, State: g.State, Members: g.Members}
+				idx[g.Group] = s
+				order = append(order, g.Group)
+			}
+			s.Topics = append(s.Topics, t.Name)
+			s.Lag += g.Lag
+			s.LagPerSec += g.LagPerSec
+			s.Stalled = s.Stalled || g.Stalled
+		}
+	}
+	// Live groups that have not committed anything yet also belong in the list.
+	for _, v := range views {
+		s := idx[v.Name]
+		if s == nil {
+			s = &groupSummary{Name: v.Name}
+			idx[v.Name] = s
+			order = append(order, v.Name)
+		}
+		s.State = v.State
+		s.Members = v.Members
+		if s.Topics == nil {
+			s.Topics = []string{}
+		}
+	}
+	out := make([]groupSummary, 0, len(order))
+	for _, name := range order {
+		out = append(out, *idx[name])
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Lag != out[j].Lag {
+			return out[i].Lag > out[j].Lag
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// totalLagWithTopics sums the backlog of every topic row.
+func totalLagWithTopics(topics []topicHealth) int64 {
+	var total int64
+	for _, t := range topics {
+		total += t.Lag
+	}
+	return total
+}
+
+// lastTopic returns the newest sample of a topic series.
+func lastTopic(series []topicSample) (topicSample, bool) {
+	if len(series) == 0 {
+		return topicSample{}, false
+	}
+	return series[len(series)-1], true
+}
+
+// topicBaseline returns the oldest sample inside the window (or the series
+// head when the window covers everything) and the elapsed time to now.
+func topicBaseline(series []topicSample, window time.Duration, now time.Time) (topicSample, time.Duration) {
+	if len(series) < 2 {
+		return topicSample{}, 0
+	}
+	cur := series[len(series)-1]
+	idx := 0
+	cutoff := now.Add(-window)
+	for i := len(series) - 1; i >= 0; i-- {
+		if series[i].At.Before(cutoff) {
+			idx = i
+			break
+		}
+		idx = i
+	}
+	base := series[idx]
+	if !base.At.Before(cur.At) {
+		return topicSample{}, 0
+	}
+	return base, cur.At.Sub(base.At)
+}
+
+func lastPartition(series []topicSample, pid int32) (partitionSample, bool) {
+	if len(series) == 0 {
+		return partitionSample{}, false
+	}
+	last := series[len(series)-1]
+	for _, p := range last.Partitions {
+		if p.Partition == pid {
+			return p, true
+		}
+	}
+	return partitionSample{}, false
+}
+
+func partitionBaseline(series []topicSample, pid int32, window time.Duration, now time.Time) (partitionSample, bool) {
+	base, _ := topicBaseline(series, window, now)
+	if base.At.IsZero() {
+		return partitionSample{}, false
+	}
+	for _, p := range base.Partitions {
+		if p.Partition == pid {
+			return p, true
+		}
+	}
+	return partitionSample{}, false
+}
+
+func lastCluster(series []clusterSample) (clusterSample, bool) {
+	if len(series) == 0 {
+		return clusterSample{}, false
+	}
+	return series[len(series)-1], true
+}
+
+func clusterBaseline(series []clusterSample, window time.Duration, now time.Time) (clusterSample, time.Duration) {
+	if len(series) < 2 {
+		return clusterSample{}, 0
+	}
+	cur := series[len(series)-1]
+	cutoff := now.Add(-window)
+	idx := 0
+	for i := len(series) - 1; i >= 0; i-- {
+		idx = i
+		if series[i].At.Before(cutoff) {
+			break
+		}
+	}
+	base := series[idx]
+	if !base.At.Before(cur.At) {
+		return clusterSample{}, 0
+	}
+	return base, cur.At.Sub(base.At)
+}
+
+// snapshot copies the sample ring for lock-free rendering.
+func (m *Monitor) snapshot() (map[string][]topicSample, []clusterSample, time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	topics := make(map[string][]topicSample, len(m.topics))
+	for name, series := range m.topics {
+		topics[name] = append([]topicSample(nil), series...)
+	}
+	return topics, append([]clusterSample(nil), m.cluster...), m.lastAt
+}
+
+// limits returns the sampling interval and ring capacity.
+func (m *Monitor) limits() (time.Duration, int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.interval, m.capacity
+}
+
+func (m *Monitor) lastSeenAt(topic string) (time.Time, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.lastSeen[topic]
+	return t, ok
+}

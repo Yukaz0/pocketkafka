@@ -162,6 +162,15 @@ func main() {
 	if ws != nil {
 		ws.WithMQTT(mqttBridge, cfg.MQTT.Listen)
 	}
+
+	// Health sampler: keeps a rolling sample ring for /api/v1/health/overview
+	// and the /monitor dashboard, so history exists even before anyone opens
+	// the page.
+	if ws != nil {
+		samplerCtx, stopSampler := context.WithCancel(context.Background())
+		defer stopSampler()
+		ws.StartSampler(samplerCtx, store, gm, 5*time.Second)
+	}
 	defer mqttBridge.Close()
 
 	// Background retention cleanup.

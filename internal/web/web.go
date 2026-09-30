@@ -32,6 +32,9 @@ type Server struct {
 	version   string
 	startTime time.Time
 	metrics   *metrics.Registry
+	// monitor keeps the health sample ring behind /api/v1/health/overview and
+	// the standalone /monitor dashboard.
+	monitor *Monitor
 
 	// Auth (Fitur 12).
 	users       []config.SecurityUser
@@ -108,6 +111,7 @@ func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.
 		version:   version,
 		startTime: time.Now(),
 		metrics:   metrics.NewRegistry(),
+		monitor:   NewMonitor(),
 		aclStore:  authz.NewInMemory(),
 		rrCounter: make(map[string]uint64),
 	}
@@ -210,6 +214,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /livez", s.handleLivez)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
+	// Health monitoring: aggregate report plus its standalone dashboard. The
+	// page is served from the embedded assets, so it ships with the binary.
+	mux.HandleFunc("GET /api/v1/health/overview", s.handleHealthOverview)
+	mux.HandleFunc("GET /monitor", s.handleMonitorPage)
+	mux.HandleFunc("GET /monitor.html", s.handleMonitorPage)
 	authed := newAuthMiddleware(s.users, s.authSecret, s.authEnabled)(mux)
 	return s.authorizeMutations(authed)
 }

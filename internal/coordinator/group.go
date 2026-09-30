@@ -614,6 +614,23 @@ func (gm *GroupManager) GroupOffsetsSnapshot(group string) map[string]map[int32]
 	return gm.offsets.GroupOffsets(group)
 }
 
+// CommittedGroups returns every group that has committed offsets, including
+// groups that have no live members. A consumer that stopped still holds a
+// backlog an operator must be able to see, so monitoring cannot rely on
+// ListGroups alone (which only knows about groups with live/buffered members).
+// The result is group -> topic -> partition -> offset.
+func (gm *GroupManager) CommittedGroups() map[string]map[string]map[int32]int64 {
+	out := map[string]map[string]map[int32]int64{}
+	for _, name := range gm.offsets.Groups() {
+		offsets := gm.offsets.GroupOffsets(name)
+		if len(offsets) == 0 {
+			continue
+		}
+		out[name] = offsets
+	}
+	return out
+}
+
 var errNonEmptyGroup = fmt.Errorf("group is not empty")
 
 // protocolMetadata picks the metadata bytes for the group's chosen protocol.
