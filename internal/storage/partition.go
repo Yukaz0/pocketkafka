@@ -40,6 +40,11 @@ type Partition struct {
 
 	// compacting keeps a second compaction from racing the first on one partition.
 	compacting atomic.Bool
+
+	// lastCompactMs/bytesAtCompact record the last successful compaction, so the
+	// dashboard can show how much has piled up since.
+	lastCompactMs  int64
+	bytesAtCompact int64
 }
 
 // OpenPartition opens (or creates) a partition directory and recovers its state.
@@ -405,6 +410,38 @@ func (p *Partition) EarliestOffset() int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.earliestOffsetLocked()
+}
+
+// Durability reports how far an fsync has covered: the durable offset, the bytes
+// written past it, and when the last sync happened (0 when this process has not
+// synced the segment yet).
+func (p *Partition) Durability() (durableOffset, bytesAtRisk, lastSyncMs int64) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.activeSegment == nil {
+		return p.nextOffset, 0, 0
+	}
+	risk := p.activeSegment.size - p.activeSegment.syncedBytes
+	if risk < 0 {
+		risk = 0
+	}
+	return p.activeSegment.syncedOffset, risk, p.activeSegment.lastSyncMs
+}
+
+// CompactionDebt reports the bytes written since the last compaction and when
+// that was. It is an upper bound on what the next pass drops: records with a
+// unique key survive it.
+func (p *Partition) CompactionDebt() (bytes int64, lastCompactMs int64) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	base := int64(0)
+	if p.lastCompactMs > 0 {
+		base = p.bytesAtCompact
+	}
+	if debt := p.totalSizeLocked() - base; debt > 0 {
+		return debt, p.lastCompactMs
+	}
+	return 0, p.lastCompactMs
 }
 
 // SizeBytes returns the total on-disk size of the partition in bytes.

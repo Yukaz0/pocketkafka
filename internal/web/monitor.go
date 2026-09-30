@@ -31,8 +31,15 @@ const (
 	// client polling faster than this reuses the newest sample instead of
 	// diluting the history.
 	monitorInterval = 2 * time.Second
-	// monitorCapacity is how many samples are retained (120 x 2s = 4 minutes).
-	monitorCapacity = 120
+	// historyRetention is how far back samples are kept. Every window the API
+	// accepts (up to 3600 s) must have history to measure against, or its rate
+	// is not reliable by construction.
+	historyRetention = time.Hour
+	// historyMaxSamples bounds memory if a client polls faster than the sampler.
+	historyMaxSamples = 3600
+	// historyPoints caps the series returned to the browser. The ring keeps more
+	// than it ships, and the span actually measured is reported separately.
+	historyPoints = 240
 	// defaultWindow is the rate window when the request does not ask for one.
 	defaultWindow = 60 * time.Second
 	// sparklinePoints caps the per-topic series returned to the UI.
@@ -50,18 +57,67 @@ type healthThresholds struct {
 	IdleAfter   time.Duration
 	DiskWarnPct float64
 	DiskCritPct float64
+	// UnflushedWarnBytes is how many bytes may sit un-synced before the broker
+	// says so: a page-cache backlog is only a durability risk once it is large.
+	UnflushedWarnBytes int64
+	// RetentionWarnSeconds and RetentionCriticalSeconds bound how soon a lagging
+	// group is projected to lose offsets retention has not deleted yet.
+	RetentionWarnSeconds     int64
+	RetentionCriticalSeconds int64
 }
 
 func defaultThresholds() healthThresholds {
 	return healthThresholds{
-		LagWarn:     1000,
-		LagCritical: 10000,
-		LagRateWarn: 50,
-		LagRateCrit: 500,
-		SkewWarn:    3,
-		IdleAfter:   5 * time.Minute,
-		DiskWarnPct: 85,
-		DiskCritPct: 95,
+		LagWarn:                  1000,
+		LagCritical:              10000,
+		LagRateWarn:              50,
+		LagRateCrit:              500,
+		SkewWarn:                 3,
+		IdleAfter:                5 * time.Minute,
+		DiskWarnPct:              85,
+		DiskCritPct:              95,
+		UnflushedWarnBytes:       32 << 20,
+		RetentionWarnSeconds:     1800,
+		RetentionCriticalSeconds: 300,
+	}
+}
+
+// retentionSummary condenses the projection: whether any group has already lost
+// unread data, and the soonest projected loss.
+func retentionSummary(risks []retentionRisk) (*int64, bool) {
+	var soonest *int64
+	for _, r := range risks {
+		if r.AlreadyLost {
+			return nil, true
+		}
+		if r.SecondsUntilLoss != nil && (soonest == nil || *r.SecondsUntilLoss < *soonest) {
+			soonest = r.SecondsUntilLoss
+		}
+	}
+	return soonest, false
+}
+
+// retentionUrgency orders the projection list, most urgent first.
+func retentionUrgency(r retentionRisk) int64 {
+	if r.AlreadyLost {
+		return -1
+	}
+	if r.SecondsUntilLoss == nil {
+		return int64(1) << 62
+	}
+	return *r.SecondsUntilLoss
+}
+
+// shortDuration renders a span as the largest useful unit pair.
+func shortDuration(secs int64) string {
+	d := time.Duration(secs) * time.Second
+	switch {
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	default:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}
 }
 
@@ -82,6 +138,10 @@ type topicSample struct {
 	Bytes      int64
 	Lag        int64
 	MaxLag     int64
+	// Earliest is the lowest offset still retained on the topic (-1 unknown):
+	// paired with a group's next-needed offset it projects when retention will
+	// take data that group has not consumed yet.
+	Earliest int64
 	// GroupLag is the per-group total backlog on this topic at sample time, so
 	// a group's trend can be read from the same series as the topic.
 	GroupLag map[string]int64
@@ -93,28 +153,39 @@ type clusterSample struct {
 	Bytes    int64
 	Lag      int64
 	DiskPct  float64
+	// Earliest is the lowest offset still retained anywhere in the cluster, and
+	// Committed is each group's committed total: together they project when a
+	// lagging group loses the offsets it still needs to retention.
+	Earliest  int64
+	Committed map[string]int64
 }
+
+// sampleTime lets one trim helper serve both rings.
+func (t topicSample) sampleTime() time.Time   { return t.At }
+func (c clusterSample) sampleTime() time.Time { return c.At }
 
 // Monitor accumulates samples and answers "is this flowing?" questions.
 type Monitor struct {
-	mu       sync.Mutex
-	topics   map[string][]topicSample
-	cluster  []clusterSample
-	lastSeen map[string]time.Time // topic -> last observed log growth
-	lastAt   time.Time
-	started  time.Time
-	interval time.Duration
-	capacity int
+	mu         sync.Mutex
+	topics     map[string][]topicSample
+	cluster    []clusterSample
+	lastSeen   map[string]time.Time // topic -> last observed log growth
+	lastAt     time.Time
+	started    time.Time
+	interval   time.Duration
+	retention  time.Duration
+	maxSamples int
 }
 
 // NewMonitor builds an empty monitor.
 func NewMonitor() *Monitor {
 	return &Monitor{
-		topics:   make(map[string][]topicSample),
-		lastSeen: make(map[string]time.Time),
-		started:  time.Now(),
-		interval: monitorInterval,
-		capacity: monitorCapacity,
+		topics:     make(map[string][]topicSample),
+		lastSeen:   make(map[string]time.Time),
+		started:    time.Now(),
+		interval:   monitorInterval,
+		retention:  historyRetention,
+		maxSamples: historyMaxSamples,
 	}
 }
 
@@ -125,13 +196,14 @@ func (m *Monitor) Record(store *storage.Store, gm *coordinator.GroupManager, now
 	if store == nil {
 		return false
 	}
-	lagByTopic, groupLag := lagMaps(mergedGroupViews(gm), store)
+	views := mergedGroupViews(gm)
+	lagByTopic, groupLag := lagMaps(views, store)
 
 	topics := store.TopicsSnapshot()
 	topicSamples := make(map[string]topicSample, len(topics))
-	cs := clusterSample{At: now, DiskPct: store.DiskUsagePct()}
+	cs := clusterSample{At: now, DiskPct: store.DiskUsagePct(), Earliest: -1, Committed: committedTotals(views)}
 	for name, t := range topics {
-		ts := topicSample{At: now}
+		ts := topicSample{At: now, Earliest: -1}
 		for _, pid := range sortedPartitionIDs(t) {
 			p := t.Partitions[pid]
 			if p == nil {
@@ -139,6 +211,9 @@ func (m *Monitor) Record(store *storage.Store, gm *coordinator.GroupManager, now
 			}
 			leo := p.LogEndOffset()
 			earliest := p.EarliestOffset()
+			if ts.Earliest < 0 || earliest < ts.Earliest {
+				ts.Earliest = earliest
+			}
 			lag := int64(0)
 			if l, ok := lagByTopic[name]; ok {
 				lag = l[pid]
@@ -160,6 +235,9 @@ func (m *Monitor) Record(store *storage.Store, gm *coordinator.GroupManager, now
 		}
 		ts.GroupLag = groupLag[name]
 		topicSamples[name] = ts
+		if ts.Earliest >= 0 && (cs.Earliest < 0 || ts.Earliest < cs.Earliest) {
+			cs.Earliest = ts.Earliest
+		}
 		cs.Messages += ts.Messages
 		cs.Bytes += ts.Bytes
 		cs.Lag += ts.Lag
@@ -183,7 +261,7 @@ func (m *Monitor) Record(store *storage.Store, gm *coordinator.GroupManager, now
 			// overstate activity right after startup; it never hides silence.
 			m.lastSeen[name] = now
 		}
-		m.topics[name] = appendBounded(m.topics[name], ts, m.capacity)
+		m.topics[name] = trimSamples(append(m.topics[name], ts), now, m.retention, m.maxSamples)
 	}
 	// Drop series for topics that no longer exist.
 	for name := range m.topics {
@@ -192,7 +270,7 @@ func (m *Monitor) Record(store *storage.Store, gm *coordinator.GroupManager, now
 			delete(m.lastSeen, name)
 		}
 	}
-	m.cluster = appendBounded(m.cluster, cs, m.capacity)
+	m.cluster = trimSamples(append(m.cluster, cs), now, m.retention, m.maxSamples)
 	return true
 }
 
@@ -256,6 +334,25 @@ type partitionHealth struct {
 	MessagesPerSec float64 `json:"messagesPerSec"`
 	BytesPerSec    float64 `json:"bytesPerSec"`
 	SkewRatio      float64 `json:"skewRatio"`
+	// DurableOffset is how far an fsync has covered. Everything between it and
+	// logEndOffset lives in the page cache only, which is the durability this
+	// broker can honestly promise.
+	DurableOffset      int64 `json:"durableOffset"`
+	OffsetsAtRisk      int64 `json:"offsetsAtRisk"`
+	BytesAtRisk        int64 `json:"bytesAtRisk"`
+	RetentionDebtBytes int64 `json:"retentionDebtBytes"`
+}
+
+// retentionRisk projects when a lagging group loses the offsets it still needs.
+// It is derived from the broker's own earliest offset advancing, which no client
+// can observe: a client only finds out by failing a read.
+type retentionRisk struct {
+	Group            string  `json:"group"`
+	NextNeeded       int64   `json:"nextNeeded"`
+	Earliest         int64   `json:"earliest"`
+	EarliestPerSec   float64 `json:"earliestPerSec"`
+	SecondsUntilLoss *int64  `json:"secondsUntilLoss,omitempty"`
+	AlreadyLost      bool    `json:"alreadyLost"`
 }
 
 type topicHealth struct {
@@ -279,46 +376,137 @@ type topicHealth struct {
 	Reasons           []healthReason    `json:"reasons"`
 	PartitionsDetail  []partitionHealth `json:"partitionsDetail"`
 	Sparkline         []float64         `json:"sparkline"` // msg/s, oldest first
+	// Broker-only facts, all of them cheap to read and impossible to observe
+	// from a client: what a power cut would cost, what retention has already
+	// given up on, and what compaction still owes.
+	BytesAtRisk         int64           `json:"bytesAtRisk"`
+	OffsetsAtRisk       int64           `json:"offsetsAtRisk"`
+	LastSyncAgeMs       *int64          `json:"lastSyncAgeMs"`
+	RetentionDebtBytes  int64           `json:"retentionDebtBytes"`
+	CompactionDebtBytes int64           `json:"compactionDebtBytes"`
+	LastCompactMs       int64           `json:"lastCompactMs"`
+	RetentionRisk       []retentionRisk `json:"retentionRisk"`
 }
 
 type clusterHealth struct {
-	ClusterID       string         `json:"clusterId"`
-	BrokerID        int32          `json:"brokerId"`
-	Version         string         `json:"version"`
-	Status          string         `json:"status"`
-	UptimeSeconds   float64        `json:"uptimeSeconds"`
-	Topics          int            `json:"topics"`
-	Partitions      int            `json:"partitions"`
-	Groups          int            `json:"groups"`
-	TotalBytes      int64          `json:"totalBytes"`
-	TotalMessages   int64          `json:"totalMessages"`
-	Lag             int64          `json:"lag"`
-	MaxPartitionLag int64          `json:"maxPartitionLag"`
-	MessagesPerSec  float64        `json:"messagesPerSec"`
-	BytesPerSec     float64        `json:"bytesPerSec"`
-	DiskUsagePct    float64        `json:"diskUsagePct"`
-	Listeners       []string       `json:"listeners"`
-	Advertised      string         `json:"advertised"`
-	Security        string         `json:"security"`
-	Reasons         []healthReason `json:"reasons"`
+	ClusterID       string  `json:"clusterId"`
+	BrokerID        int32   `json:"brokerId"`
+	Version         string  `json:"version"`
+	Status          string  `json:"status"`
+	UptimeSeconds   float64 `json:"uptimeSeconds"`
+	Topics          int     `json:"topics"`
+	Partitions      int     `json:"partitions"`
+	Groups          int     `json:"groups"`
+	TotalBytes      int64   `json:"totalBytes"`
+	TotalMessages   int64   `json:"totalMessages"`
+	Lag             int64   `json:"lag"`
+	MaxPartitionLag int64   `json:"maxPartitionLag"`
+	// Broker-only durability and policy facts, summed over topics.
+	BytesAtRisk         int64          `json:"bytesAtRisk"`
+	OffsetsAtRisk       int64          `json:"offsetsAtRisk"`
+	LastSyncAgeMs       *int64         `json:"lastSyncAgeMs"`
+	RetentionDebtBytes  int64          `json:"retentionDebtBytes"`
+	CompactionDebtBytes int64          `json:"compactionDebtBytes"`
+	RetentionRisks      int            `json:"retentionRisks"`
+	MessagesPerSec      float64        `json:"messagesPerSec"`
+	BytesPerSec         float64        `json:"bytesPerSec"`
+	ConsumedPerSec      float64        `json:"consumedPerSec"`
+	RateSpanSeconds     float64        `json:"rateSpanSeconds"`
+	DiskUsagePct        float64        `json:"diskUsagePct"`
+	Listeners           []string       `json:"listeners"`
+	Advertised          string         `json:"advertised"`
+	Security            string         `json:"security"`
+	Reasons             []healthReason `json:"reasons"`
 }
 
 type historyPoint struct {
 	T              int64   `json:"t"` // unix ms
 	MessagesPerSec float64 `json:"messagesPerSec"`
 	BytesPerSec    float64 `json:"bytesPerSec"`
+	ConsumedPerSec float64 `json:"consumedPerSec"`
 	Lag            int64   `json:"lag"`
 	DiskUsagePct   float64 `json:"diskUsagePct"`
 }
 
+// committedTotals sums each group's committed offsets, per group, so a consumed
+// rate can be taken from forward progress only: a reset or a group that
+// disappeared must not read as negative consumption.
+func committedTotals(views []groupView) map[string]int64 {
+	out := make(map[string]int64, len(views))
+	for _, g := range views {
+		var total int64
+		for _, parts := range g.Offsets {
+			for _, committed := range parts {
+				total += committed
+			}
+		}
+		out[g.Name] = total
+	}
+	return out
+}
+
+// progressBetween counts committed offsets advancing from one sample to the
+// next, forward only: a reset must not read as negative consumption.
+func progressBetween(prev, cur clusterSample) int64 {
+	var progressed int64
+	for group, committed := range cur.Committed {
+		if before, ok := prev.Committed[group]; ok && committed > before {
+			progressed += committed - before
+		}
+	}
+	return progressed
+}
+
+// consumedRate sums forward progress over the consecutive sample pairs inside
+// the window. Measuring it against the window baseline alone would read zero for
+// a group that only appeared after that baseline, and would hide the traffic of
+// a group whose first sample sits mid-window.
+func consumedRate(series []clusterSample, window time.Duration, now time.Time) float64 {
+	cut := now.Add(-window)
+	var progressed int64
+	var counted time.Duration
+	for i := 1; i < len(series); i++ {
+		prev, cur := series[i-1], series[i]
+		if cur.At.Before(cut) {
+			continue
+		}
+		d := cur.At.Sub(prev.At)
+		if d <= 0 {
+			continue
+		}
+		counted += d
+		progressed += progressBetween(prev, cur)
+	}
+	if counted <= 0 {
+		return 0
+	}
+	return rate(float64(progressed), counted)
+}
+
+// thinPoints keeps at most max points, preserving both ends so a long window
+// still shows the whole span instead of only its newest tail.
+func thinPoints(points []historyPoint, max int) []historyPoint {
+	if max <= 2 || len(points) <= max {
+		return points
+	}
+	out := make([]historyPoint, 0, max)
+	step := float64(len(points)-1) / float64(max-1)
+	for i := 0; i < max; i++ {
+		out = append(out, points[int(float64(i)*step+0.5)])
+	}
+	return out
+}
+
 type samplingInfo struct {
-	IntervalMs    int64   `json:"intervalMs"`
-	Samples       int     `json:"samples"`
-	WindowSeconds int     `json:"windowSeconds"`
-	Warmup        bool    `json:"warmup"`
-	RateReliable  bool    `json:"rateReliable"`
-	StartedAtMs   int64   `json:"startedAtMs"`
-	AgeSeconds    float64 `json:"ageSeconds"`
+	IntervalMs       int64   `json:"intervalMs"`
+	Samples          int     `json:"samples"`
+	WindowSeconds    int     `json:"windowSeconds"`
+	RetentionSeconds int     `json:"retentionSeconds"`
+	HistoryPoints    int     `json:"historyPoints"`
+	Warmup           bool    `json:"warmup"`
+	RateReliable     bool    `json:"rateReliable"`
+	StartedAtMs      int64   `json:"startedAtMs"`
+	AgeSeconds       float64 `json:"ageSeconds"`
 }
 
 // reportCtx carries the per-request settings the report builders need.
@@ -327,23 +515,18 @@ type reportCtx struct {
 	window   time.Duration
 	now      time.Time
 	interval time.Duration
-	capacity int
 }
 
-// rateReliable reports whether the sample series covers the requested window.
-// Short of that the baseline already holds the traffic that arrived before
-// monitoring started, so the rate understates reality and must be presented as
-// not yet measurable rather than as zero.
+// rateReliable reports whether the series actually covers the requested window.
+// A shorter span means the baseline already holds traffic that arrived before
+// monitoring started (or before the window's edge), so the derived rate
+// understates reality and must not be presented as this window's rate. One
+// sample of slack is allowed, because the ring is trimmed by age.
 func (c reportCtx) rateReliable(first, last time.Time, n int) bool {
 	if n < 2 {
 		return false
 	}
-	if first.Before(c.now.Add(-c.window)) {
-		return true
-	}
-	// The window is longer than the retained ring: a full ring is the best
-	// history that can exist, so treat it as good enough.
-	return c.capacity > 0 && n >= c.capacity
+	return c.now.Sub(first) >= c.window-c.interval
 }
 
 // topicRateReliable adapts rateReliable to a topic series.
@@ -397,6 +580,11 @@ type topicMetrics struct {
 	LastAppendAge  time.Duration
 	HasActivity    bool
 	StalledGroups  []string
+	// RetentionLossSeconds is how soon a lagging group is projected to lose the
+	// offsets it still needs; nil means no projection (retention is not
+	// advancing), and RetentionLost means the data is already gone.
+	RetentionLossSeconds *int64
+	RetentionLost        bool
 }
 
 // evaluateTopic turns metrics into a status plus the reasons behind it. The
@@ -459,6 +647,34 @@ func evaluateTopic(th healthThresholds, m topicMetrics) (string, []healthReason)
 
 	if status == StatusHealthy && rising {
 		status = StatusDegraded
+	}
+	// Retention risk outranks the ordinary verdict: a client cannot see this
+	// coming, it only finds out when a read fails.
+	if m.RetentionLost {
+		status = worseStatus(status, StatusCritical)
+		reasons = append(reasons, healthReason{
+			Code:     "retention_offset_lost",
+			Severity: "critical",
+			Message:  "retention has deleted offsets a consumer group has not read yet",
+		})
+	} else if m.RetentionLossSeconds != nil {
+		secs := *m.RetentionLossSeconds
+		switch {
+		case secs <= th.RetentionCriticalSeconds:
+			status = worseStatus(status, StatusCritical)
+			reasons = append(reasons, healthReason{
+				Code:     "retention_loss_imminent",
+				Severity: "critical",
+				Message:  fmt.Sprintf("retention will delete unread offsets in ~%s", shortDuration(secs)),
+			})
+		case secs <= th.RetentionWarnSeconds:
+			status = worseStatus(status, StatusDegraded)
+			reasons = append(reasons, healthReason{
+				Code:     "retention_loss_projected",
+				Severity: "warn",
+				Message:  fmt.Sprintf("retention will delete unread offsets in ~%s", shortDuration(secs)),
+			})
+		}
 	}
 	if status == StatusHealthy && m.Messages == 0 {
 		status = StatusIdle
@@ -552,8 +768,8 @@ func statusRank(s string) int {
 // except the sample ring.
 func (s *Server) buildOverview(th healthThresholds, window time.Duration, now time.Time) overviewResponse {
 	samples, clusterSeries, lastAt := s.monitor.snapshot()
-	interval, capacity := s.monitor.limits()
-	ctx := reportCtx{th: th, window: window, now: now, interval: interval, capacity: capacity}
+	interval, retention := s.monitor.limits()
+	ctx := reportCtx{th: th, window: window, now: now, interval: interval}
 
 	views := mergedGroupViews(s.gm)
 	lagByTopic, _ := lagMaps(views, s.store)
@@ -593,13 +809,14 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 		age = now.Sub(lastAt).Seconds()
 	}
 	report.Sampling = samplingInfo{
-		IntervalMs:    intervalMs,
-		Samples:       samplesInWindow,
-		WindowSeconds: int(window.Seconds()),
-		Warmup:        warmup,
-		RateReliable:  ctx.clusterRateReliable(clusterSeries),
-		StartedAtMs:   s.monitor.started.UnixMilli(),
-		AgeSeconds:    age,
+		IntervalMs:       intervalMs,
+		Samples:          samplesInWindow,
+		WindowSeconds:    int(window.Seconds()),
+		RetentionSeconds: int(retention.Seconds()),
+		Warmup:           warmup,
+		RateReliable:     ctx.clusterRateReliable(clusterSeries),
+		StartedAtMs:      s.monitor.started.UnixMilli(),
+		AgeSeconds:       age,
 	}
 
 	// Cluster totals.
@@ -614,10 +831,11 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 		totalMessages, totalBytes = cur.Messages, cur.Bytes
 	}
 	old, dt := clusterBaseline(clusterSeries, window, now)
-	var msgRate, byteRate float64
+	var msgRate, byteRate, consumeRate float64
 	if dt > 0 {
 		msgRate = rate(float64(cur.Messages-old.Messages), dt)
 		byteRate = rate(float64(cur.Bytes-old.Bytes), dt)
+		consumeRate = consumedRate(clusterSeries, window, now)
 	}
 
 	topicReports := make([]topicHealth, 0, len(names))
@@ -637,26 +855,59 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 	}
 	report.Groups = groupSummariesOf(topicReports, views)
 	status, reasons := clusterStatus(ctx.th, diskPct, topicReports)
+
+	// Durability and policy debt roll up from the topic reports, and an
+	// un-synced backlog big enough to matter becomes a cluster-level warning.
+	var bytesAtRisk, offsetsAtRisk, retentionDebt, compactionDebt int64
+	var syncAgeMs *int64
+	retentionRisks := 0
+	for _, tr := range topicReports {
+		bytesAtRisk += tr.BytesAtRisk
+		offsetsAtRisk += tr.OffsetsAtRisk
+		retentionDebt += tr.RetentionDebtBytes
+		compactionDebt += tr.CompactionDebtBytes
+		retentionRisks += len(tr.RetentionRisk)
+		if tr.LastSyncAgeMs != nil && (syncAgeMs == nil || *tr.LastSyncAgeMs > *syncAgeMs) {
+			syncAgeMs = tr.LastSyncAgeMs
+		}
+	}
+	if bytesAtRisk >= ctx.th.UnflushedWarnBytes {
+		status = worseStatus(status, StatusDegraded)
+		reasons = append(reasons, healthReason{
+			Code:     "unflushed_backlog",
+			Severity: "warn",
+			Message:  fmt.Sprintf("%.1f MiB written but not fsynced yet", float64(bytesAtRisk)/(1<<20)),
+		})
+	}
+
 	report.Cluster = clusterHealth{
-		ClusterID:       s.clusterID,
-		BrokerID:        s.brokerID,
-		Version:         s.version,
-		Status:          status,
-		UptimeSeconds:   now.Sub(s.startTime).Seconds(),
-		Topics:          len(names),
-		Partitions:      clusterPartitions,
-		Groups:          len(report.Groups),
-		TotalBytes:      totalBytes,
-		TotalMessages:   totalMessages,
-		Lag:             totalLagWithTopics(topicReports),
-		MaxPartitionLag: maxLag,
-		MessagesPerSec:  msgRate,
-		BytesPerSec:     byteRate,
-		DiskUsagePct:    diskPct,
-		Listeners:       s.listeners,
-		Advertised:      s.advertised,
-		Security:        s.securityMode,
-		Reasons:         reasons,
+		ClusterID:           s.clusterID,
+		BrokerID:            s.brokerID,
+		Version:             s.version,
+		Status:              status,
+		UptimeSeconds:       now.Sub(s.startTime).Seconds(),
+		Topics:              len(names),
+		Partitions:          clusterPartitions,
+		Groups:              len(report.Groups),
+		TotalBytes:          totalBytes,
+		TotalMessages:       totalMessages,
+		Lag:                 totalLagWithTopics(topicReports),
+		MaxPartitionLag:     maxLag,
+		BytesAtRisk:         bytesAtRisk,
+		OffsetsAtRisk:       offsetsAtRisk,
+		LastSyncAgeMs:       syncAgeMs,
+		RetentionDebtBytes:  retentionDebt,
+		CompactionDebtBytes: compactionDebt,
+		RetentionRisks:      retentionRisks,
+		MessagesPerSec:      msgRate,
+		BytesPerSec:         byteRate,
+		ConsumedPerSec:      consumeRate,
+		RateSpanSeconds:     dt.Seconds(),
+		DiskUsagePct:        diskPct,
+		Listeners:           s.listeners,
+		Advertised:          s.advertised,
+		Security:            s.securityMode,
+		Reasons:             reasons,
 	}
 	report.Topics = topicReports
 
@@ -675,7 +926,8 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 	})
 	report.Attention = attention
 
-	// Cluster history.
+	// Cluster history: consumed/s rides along with the produced rate so the two
+	// can be compared, which is what makes a backlog visible as a shape.
 	history := make([]historyPoint, 0, len(clusterSeries))
 	for i := 1; i < len(clusterSeries); i++ {
 		prev, cur := clusterSeries[i-1], clusterSeries[i]
@@ -687,14 +939,13 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 			T:              cur.At.UnixMilli(),
 			MessagesPerSec: rate(float64(cur.Messages-prev.Messages), d),
 			BytesPerSec:    rate(float64(cur.Bytes-prev.Bytes), d),
+			ConsumedPerSec: rate(float64(progressBetween(prev, cur)), d),
 			Lag:            cur.Lag,
 			DiskUsagePct:   cur.DiskPct,
 		})
 	}
-	if len(history) > monitorCapacity {
-		history = history[len(history)-monitorCapacity:]
-	}
-	report.History = history
+	report.History = thinPoints(history, historyPoints)
+	report.Sampling.HistoryPoints = len(report.History)
 	return report
 }
 
@@ -716,19 +967,34 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 
 	// Parallel live snapshot (authoritative for offsets/bytes).
 	type live struct {
-		pid      int32
-		leo      int64
-		earliest int64
-		bytes    int64
+		pid           int32
+		leo           int64
+		earliest      int64
+		bytes         int64
+		durable       int64
+		atRisk        int64
+		atRiskOffsets int64
+		syncMs        int64
+		debt          int64
 	}
 	var lives []live
 	if t != nil {
+		ret, hasRet := s.store.Retention()
 		for _, pid := range sortedPartitionIDs(t) {
 			p := t.Partitions[pid]
 			if p == nil {
 				continue
 			}
-			lives = append(lives, live{pid: pid, leo: p.LogEndOffset(), earliest: p.EarliestOffset(), bytes: p.SizeBytes()})
+			durable, atRisk, syncMs := p.Durability()
+			debt := int64(0)
+			if hasRet {
+				debt = p.RetentionDebt(ret)
+			}
+			lives = append(lives, live{
+				pid: pid, leo: p.LogEndOffset(), earliest: p.EarliestOffset(), bytes: p.SizeBytes(),
+				durable: durable, atRisk: atRisk, atRiskOffsets: nonNegative(p.LogEndOffset() - durable),
+				syncMs: syncMs, debt: debt,
+			})
 		}
 	}
 
@@ -739,6 +1005,39 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 	}
 	row.Messages = messages
 	row.Bytes = bytes
+
+	// Durability and policy debt, aggregated over the topic's partitions.
+	var oldestSync int64
+	for _, l := range lives {
+		row.BytesAtRisk += l.atRisk
+		row.OffsetsAtRisk += l.atRiskOffsets
+		row.RetentionDebtBytes += l.debt
+		if l.syncMs > 0 && (oldestSync == 0 || l.syncMs < oldestSync) {
+			oldestSync = l.syncMs
+		}
+	}
+	if oldestSync > 0 {
+		ageMs := now.Sub(time.UnixMilli(oldestSync)).Milliseconds()
+		if ageMs < 0 {
+			ageMs = 0
+		}
+		row.LastSyncAgeMs = &ageMs
+	}
+	if s.store.IsCompacted(name) {
+		var lastCompact int64
+		for _, pid := range sortedPartitionIDs(t) {
+			p := t.Partitions[pid]
+			if p == nil {
+				continue
+			}
+			debt, ms := p.CompactionDebt()
+			row.CompactionDebtBytes += debt
+			if ms > lastCompact {
+				lastCompact = ms
+			}
+		}
+		row.LastCompactMs = lastCompact
+	}
 
 	cur, hasCur := lastTopic(series)
 	base, dt := topicBaseline(series, window, now)
@@ -780,12 +1079,16 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 
 	for _, l := range lives {
 		ph := partitionHealth{
-			Partition: l.pid,
-			Leader:    s.brokerID,
-			LogEnd:    l.leo,
-			Earliest:  l.earliest,
-			Messages:  nonNegative(l.leo - l.earliest),
-			Bytes:     l.bytes,
+			Partition:          l.pid,
+			Leader:             s.brokerID,
+			LogEnd:             l.leo,
+			Earliest:           l.earliest,
+			Messages:           nonNegative(l.leo - l.earliest),
+			Bytes:              l.bytes,
+			DurableOffset:      l.durable,
+			OffsetsAtRisk:      l.atRiskOffsets,
+			BytesAtRisk:        l.atRisk,
+			RetentionDebtBytes: l.debt,
 		}
 		if m, ok := lagByPart[l.pid]; ok {
 			ph.Lag = m
@@ -801,6 +1104,62 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 			}
 		}
 		row.PartitionsDetail = append(row.PartitionsDetail, ph)
+	}
+
+	// Retention projection: a group loses its unread offsets when the earliest
+	// retained offset catches up with the offset it needs next. The earliest
+	// offset advances only as retention deletes, so its observed rate is what
+	// projects the moment.
+	earliestNow := int64(-1)
+	for _, l := range lives {
+		if earliestNow < 0 || l.earliest < earliestNow {
+			earliestNow = l.earliest
+		}
+	}
+	if earliestNow >= 0 && len(groups) > 0 {
+		var advance float64
+		if hasCur && dt > 0 && base.Earliest >= 0 && cur.Earliest > base.Earliest {
+			advance = rate(float64(cur.Earliest-base.Earliest), dt)
+		}
+		leoByPart := make(map[int32]int64, len(lives))
+		for _, l := range lives {
+			leoByPart[l.pid] = l.leo
+		}
+		for _, g := range groups {
+			parts, ok := g.Offsets[name]
+			if !ok || len(parts) == 0 {
+				continue
+			}
+			// Only a group that is behind a partition needs data that retention
+			// can still take: one that has caught up needs what comes next.
+			next := int64(-1)
+			for part, committed := range parts {
+				leo, known := leoByPart[part]
+				if !known || committed >= leo {
+					continue
+				}
+				if next < 0 || committed+1 < next {
+					next = committed + 1
+				}
+			}
+			if next < 0 {
+				continue
+			}
+			risk := retentionRisk{Group: g.Name, NextNeeded: next, Earliest: earliestNow, EarliestPerSec: round2(advance)}
+			switch {
+			case next < earliestNow:
+				risk.AlreadyLost = true
+			case advance > 0:
+				secs := int64(float64(next-earliestNow) / advance)
+				risk.SecondsUntilLoss = &secs
+			default:
+				continue // retention is not advancing: nothing to project
+			}
+			row.RetentionRisk = append(row.RetentionRisk, risk)
+		}
+		sort.Slice(row.RetentionRisk, func(i, j int) bool {
+			return retentionUrgency(row.RetentionRisk[i]) < retentionUrgency(row.RetentionRisk[j])
+		})
 	}
 
 	// Last observed append.
@@ -866,16 +1225,19 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 	if hasActivity {
 		age = time.Duration(*row.LastAppendAgeMs) * time.Millisecond
 	}
+	lossSeconds, lost := retentionSummary(row.RetentionRisk)
 	row.Status, row.Reasons = evaluateTopic(th, topicMetrics{
-		Partitions:     row.Partitions,
-		Messages:       row.Messages,
-		MessagesPerSec: row.MessagesPerSec,
-		Lag:            row.Lag,
-		LagPerSec:      row.LagPerSec,
-		SkewRatio:      row.SkewRatio,
-		LastAppendAge:  age,
-		HasActivity:    hasActivity,
-		StalledGroups:  stalled,
+		Partitions:           row.Partitions,
+		Messages:             row.Messages,
+		MessagesPerSec:       row.MessagesPerSec,
+		Lag:                  row.Lag,
+		LagPerSec:            row.LagPerSec,
+		SkewRatio:            row.SkewRatio,
+		LastAppendAge:        age,
+		HasActivity:          hasActivity,
+		StalledGroups:        stalled,
+		RetentionLossSeconds: lossSeconds,
+		RetentionLost:        lost,
 	})
 	// An empty topic with a consumer group that has nothing to read is still
 	// idle, never a fault.
@@ -912,6 +1274,21 @@ func (s *Server) handleHealthOverview(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("idle_s"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 10 {
 			th.IdleAfter = time.Duration(n) * time.Second
+		}
+	}
+	if v := q.Get("retention_warn_s"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			th.RetentionWarnSeconds = n
+		}
+	}
+	if v := q.Get("retention_crit_s"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			th.RetentionCriticalSeconds = n
+		}
+	}
+	if v := q.Get("unflushed_warn_bytes"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			th.UnflushedWarnBytes = n
 		}
 	}
 	// A named cluster is proxied from the peer, so the dashboard renders a
@@ -985,11 +1362,19 @@ func humanDuration(d time.Duration) string {
 	}
 }
 
-// appendBounded appends v and trims the slice to cap entries.
-func appendBounded[T any](s []T, v T, cap int) []T {
-	s = append(s, v)
-	if len(s) > cap {
-		s = s[len(s)-cap:]
+// trimSamples drops samples older than retention, then caps the slice so a
+// client polling faster than the sampler cannot grow it without bound.
+func trimSamples[T interface{ sampleTime() time.Time }](s []T, now time.Time, retention time.Duration, max int) []T {
+	cut := now.Add(-retention)
+	first := 0
+	for first < len(s) && s[first].sampleTime().Before(cut) {
+		first++
+	}
+	if first > 0 {
+		s = append([]T(nil), s[first:]...)
+	}
+	if len(s) > max {
+		s = append([]T(nil), s[len(s)-max:]...)
 	}
 	return s
 }
@@ -1223,11 +1608,11 @@ func (m *Monitor) snapshot() (map[string][]topicSample, []clusterSample, time.Ti
 	return topics, append([]clusterSample(nil), m.cluster...), m.lastAt
 }
 
-// limits returns the sampling interval and ring capacity.
-func (m *Monitor) limits() (time.Duration, int) {
+// limits returns the sampling interval and how far back samples are kept.
+func (m *Monitor) limits() (time.Duration, time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.interval, m.capacity
+	return m.interval, m.retention
 }
 
 func (m *Monitor) lastSeenAt(topic string) (time.Time, bool) {

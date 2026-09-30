@@ -200,7 +200,12 @@ func (p *Partition) installCompaction(w *compactWriter, snapshotEnd int64) error
 	if err := applyCompactionSwap(p.dir); err != nil {
 		return err
 	}
-	return p.recover()
+	if err := p.recover(); err != nil {
+		return err
+	}
+	p.lastCompactMs = time.Now().UnixMilli()
+	p.bytesAtCompact = p.totalSizeLocked()
+	return nil
 }
 
 func (p *Partition) closeSegments() error {

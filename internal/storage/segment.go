@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Segment is a single append-only log file (.log) with its associated sparse
@@ -23,6 +24,13 @@ type Segment struct {
 	indexInterval   int64
 	remote          bool   // true when this segment is offloaded to object storage
 	remoteStub      string // path to the .remote pointer file
+
+	// How far an fsync has covered. Everything past syncedBytes is in the page
+	// cache only, so it is the broker's own answer to "what would a power cut
+	// cost me" - a property no client can observe.
+	syncedOffset int64
+	syncedBytes  int64
+	lastSyncMs   int64
 }
 
 // openSegment opens (or creates) a segment whose base offset is baseOffset and
@@ -83,6 +91,8 @@ func openSegment(dir string, baseOffset int64, maxSegmentBytes, indexInterval in
 		seg.close()
 		return nil, err
 	}
+	// What recovery just read is on disk, so it counts as durable.
+	seg.syncedOffset, seg.syncedBytes = seg.nextOffset, seg.size
 	return seg, nil
 }
 
@@ -377,6 +387,10 @@ func (s *Segment) sync() error {
 		if err := s.logFile.Sync(); err != nil {
 			return err
 		}
+		// Marked only after the fsync returns: the point of these fields is to
+		// never claim durability that has not happened.
+		s.syncedOffset, s.syncedBytes = s.nextOffset, s.size
+		s.lastSyncMs = time.Now().UnixMilli()
 	}
 	if s.index != nil {
 		return s.index.sync()
@@ -392,6 +406,8 @@ func (s *Segment) close() error {
 		s.logFile.Close()
 		return err
 	}
+	s.syncedOffset, s.syncedBytes = s.nextOffset, s.size
+	s.lastSyncMs = time.Now().UnixMilli()
 	if s.index != nil {
 		if err := s.index.close(); err != nil {
 			s.logFile.Close()

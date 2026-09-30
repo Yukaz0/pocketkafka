@@ -30,6 +30,11 @@ type Store struct {
 	indexInterval   int64
 	s3              *tier.S3Client
 	tierThreshold   time.Duration
+
+	// ret is the active cleanup policy, kept so a reader can report what the
+	// next retention pass would delete.
+	retentionMu sync.RWMutex
+	ret         *Retention
 }
 
 // NewStore opens (or creates) the data directory and recovers existing topics.
