@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Partition is a single topic-partition backed by a directory of log segments.
@@ -36,6 +37,9 @@ type Partition struct {
 
 	// remoteFetch downloads an object-store key (set when tiering is enabled).
 	remoteFetch func(key string) ([]byte, error)
+
+	// compacting keeps a second compaction from racing the first on one partition.
+	compacting atomic.Bool
 }
 
 // OpenPartition opens (or creates) a partition directory and recovers its state.
@@ -51,6 +55,9 @@ func OpenPartition(dir, topic string, partitionID int32, maxSegmentBytes, indexI
 		indexInterval:   indexInterval,
 		idempotence:     NewPartitionIdempotenceTracker(),
 		appendCh:        make(chan struct{}),
+	}
+	if err := applyCompactionSwap(dir); err != nil {
+		return nil, fmt.Errorf("recover compaction: %w", err)
 	}
 	if err := p.recover(); err != nil {
 		return nil, err

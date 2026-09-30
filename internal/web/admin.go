@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -236,6 +237,10 @@ func (s *Server) handleCompactTopic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.CompactNow(topic); err != nil {
+		if errors.Is(err, storage.ErrCompactionRunning) {
+			writeErr(w, 409, err.Error())
+			return
+		}
 		writeErr(w, 500, err.Error())
 		return
 	}
