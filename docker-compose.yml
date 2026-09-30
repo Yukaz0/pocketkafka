@@ -15,7 +15,8 @@ services:
 
   # 2. PostgreSQL Database
   postgres:
-    image: postgres:16-alpine
+    # postgis image (Alpine PG16 + PostGIS) agar schema scada23* dari prod (167 kolom geometry) bisa diakses
+    image: postgis/postgis:16-3.5-alpine
     container_name: local-postgres
     deploy:
       resources:
@@ -49,6 +50,25 @@ services:
         limits:
           memory: 128M
     restart: always
+    # Hardening container. read_only hanya aman karena semua berkas yang ditulis
+    # broker berada di KAFKA_DATA_DIR (volume) / tmpfs; entrypoint masih boleh
+    # su-exec ke uid 10001 sebab no-new-privileges melarang penambahan hak, bukan
+    # pelepasan hak. Capability yang tersisa hanya yang dipakai entrypoint:
+    # CHOWN/DAC_OVERRIDE/FOWNER untuk mengambil alih data dir milik root (sekali,
+    # untuk volume lama) dan SETUID/SETGID untuk turun ke pengguna tanpa hak.
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
     ports:
       - "9092:9092"   # Kafka API (host / luar container)
       - "29092:29092" # Kafka API (internal docker network)
