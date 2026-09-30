@@ -35,6 +35,9 @@ import (
 const (
 	clustersFileName  = "__clusters.json"
 	clusterTokensFile = "__cluster_tokens.json"
+	// secretsKeyFile holds the auto-generated key that seals stored tokens. It
+	// must be backed up: without it the stored tokens cannot be read.
+	secretsKeyFile = "__secrets.key"
 	// clusterFetchTimeout bounds one remote health fetch. A slow or dead peer
 	// must not stall the whole cluster overview.
 	clusterFetchTimeout = 4 * time.Second
@@ -63,13 +66,21 @@ type clusterStore struct {
 	entriesPath string
 	tokensPath  string
 	persistent  bool
+	// box seals tokens before they are written. It is nil only when there is
+	// nothing to persist; with a data dir it is always set, because refusing to
+	// store a token beats storing it in the clear.
+	box *secretBox
+	// boxErr records a secrets problem (missing key, unreadable key, a file
+	// sealed with a different key) so the next write can report it instead of
+	// failing silently.
+	boxErr error
 }
 
 // newClusterStore loads the registry. The config seed is applied only when no
 // registry file exists yet, so a cluster removed from the UI does not reappear
 // on the next restart.
-func newClusterStore(dataDir string, seed []config.WebCluster) *clusterStore {
-	s := &clusterStore{tokens: map[string]string{}}
+func newClusterStore(dataDir string, seed []config.WebCluster, box *secretBox) *clusterStore {
+	s := &clusterStore{tokens: map[string]string{}, box: box}
 	if dataDir == "" {
 		for _, c := range seed {
 			s.entries = append(s.entries, ClusterEntry{Name: c.Name, URL: c.URL})
@@ -81,9 +92,40 @@ func newClusterStore(dataDir string, seed []config.WebCluster) *clusterStore {
 	s.tokensPath = filepath.Join(dataDir, clusterTokensFile)
 
 	if b, err := os.ReadFile(s.tokensPath); err == nil {
-		var m map[string]string
-		if json.Unmarshal(b, &m) == nil {
-			s.tokens = m
+		var stored map[string]string
+		if json.Unmarshal(b, &stored) == nil {
+			needsMigration := false
+			for name, v := range stored {
+				if v == "" {
+					continue
+				}
+				if s.box == nil {
+					if strings.HasPrefix(v, secretPrefix) {
+						// Sealed without a key: keeping the ciphertext as a
+						// token would send garbage to the peer.
+						s.boxErr = errors.New("secrets key unavailable: stored cluster tokens cannot be read")
+						continue
+					}
+					s.tokens[name] = v
+					needsMigration = true
+					continue
+				}
+				plain, wasPlain, err := s.box.open(v)
+				if err != nil {
+					s.boxErr = fmt.Errorf("cluster token %q: %w", name, err)
+					continue
+				}
+				s.tokens[name] = plain
+				needsMigration = needsMigration || wasPlain
+			}
+			if needsMigration {
+				// A file written before encryption existed is rewritten sealed
+				// right away, so the migration does not depend on somebody
+				// editing the registry later.
+				if err := s.persistTokensLocked(); err != nil && s.boxErr == nil {
+					s.boxErr = err
+				}
+			}
 		}
 	}
 	if b, err := os.ReadFile(s.entriesPath); err == nil {
@@ -219,11 +261,32 @@ func (s *clusterStore) persistTokensLocked() error {
 	if !s.persistent {
 		return nil
 	}
-	data, err := json.MarshalIndent(s.tokens, "", "  ")
+	if s.box == nil {
+		if len(s.tokens) == 0 {
+			return nil
+		}
+		return errors.New("secrets key unavailable: refusing to write cluster tokens unencrypted")
+	}
+	sealed := make(map[string]string, len(s.tokens))
+	for name, v := range s.tokens {
+		enc, err := s.box.seal(v)
+		if err != nil {
+			return err
+		}
+		sealed[name] = enc
+	}
+	data, err := json.MarshalIndent(sealed, "", "  ")
 	if err != nil {
 		return err
 	}
 	return atomicfile.Write(s.tokensPath, data, 0o600)
+}
+
+// BoxError reports a secrets problem that would make the next token write fail.
+func (s *clusterStore) BoxError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.boxErr
 }
 
 // ---------------------------------------------------------------------------
@@ -504,12 +567,58 @@ func (s *Server) handleUpsertCluster(w http.ResponseWriter, r *http.Request) {
 	case req.Token != "":
 		token = &req.Token
 	}
+	if token != nil {
+		// A stored token can only be written sealed. When the key is missing or
+		// wrong this refuses the write instead of dropping the credential.
+		if err := s.clusters.BoxError(); err != nil {
+			writeErr(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+	}
 	if err := s.clusters.Upsert(entry, token); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	s.recordAudit(s.actorFrom(r), "cluster.upsert", entry.Name, "monitored cluster "+entry.URL)
 	writeJSON(w, http.StatusOK, map[string]any{"name": entry.Name, "url": entry.URL, "hasToken": s.clusters.HasToken(entry.Name)})
+}
+
+// handleTestCluster checks a candidate cluster WITHOUT registering it, so the
+// operator finds out that a URL or token is wrong before it is stored. It
+// fetches only URLs that pass the same validation as the registry, and the route
+// is admin-gated with the other mutations, so this does not widen what the
+// broker can be pointed at. An unreachable target is a test RESULT, not a failed
+// request: it answers 200 with ok=false and the reason, like the fan-out does.
+func (s *Server) handleTestCluster(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name  string `json:"name"`
+		URL   string `json:"url"`
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if err := validateClusterURL(req.URL); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	token := req.Token
+	if token == "" && req.Name != "" {
+		// The edit form leaves the token empty to keep the stored one, so the
+		// test must use that stored token instead of probing unauthenticated.
+		token = s.clusters.Token(req.Name)
+	}
+	entry := ClusterEntry{Name: req.Name, URL: req.URL}
+	body, latency, err := s.fetchClusterReport(r.Context(), entry, defaultWindow, token)
+	if err != nil {
+		writeJSON(w, http.StatusOK, clusterSummary{
+			Name: req.Name, URL: req.URL, OK: false, Error: err.Error(),
+			LatencyMs: latency.Milliseconds(), HasToken: token != "",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, summarize(entry, token != "", body, latency))
 }
 
 // handleDeleteCluster removes one monitored cluster.
@@ -539,9 +648,29 @@ type clusterCacheEntry struct {
 }
 
 // WithClusterMonitoring installs the multi-cluster registry: the config seed,
-// the accept-side bearer token, and the persistence paths under the data dir.
+// the accept-side bearer token, the key that seals stored tokens, and the
+// persistence paths under the data dir.
 func (s *Server) WithClusterMonitoring(cfg config.Config) *Server {
 	s.clusterToken = cfg.Web.ClusterToken
-	s.clusters = newClusterStore(s.dataDir, cfg.Web.Clusters)
+	box, err := loadClusterSecrets(cfg, s.dataDir)
+	s.clusters = newClusterStore(s.dataDir, cfg.Web.Clusters, box)
+	if err != nil {
+		s.clusters.boxErr = err
+	}
 	return s
+}
+
+// loadClusterSecrets returns the box that seals stored tokens. An in-memory
+// registry (tests, embedded use) persists nothing and needs no key; with a data
+// dir the key is required, and its absence is reported rather than worked
+// around by writing credentials in the clear.
+func loadClusterSecrets(cfg config.Config, dataDir string) (*secretBox, error) {
+	if dataDir == "" {
+		return nil, nil
+	}
+	key := cfg.Web.SecretsKey
+	if key == "" {
+		key = os.Getenv(secretsKeyEnv)
+	}
+	return newSecretBox(key, filepath.Join(dataDir, secretsKeyFile))
 }

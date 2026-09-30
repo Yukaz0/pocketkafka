@@ -268,6 +268,7 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 		cfg.Web.Auth = getBool(w, "auth", cfg.Web.Auth)
 		cfg.Web.AuthSecret = getString(w, "auth_secret", cfg.Web.AuthSecret)
 		cfg.Web.ClusterToken = getString(w, "cluster_token", cfg.Web.ClusterToken)
+		cfg.Web.SecretsKey = getString(w, "secrets_key", cfg.Web.SecretsKey)
 		if list, ok := w["clusters"].([]interface{}); ok {
 			for _, c := range list {
 				if cm, ok := c.(map[string]interface{}); ok {

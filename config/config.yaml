@@ -87,6 +87,16 @@ web:
   # Must be at least 16 characters. It grants reads only: mutations still
   # require an ACL grant.
   # cluster_token: ""
+  # Key that seals stored credentials (the per-cluster tokens above) at rest.
+  # Empty uses KAFKA_SECRETS_KEY, and failing that a key file is generated once
+  # inside the data dir with mode 0600: back that file up, because without it
+  # the stored tokens cannot be read. Set it to at least 16 characters.
+  # secrets_key: ""
+  #
+  # NOTE: every state-changing /api request must now carry the header
+  # "X-PocketKafka-Request: 1" (the dashboard sends it automatically). A script
+  # or curl call that POSTs, PUTs or DELETEs, including /api/v1/auth/login,
+  # needs it too, otherwise the request is refused with 403.
 
 schema_registry:
   listen: "0.0.0.0:8081"  # Confluent-compatible Schema Registry

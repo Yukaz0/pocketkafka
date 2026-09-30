@@ -35,8 +35,10 @@ func newSecureWeb(t *testing.T, acl *authz.Store) http.Handler {
 func login(t *testing.T, h http.Handler) *http.Cookie {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"username": "app", "password": "changeme"})
+	req := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(body))
+	req.Header.Set(csrfHeader, "1")
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(body)))
+	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("login status = %d", rr.Code)
 	}
@@ -51,6 +53,11 @@ func doJSON(t *testing.T, h http.Handler, method, path string, cookie *http.Cook
 	t.Helper()
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
+	if method != http.MethodGet {
+		// State-changing calls carry the cross-site guard header, as the
+		// dashboard does.
+		req.Header.Set(csrfHeader, "1")
+	}
 	if cookie != nil {
 		req.AddCookie(cookie)
 	}

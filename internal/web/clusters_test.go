@@ -95,9 +95,13 @@ func TestClusterRegistryPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Reload from disk: the file wins, so a cluster removed from the UI does
-	// not come back from the config seed.
-	reloaded := newClusterStore(dir, []config.WebCluster{{Name: "staging", URL: "http://10.0.0.26:8080"}})
+	// Reload from disk with the key the store generated in the data dir: the
+	// file, not the config seed, decides what is monitored.
+	box, err := newSecretBox("", filepath.Join(dir, secretsKeyFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded := newClusterStore(dir, []config.WebCluster{{Name: "staging", URL: "http://10.0.0.26:8080"}}, box)
 	after := reloaded.List()
 	if len(after) != 1 || after[0].Name != "prod" {
 		t.Fatalf("registry after reload = %+v, want only prod", after)
@@ -109,11 +113,17 @@ func TestClusterRegistryPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), token) == false {
-		t.Fatal("token file should hold the token")
+	if strings.Contains(string(raw), token) {
+		t.Fatalf("token must not be readable in the file on disk: %s", raw)
+	}
+	if !strings.Contains(string(raw), secretPrefix) {
+		t.Fatalf("token file should be sealed: %s", raw)
 	}
 	if info, err := os.Stat(filepath.Join(dir, clusterTokensFile)); err == nil && info.Mode().Perm() != 0o600 {
 		t.Fatalf("token file mode = %v, want 0600", info.Mode().Perm())
+	}
+	if info, err := os.Stat(filepath.Join(dir, secretsKeyFile)); err == nil && info.Mode().Perm() != 0o600 {
+		t.Fatalf("key file mode = %v, want 0600", info.Mode().Perm())
 	}
 }
 
@@ -131,9 +141,14 @@ func TestClusterRegistryValidation(t *testing.T) {
 			t.Fatalf("ValidateClusterURL(%q) rejected a good URL: %v", u, err)
 		}
 	}
-	for _, n := range []string{"", "  ", strings.Repeat("x", 65), "bad\nname"} {
+	for _, n := range []string{"", "  ", strings.Repeat("x", 65), "bad\nname", "peer satu", "peer/1", "na'me", "peer<1>", "peer;x"} {
 		if err := config.ValidateClusterName(n); err == nil {
 			t.Fatalf("ValidateClusterName(%q) accepted a bad name", n)
+		}
+	}
+	for _, n := range []string{"peer", "prod-eu.1", "STAGING_2"} {
+		if err := config.ValidateClusterName(n); err != nil {
+			t.Fatalf("ValidateClusterName(%q) rejected a good name: %v", n, err)
 		}
 	}
 
@@ -273,6 +288,7 @@ func TestClusterTokenNeverExposed(t *testing.T) {
 	payload := `{"name":"peer","url":"http://10.0.0.9:8080","token":"peer-token-0123456789"}`
 	req := httptest.NewRequest("POST", "/api/v1/clusters", strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(csrfHeader, "1")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -295,6 +311,7 @@ func TestClusterTokenNeverExposed(t *testing.T) {
 
 	// Delete removes both the entry and its token.
 	req = httptest.NewRequest("DELETE", "/api/v1/clusters/peer", nil)
+	req.Header.Set(csrfHeader, "1")
 	rr = httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -362,3 +379,174 @@ func TestClusterFanoutCacheIsUsed(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// TestClusterTokensAreSealedAtRest: the token file is a credential store, so a
+// wrong or missing key must fail loudly instead of degrading to plaintext.
+func TestClusterTokensAreSealedAtRest(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, secretsKeyFile)
+
+	box, err := newSecretBox("first-key-0123456789abcd", keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newClusterStore(dir, nil, box)
+	if err := s.Upsert(ClusterEntry{Name: "peer", URL: "http://127.0.0.1:1"}, strPtr("tok-abc")); err != nil {
+		t.Fatal(err)
+	}
+	if s.Token("peer") != "tok-abc" {
+		t.Fatalf("token = %q, want tok-abc", s.Token("peer"))
+	}
+
+	// Same file, different key: the ciphertext must not yield a usable token.
+	other, err := newSecretBox("second-key-0123456789ab", keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2 := newClusterStore(dir, nil, other)
+	if s2.Token("peer") != "" {
+		t.Fatalf("a wrong key produced token %q", s2.Token("peer"))
+	}
+	if s2.BoxError() == nil {
+		t.Fatal("a wrong key should be reported on the store")
+	}
+
+	// No key at all: reading is skipped and writing is refused outright.
+	s3 := newClusterStore(dir, nil, nil)
+	if s3.Token("peer") != "" {
+		t.Fatal("without a key the sealed token must not be used")
+	}
+	if err := s3.Upsert(ClusterEntry{Name: "lain", URL: "http://127.0.0.1:2"}, strPtr("tok-xyz")); err == nil {
+		t.Fatal("without a key a token write must fail instead of storing plaintext")
+	}
+}
+
+// TestClusterTokenPlaintextMigration keeps a registry written before encryption
+// existed usable, and reseals it without being asked.
+func TestClusterTokenPlaintextMigration(t *testing.T) {
+	dir := t.TempDir()
+	legacy, err := json.Marshal(map[string]string{"peer": "tok-legacy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, clusterTokensFile), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	box, err := newSecretBox("", filepath.Join(dir, secretsKeyFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newClusterStore(dir, nil, box)
+	if s.Token("peer") != "tok-legacy" {
+		t.Fatalf("legacy token = %q, want tok-legacy", s.Token("peer"))
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, clusterTokensFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "tok-legacy") {
+		t.Fatalf("legacy file was left in the clear: %s", raw)
+	}
+	if !strings.Contains(string(raw), secretPrefix) {
+		t.Fatalf("legacy file should be sealed now: %s", raw)
+	}
+}
+
+// TestCSRFProtectsMutations: the mutation endpoints authenticate with a cookie,
+// so a cross-site page must not be able to reach them.
+func TestCSRFProtectsMutations(t *testing.T) {
+	s, _ := newClusterTestServer(t, nil, nil)
+	h := s.Handler()
+	const body = `{"name":"peer","url":"http://127.0.0.1:9"}`
+
+	post := func(header, origin string) int {
+		req := httptest.NewRequest("POST", "/api/v1/clusters", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if header != "" {
+			req.Header.Set(csrfHeader, header)
+		}
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		return rr.Code
+	}
+
+	if code := post("", "http://example.com"); code != http.StatusForbidden {
+		t.Fatalf("POST without the header = %d, want 403", code)
+	}
+	req := httptest.NewRequest("POST", "/api/v1/clusters", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("POST without header or origin = %d, want 403", rr.Code)
+	}
+	if code := post("1", "http://evil.example"); code != http.StatusForbidden {
+		t.Fatalf("POST from a foreign origin = %d, want 403", code)
+	}
+	if code := post("1", ""); code != http.StatusOK {
+		t.Fatalf("POST with the header and no Origin = %d, want 200", code)
+	}
+	if code, _ := getJSON(t, h, "/api/v1/clusters", nil); code != http.StatusOK {
+		t.Fatalf("GET without the header = %d, want 200 (reads are not state-changing)", code)
+	}
+}
+
+// TestSecurityHeaders guards the response headers the dashboard relies on.
+func TestSecurityHeaders(t *testing.T) {
+	s, _ := newClusterTestServer(t, nil, nil)
+	req := httptest.NewRequest("GET", "/", nil)
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	for _, h := range []string{"Content-Security-Policy", "X-Frame-Options", "X-Content-Type-Options", "Referrer-Policy", "Permissions-Policy"} {
+		if rr.Header().Get(h) == "" {
+			t.Errorf("response is missing %s", h)
+		}
+	}
+	if csp := rr.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Errorf("CSP does not forbid framing: %s", csp)
+	}
+}
+
+// TestTestClusterEndpoint: the operator learns a URL or token is wrong before it
+// is registered, and an unreachable target is a result rather than an error.
+func TestTestClusterEndpoint(t *testing.T) {
+	var seen string
+	peer := fakePeer(t, http.StatusOK, peerReport, &seen)
+	s, _ := newClusterTestServer(t, nil, nil)
+	h := s.Handler()
+
+	post := func(body string) (int, string) {
+		req := httptest.NewRequest("POST", "/api/v1/clusters/test", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(csrfHeader, "1")
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		return rr.Code, rr.Body.String()
+	}
+
+	code, out := post(`{"url":"` + peer.URL + `"}`)
+	if code != http.StatusOK || !strings.Contains(out, "peer-cluster") {
+		t.Fatalf("testing a live peer = %d %s", code, out)
+	}
+	if code, _ := post(`{"url":"file:///etc/passwd"}`); code != http.StatusBadRequest {
+		t.Fatalf("a non-http URL = %d, want 400", code)
+	}
+	code, out = post(`{"url":"http://127.0.0.1:1"}`)
+	if code != http.StatusOK || !strings.Contains(out, `"ok":false`) {
+		t.Fatalf("an unreachable target should be reported, not failed: %d %s", code, out)
+	}
+
+	// The edit form leaves the token empty to keep the stored one, so the test
+	// has to use that token instead of probing unauthenticated.
+	if err := s.clusters.Upsert(ClusterEntry{Name: "peer", URL: peer.URL}, strPtr("tok-stored")); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := post(`{"name":"peer","url":"` + peer.URL + `"}`); code != http.StatusOK {
+		t.Fatalf("testing with a stored token = %d %s", code, out)
+	}
+	if seen != "Bearer tok-stored" {
+		t.Fatalf("peer saw %q, want the stored token", seen)
+	}
+}

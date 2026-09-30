@@ -120,7 +120,7 @@ func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.
 		startTime: time.Now(),
 		metrics:   metrics.NewRegistry(),
 		monitor:   NewMonitor(),
-		clusters:  newClusterStore("", nil),
+		clusters:  newClusterStore("", nil, nil),
 		aclStore:  authz.NewInMemory(),
 		rrCounter: make(map[string]uint64),
 	}
@@ -231,9 +231,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/health/clusters", s.handleClustersOverview)
 	mux.HandleFunc("GET /api/v1/clusters", s.handleClusters)
 	mux.HandleFunc("POST /api/v1/clusters", s.handleUpsertCluster)
+	mux.HandleFunc("POST /api/v1/clusters/test", s.handleTestCluster)
 	mux.HandleFunc("DELETE /api/v1/clusters/{name}", s.handleDeleteCluster)
 	authed := newAuthMiddleware(s.users, s.authSecret, s.authEnabled, s.clusterToken)(mux)
-	return s.authorizeMutations(authed)
+	// securityHeaders is outermost so every response (pages included) carries
+	// them; csrfMiddleware then rejects state-changing calls that a cross-site
+	// page could have made with the operator's cookie.
+	return securityHeaders(csrfMiddleware(s.authorizeMutations(authed)))
 }
 
 // handleMetrics exposes pocketkafka metrics in Prometheus text format.

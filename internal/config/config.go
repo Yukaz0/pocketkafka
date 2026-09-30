@@ -121,6 +121,10 @@ type Web struct {
 	// broker's dashboard aggregating its health report. Empty disables the
 	// bearer path entirely.
 	ClusterToken string `yaml:"cluster_token"`
+	// SecretsKey protects stored credentials (per-cluster bearer tokens) at
+	// rest. Empty uses KAFKA_SECRETS_KEY, and failing that a key file is
+	// generated once inside the data dir with 0600.
+	SecretsKey string `yaml:"secrets_key"`
 }
 
 // SchemaRegistry configures the embedded Confluent-compatible registry.

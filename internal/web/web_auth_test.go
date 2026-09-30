@@ -42,18 +42,23 @@ func TestAuthIntegration(t *testing.T) {
 		t.Fatalf("expected 401 for unauthenticated request, got %d", rr.Code)
 	}
 
-	// Wrong password must fail.
+	// Wrong password must fail. State-changing API calls carry the cross-site
+	// guard header, exactly as the dashboard sends it.
 	bad, _ := json.Marshal(map[string]string{"username": "app", "password": "wrong"})
+	badReq := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(bad))
+	badReq.Header.Set(csrfHeader, "1")
 	rr = httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(bad)))
+	h.ServeHTTP(rr, badReq)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for bad credentials, got %d", rr.Code)
 	}
 
 	// Correct login issues a cookie.
 	good, _ := json.Marshal(map[string]string{"username": "app", "password": "changeme"})
+	goodReq := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(good))
+	goodReq.Header.Set(csrfHeader, "1")
 	rr = httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(good)))
+	h.ServeHTTP(rr, goodReq)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 for login, got %d", rr.Code)
 	}

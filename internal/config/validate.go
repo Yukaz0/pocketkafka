@@ -18,8 +18,10 @@ var defaultWebSecrets = map[string]bool{
 	"changeme":                true,
 }
 
-// ValidateClusterName checks a monitored-cluster name. It is exported so the
-// web layer applies exactly the same rule as config validation.
+// ValidateClusterName checks a monitored-cluster name. The charset is
+// deliberately narrow: a name ends up in URLs, in log lines, and as an argument
+// inside a generated onclick attribute, so allowing punctuation would only
+// create escaping problems for no benefit.
 func ValidateClusterName(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -28,8 +30,12 @@ func ValidateClusterName(name string) error {
 	if len(name) > 64 {
 		return errors.New("too long (max 64)")
 	}
-	if strings.ContainsAny(name, "\n\r\t") {
-		return errors.New("must not contain control characters")
+	for _, r := range name {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '.' || r == '_' || r == '-'
+		if !ok {
+			return errors.New("may contain only letters, digits, '.', '_' and '-'")
+		}
 	}
 	return nil
 }
@@ -184,6 +190,11 @@ func validateSecurity(c *Config, add func(string, ...interface{})) {
 	// guessable, so refuse them rather than shipping a weak shared secret.
 	if c.Web.ClusterToken != "" && len(c.Web.ClusterToken) < 16 {
 		add("web.cluster_token: must be at least 16 characters when set")
+	}
+	// The key that seals stored credentials at rest. A short key protects
+	// nothing; an unset key is fine because one is generated in the data dir.
+	if c.Web.SecretsKey != "" && len(c.Web.SecretsKey) < 16 {
+		add("web.secrets_key: must be at least 16 characters when set")
 	}
 	if c.Security.Enabled {
 		useful := 0
