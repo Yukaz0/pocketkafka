@@ -314,18 +314,14 @@ func (s *Server) handleMQTTStatus(w http.ResponseWriter, r *http.Request) {
 // ACL persistence now lives in internal/authz (shared across every ingress);
 // the web server only reads and writes through its *authz.Store.
 
-// ---------------------------------------------------------------------------
 // Avro decode (minimal): parse the Confluent wire format and interpret the
 // schema to walk records without a full Avro codegen.
-// ---------------------------------------------------------------------------
 
 // avroInfo reports whether a message value carries the Confluent Avro magic.
 
-// ---------------------------------------------------------------------------
 // Throughput samples (Batch 2): the UI polls /api/v1/cluster every few
 // seconds; the server tracks message-count deltas here so the sparkline can
 // render messages/sec without any client-side history.
-// ---------------------------------------------------------------------------
 
 var tpMu sync.Mutex
 var tpLastCount int64 = -1

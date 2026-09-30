@@ -34,7 +34,7 @@
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;height:100vh;overflow:hidden}
 
-  /* ---- workbench chrome: titlebar / explorer / statusbar ---- */
+  /* workbench chrome: titlebar / explorer / statusbar */
   .tb{height:44px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:stretch;flex-shrink:0;padding-right:10px}
   .wm{display:flex;align-items:center;padding:0 16px;font-weight:600;font-size:13px;gap:8px;cursor:pointer;user-select:none}
   .wm:hover{color:var(--primary-text)}
@@ -222,7 +222,7 @@
   .pbar{height:6px;border-radius:2px;background:var(--surface3);overflow:hidden;margin-top:4px}
   .pbar>span{display:block;height:100%;background:var(--primary);border-radius:2px}
 
-  /* ---- Fitur 3.2: filter builder ---- */
+  /* Fitur 3.2: filter builder */
   .filterPanel{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:14px;margin-bottom:16px}
   .filterRow{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
   .filterRow select,.filterRow input{width:auto;flex:0 1 auto}
@@ -237,13 +237,13 @@
   .presetChip{display:inline-flex;align-items:center;gap:4px;background:var(--primary-soft);color:var(--primary-text);border-radius:3px;padding:2px 9px;font-size:11px;margin:2px 4px 2px 0;cursor:pointer}
   .presetChip button{background:none;border:none;color:inherit;cursor:pointer;font-size:11px;padding:0 2px}
 
-  /* ---- Fitur 3.3: column projection ---- */
+  /* Fitur 3.3: column projection */
   .projBar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
   .projTag{display:inline-flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:2px 8px;font-size:11px;font-family:var(--font-mono)}
   .projTag button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px}
   .projTag button:hover{color:var(--danger)}
 
-  /* ---- Fitur 3.4: message diff ---- */
+  /* Fitur 3.4: message diff */
   .diffPanel{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:14px;margin-top:16px}
   .diffWrap{display:flex;gap:14px}
   .diffCol{flex:1;min-width:0}
@@ -253,13 +253,13 @@
   .d-add{background:rgba(62,207,142,.12);color:#8fe3bd}
   .d-ctx{color:var(--muted)}
 
-  /* ---- Fitur 3.5: replay / DLQ ---- */
+  /* Fitur 3.5: replay / DLQ */
   .overlay{position:fixed;inset:0;background:rgba(8,10,14,.6);z-index:70;display:flex;align-items:center;justify-content:center}
   .modal{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:20px;width:min(620px,94vw);box-shadow:var(--shadow);animation:view-in .15s ease-out}
   .modal h3{font-size:15px;margin-bottom:14px}
   .chkCell{width:32px;text-align:center}
 
-  /* ---- Fitur 4.x enterprise ---- */
+  /* Fitur 4.x enterprise */
   .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .topoLayer{margin-bottom:14px}
   .topoLayer:last-child{margin-bottom:0}
@@ -284,7 +284,7 @@
   .switchWrap{display:flex;gap:6px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:11px}
   .updatedAgo{color:var(--muted);font-size:11px;font-family:var(--font-mono);white-space:nowrap}
 
-  /* ---- hierarki visual (anti-monoton, tetap flat) ---- */
+  /* hierarki visual (anti-monoton, tetap flat) */
   .kicker{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-family:var(--font-mono);margin-bottom:4px}
   .kicker::before{content:"";display:inline-block;width:16px;height:2px;background:var(--primary);margin-right:8px;vertical-align:3px}
   .statXL{font-family:var(--font-mono);font-size:34px;font-weight:600;line-height:1.1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
@@ -400,7 +400,7 @@ const state={view:'connections',theme:'dark',cluster:null,topics:[],groups:[],sc
 };
 const navItems=[['connections','Connections',I.server],['databrowser','Data Browser',I.table],['topics','Topics',I.layers],['groups','Consumer Groups',I.users],['schemas','Schemas',I.code],['producer','Producer Studio',I.send],['devstudio','Dev Studio',I.code],['topology','Topology',I.layers],['storage','Storage',I.table],['clusters','Clusters',I.layers],['health','Health',I.pulse],['metrics','Metrics',I.layers],['logs','Broker Logs',I.code],['security','Security & ACL',I.users]];
 
-/* ---- Fitur 15: auto theme detection (prefers-color-scheme) ---- */
+/* Fitur 15: auto theme detection (prefers-color-scheme) */
 function initTheme(){
   const saved=localStorage.getItem('kadeck_theme');
   if(saved){state.theme=saved;document.documentElement.dataset.theme=saved;return;}
@@ -501,7 +501,7 @@ function openDrawer(){}
 function closeDrawer(){}
 window.closeDrawer=closeDrawer;
 window.openDrawer=openDrawer;
-/* ---- node detail drawer (topologi) ---- */
+/* node detail drawer (topologi) */
 function openDrw(title,innerHtml){ $('#drwT').textContent=title; $('#drwBody').innerHTML=innerHtml; document.getElementById('drw').classList.add('open'); }
 function closeDrw(){ document.getElementById('drw').classList.remove('open'); }
 window.closeDrw=closeDrw;
@@ -526,7 +526,7 @@ function copyText2(t,btn){
   else{ fallbackCopy(t);done(); }
 }
 window.copyText2=copyText2;
-/* ---- topology: peta broker -> topics -> groups dari data asli ---- */
+/* topology: peta broker -> topics -> groups dari data asli */
 function topoData(){
   const topics=(state.topics||[]).map(t=>{
     const ps=t.partitions||[];
@@ -645,7 +645,7 @@ function viewTopology(){
 }
 window.refreshTopo=function(){renderTopoSvg();render();};
 
-/* ---- Fitur 13: hash router ---- */
+/* Fitur 13: hash router */
 function currentHash(){
   const h=location.hash.replace(/^#\/?/,'');
   if(!h)return ['connections',[]];
@@ -711,7 +711,7 @@ async function refreshAll(){await refresh();render();}
 window.refreshAll=refreshAll;
 window.goView=async function(v){state.view=v;location.hash=v==='connections'?'#/connections':'#/'+v;await refresh();render();};
 
-/* ---- Fitur 12: login ---- */
+/* Fitur 12: login */
 function viewLogin(){
   return `<div style="max-width:360px;margin:80px auto">
     <div class="card">
@@ -745,7 +745,7 @@ window.logout=async function(){
   render();
 };
 
-/* ---- Settings ---- */
+/* Settings */
 function viewSettings(){
   const c=state.cluster||{};
   const auth=state.auth||{};
@@ -816,7 +816,7 @@ window.setTheme=function(mode){
   render();
 };
 
-/* ---- Connections ---- */
+/* Connections */
 function viewConnections(){
   const c=state.cluster||{};
   return `<div>
@@ -848,7 +848,7 @@ function viewConnections(){
   </div>`;
 }
 
-/* ---- Data Browser ---- */
+/* Data Browser */
 function viewDataBrowser(){
   const opts=(state.topics||[]).map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
   const parts=state.topic?state.topics.find(t=>t.name===state.topic)?.partitions||[]:[];
@@ -1023,7 +1023,7 @@ function hex(b64){let s='',bin=atob(b64||'');for(let i=0;i<bin.length;i++)s+=bin
 function copyInsp(){const p=$('#insp');navigator.clipboard.writeText(p.textContent).then(()=>{const b=document.querySelector('.inspector .btn');if(b){const old=b.textContent;b.textContent='Copied';b.style.color='var(--success)';setTimeout(()=>{b.textContent=old;b.style.color='';},1500);}else toast('Copied');});}
 window.copyInsp=copyInsp;
 
-/* ================= Fitur 3.2: Filter Builder ================= */
+/* Fitur 3.2: Filter Builder */
 function jsonOf(m){ if(m.isJSON){ try{return JSON.parse(m.value||'null');}catch(e){return null;} } return null; }
 function pathKeys(obj,prefix){ let out=[]; for(const k in obj){ const p=prefix?prefix+'.'+k:k; if(obj[k]&&typeof obj[k]==='object'){out=out.concat(pathKeys(obj[k],p));} out.push(p); } return out; }
 function refreshFieldHints(){ if(!state.topic)return; const s=state.msgs.slice(0,10); const seen={}; const keys=[]; s.forEach(m=>{ const v=jsonOf(m); if(v)pathKeys(v,'').forEach(p=>{if(!seen[p]){seen[p]=1;keys.push(p);}}); }); state.fieldHint=keys.slice(0,40); }
@@ -1075,18 +1075,18 @@ function evalFilter(f,v){
   return false;
 }
 
-/* ================= Fitur 3.3: Column Projection ================= */
+/* Fitur 3.3: Column Projection */
 function projBarHtml(){ return `<div class="projBar"><span class="muted" style="font-size:11px">Projected columns:</span>${state.projCols.map(c=>`<span class="projTag">${esc(c)}<button title="remove" onclick="removeProj('${esc(c)}')">&times;</button></span>`).join('')}<button class="btn ghost" style="padding:2px 9px;font-size:11px" onclick="openProj()">+ Add</button></div>`; }
 window.openProj=function(){ const opts=state.fieldHint.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join(''); if(!opts){toast('Load messages first to see available fields');return;} const $sel=document.createElement('div'); $sel.innerHTML=`<div class="overlay"><div class="modal"><h3>Add Column (JSON field)</h3><select id="projPick">${opts}</select><div style="margin-top:14px;display:flex;gap:8px"><button class="btn" onclick="projPickAdd()">Add column</button><button class="btn ghost" onclick="closeOverlay()">Cancel</button></div></div></div>`; document.body.appendChild($sel); refreshFieldHints(); };
 window.projPickAdd=function(){ const v=document.getElementById('projPick').value; if(v&&!state.projCols.includes(v)){state.projCols.push(v);localStorage.setItem('pk_proj',JSON.stringify(state.projCols));} closeOverlay(); render(); };
 window.removeProj=function(c){state.projCols=state.projCols.filter(x=>x!==c);localStorage.setItem('pk_proj',JSON.stringify(state.projCols));render();};
 
-/* ================= Fitur 3.4: Message Diff ================= */
+/* Fitur 3.4: Message Diff */
 window.toggleDiffSel=function(off){ if(state.diffSel.includes(off)){state.diffSel=state.diffSel.filter(x=>x!==off);} else { if(state.diffSel.length>=2)state.diffSel.shift(); state.diffSel.push(off);} renderMsgRows(); };
 function byOff(off){return state.msgs.find(m=>m.offset===off);}
 window.runDiff=function(){ const d=$('#diffPanel'); if(!d)return; if(state.diffSel.length<2){toast('Select 2 messages (checkboxes) to diff');return;} const a=byOff(state.diffSel[0]), b=byOff(state.diffSel[1]); if(!a||!b)return; const va=fmtValue(a).split('\n'), vb=fmtValue(b).split('\n'); const max=Math.max(va.length,vb.length); let ha='',hb=''; for(let i=0;i<max;i++){ const la=va[i]||'', lb=vb[i]||''; const same=la.trim()===lb.trim(); const da=la===lb?'' : (lb===''?'d-rem':(va.includes(lb)?'d-ctx':'d-rem')); ha+='<div class="'+(same?'d-ctx':'d-rem')+'">'+esc(la||' ')+'</div>'; hb+='<div class="'+(same?'d-ctx':'d-add')+'">'+esc(lb||' ')+'</div>'; } d.innerHTML=`<div class="diffPanel"><h3 style="font-size:15px;margin-bottom:4px">Message Diff <span class="muted" style="font-size:11px">offset ${a.offset} vs ${b.offset}</span></h3><div class="diffWrap"><div class="diffCol"><h4>Old / A (offset ${a.offset})</h4><pre>${ha}</pre></div><div class="diffCol"><h4>New / B (offset ${b.offset})</h4><pre>${hb}</pre></div></div></div>`; d.scrollIntoView({behavior:'smooth',block:'nearest'}); };
 
-/* ================= Fitur 3.5: Export & Replay / DLQ ================= */
+/* Fitur 3.5: Export & Replay / DLQ */
 window.exportMsgs=function(fmt){ const all=filteredMsgs(); if(!all.length){toast('Nothing to export');return;} const name=`${state.topic||'msgs'}.${fmt==='csv'?'csv':'jsonl'}`; let content=''; if(fmt==='jsonl'){ content=all.map(m=>JSON.stringify({topic:m.topic,partition:m.partition,offset:m.offset,timestamp:m.timestamp,key:m.key,headers:m.headers,value:m.value})).join('\n'); } else { const cols=['topic','partition','offset','timestamp','key','value']; const escCsv=s=>{s=String(s??'');return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}; content=cols.join(',')+'\n'+all.map(m=>cols.map(c=>escCsv(c==='value'?m.value:m[c])).join(',')).join('\n'); } const blob=new Blob([content],{type:'text/plain;charset=utf-8'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(url),100); };
 function replayModal(m){ return `<div class="overlay"><div class="modal"><h3>Replay Message <span class="muted" style="font-size:11px">offset ${m.offset}</span></h3>
   <label>Target topic (DLQ)</label><input id="rpTopic" list="tl" value="${esc(state.topic+'-dlq')}"><datalist id="tl">${state.topics.map(t=>`<option>${esc(t.name)}</option>`).join('')}</datalist>
@@ -1135,7 +1135,7 @@ function toggleTail(){ state.tail=!state.tail; const b=$('#liveBtn'); if(b)b.inn
   connectTail(); }
 window.toggleTail=toggleTail;
 
-/* ---- Fitur 13: WebSocket auto-reconnect with exponential backoff ---- */
+/* Fitur 13: WebSocket auto-reconnect with exponential backoff */
 function connectTail(){
   if(!state.tail)return;
   const proto=location.protocol==='https:'?'wss':'ws';
@@ -1172,7 +1172,7 @@ function connectTail(){
 }
 function prependMsgRow(m){const rows=$('#rows');if(!rows)return;const tr=document.createElement('tr');tr.className='rowclick animate-row-entry';tr.innerHTML=rowHtml(m);tr.onclick=()=>insp(m);rows.prepend(tr);}
 
-/* ---- Topics ---- */
+/* Topics */
 function viewTopics(){ return `<div class="card"><div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;flex-wrap:wrap">
   <div><div class="kicker">Namespace</div><div class="statXL">${(state.topics||[]).length}<small>topics</small></div></div>
   <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input id="newT" placeholder="new topic name" style="max-width:220px"><input id="newP" type="number" min="1" max="64" value="1" title="Partitions" style="max-width:70px"><button class="btn" onclick="createTopic()">Create</button></div>
@@ -1218,7 +1218,7 @@ window.createTopic=createTopic;
 async function delTopic(n){if(!confirm('Delete topic '+n+'?'))return;try{await api('/api/v1/topics/'+encodeURIComponent(n),{method:'DELETE'});toast('Deleted '+n);await refresh();render();}catch(e){toast(e.message);}}
 window.delTopic=delTopic;
 
-/* ---- Groups ---- */
+/* Groups */
 function viewGroups(){ if(!(state.groups||[]).length)return '<div class="card" style="padding:32px;text-align:center"><div class="muted" style="margin-bottom:12px">No consumer groups yet.</div><button class="btn" onclick="goView(\'databrowser\')">Browse data to create one</button></div>';
   return `<div class="card"><table><thead><tr><th class="sortable" onclick="sortRows('groups','name')">Group<span class="sortInd">${sortInd('groups','name')}</span></th><th>State</th><th class="sortable" onclick="sortRows('groups','members')">Members<span class="sortInd">${sortInd('groups','members')}</span></th><th class="sortable" onclick="sortRows('groups','lag')">Lag<span class="sortInd">${sortInd('groups','lag')}</span></th><th></th></tr></thead><tbody>
   ${sortedGroups().map(g=>{const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0);return `<tr class="rowclick" onclick="openGroup('${esc(g.name)}')"><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span></td><td class="mono">${(g.members||[]).join(', ')||'-'}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td><td style="white-space:nowrap"><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();exportGroupOffsets('${esc(g.name)}')" title="Export offset snapshot">Export</button> <button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();importGroupOffsets('${esc(g.name)}')" title="Import offset snapshot">Import</button> <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();delGroup('${esc(g.name)}')">Delete</button></td></tr>`;}).join('')}
@@ -1260,7 +1260,7 @@ window.resetGroupOffset=async function(topic,part){
 };
 window.delGroup=async function(g){if(!confirm('Delete group '+g+'?'))return;try{await api('/api/v1/groups/'+encodeURIComponent(g),{method:'DELETE'});toast('Deleted '+g);await refresh();render();}catch(e){toast(e.message);}};
 
-/* ---- Producer Studio ---- */
+/* Producer Studio */
 function viewProducer(){ const opts=(state.topics||[]).map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
   return `<div class="card">
     <h3 style="margin-bottom:12px">Producer Studio</h3>
@@ -1279,7 +1279,7 @@ async function sendMsg(){ const body={value:$('#pValue').value,key:$('#pKey').va
   if(btn){btn.disabled=false;btn.textContent='Publish Message';} }
 window.sendMsg=sendMsg;
 
-/* ================= Fitur 4.6: Multi-Cluster Switcher ================= */
+/* Fitur 4.6: Multi-Cluster Switcher */
 function clusterList(){ return JSON.parse(localStorage.getItem('pk_clusters')||'[]'); }
 function clusterSwitcherHtml(){
   const cl=clusterList();
@@ -1290,7 +1290,7 @@ function clusterSwitcherHtml(){
 window.switchCluster=function(json){ if(!json)return; const c=JSON.parse(json); toast('Switching to '+c.name+' (demo: single-broker build)'); };
 window.addCluster=function(){ const nm=prompt('Cluster name:','Local Docker'); const bk=prompt('Broker address:','localhost:9092'); if(!nm)return; const cl=clusterList(); cl.push({name:nm,broker:bk}); localStorage.setItem('pk_clusters',JSON.stringify(cl)); render(); };
 
-/* ================= Fitur 4.1: Developer Studio ================= */
+/* Fitur 4.1: Developer Studio */
 function viewDevStudio(){
   return `<div class="grid">
     <div class="card"><h3 style="margin-bottom:12px">Mock Stream Generator</h3>
@@ -1342,11 +1342,11 @@ window.mockGenStart=function(){ const topic=document.getElementById('mkTopic').v
 window.mockGenStop=function(){ if(mockTimer){clearInterval(mockTimer);mockTimer=null;} const st=document.getElementById('mockStat'); if(st)st.textContent+=' (stopped)'; };
 window.rpcSend=function(){ const req=document.getElementById('rpcReq').value,reply=document.getElementById('rpcReply').value,method=document.getElementById('rpcMethod').value,payload=document.getElementById('rpcPayload').value; const corr=Math.random().toString(36).slice(2,10); const body={key:corr,value:JSON.stringify({method,request:JSON.parse(payload||'{}'),reply_to:reply}),headers:{correlation_id:corr,reply_to_topic:reply,type:'request'}}; api('/api/v1/topics/'+encodeURIComponent(req)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>toast('RPC request sent @ offset '+r.offset+' (corr '+corr+')')).catch(e=>toast(e.message)); };
 
-/* ================= Fitur 4.2: Stream Topology & Data Flow ================= */
+/* Fitur 4.2: Stream Topology & Data Flow */
 /* Dipindah: peta SVG broker -> topics -> groups ada di renderTopoSvg()/viewTopology()
    di atas (workbench), lengkap dengan node detail drawer. */
 
-/* ================= Fitur 4.3: Storage & Segment Inspector ================= */
+/* Fitur 4.3: Storage & Segment Inspector */
 function viewStorage(){
   const tsel=(state.topics||[]).map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
   return `<div>
@@ -1359,7 +1359,7 @@ function viewStorage(){
 window.loadSegments=async function(){ const t=document.getElementById('stTopic').value; if(!t)return; const out=document.getElementById('segOut'); try{ const ps=await api('/api/v1/topics/'+encodeURIComponent(t)+'/partitions'); let html=''; ps.forEach(p=>{ const segs=p.segments||[]; const total=segs.reduce((a,s)=>a+s.sizeBytes,0); const remote=segs.filter(s=>s.remote).length; html+=`<div style="margin-top:10px"><div style="display:flex;justify-content:space-between;font-size:11px;font-family:var(--font-mono)"><span>P${p.partition}</span><span class="muted">${segs.length} segments &middot; ${fmtBytes(p.bytes)} &middot; ${remote} tiered</span></div>`; segs.forEach(s=>{ html+=`<div class="segBlock ${s.remote?'remote':(s.sizeBytes===segs[segs.length-1].sizeBytes?'act':'closed')}" title="base ${s.baseOffset} &middot; ${fmtBytes(s.sizeBytes)}">${s.baseOffset}${s.remote?' T':''}</div>`; }); html+='</div>'; }); out.innerHTML=html||'<div class="muted">no segments</div>'; }catch(e){out.textContent='error: '+e.message;} };
 window.ttJump=function(){ const off=document.getElementById('ttOff').value, part=document.getElementById('ttPart').value; state.off=off; state.partition=part; state.topic=document.getElementById('stTopic').value; if(!state.topic){toast('Select topic first');return;} goView('databrowser').then(()=>loadMsgs()); };
 
-/* ================= Fitur 4.4: Schema Studio ================= */
+/* Fitur 4.4: Schema Studio */
 function viewSchemas(){
   if(!(state.schemas||[]).length)return `<div class="card"><h3 style="margin-bottom:10px">Schema Registry Studio</h3>
     <div class="muted" style="font-size:12px;margin-bottom:14px">No schemas registered. Register the first one:</div>
@@ -1380,7 +1380,7 @@ async function loadSchemaDetail(){ const subj=document.getElementById('schSubjec
 window.schemaDiff=function(subj,ver){ const el=document.getElementById('schVersions'); if(!el)return; api('/api/v1/schemas/'+encodeURIComponent(subj)).then(vers=>{ const cur=vers.find(v=>v.version===ver); const prev=vers.find(v=>v.version===ver-1); if(!cur||!prev){toast('No previous version to diff');return;} const a=fmtSchema(prev.schema), b=fmtSchema(cur.schema); const la=a.split('\n'), lb=b.split('\n'); const max=Math.max(la.length,lb.length); let html='<div class="diffWrap" style="margin-top:8px">'; for(let i=0;i<max;i++){ const x=la[i]||'',y=lb[i]||''; const same=x.trim()===y.trim(); html+=`<div style="flex:1;font-family:var(--font-mono);font-size:11px"><div class="${same?'d-ctx':'d-rem'}">${esc(x||' ')}</div></div>`; html+=`<div style="flex:1;font-family:var(--font-mono);font-size:11px"><div class="${same?'d-ctx':'d-add'}">${esc(y||' ')}</div></div>`; } html+='</div>'; el.innerHTML+=`<div style="margin-top:14px"><b style="font-size:12px">Diff v${prev.version} -&gt; v${cur.version}</b>${html}</div>`; }).catch(e=>toast(e.message)); };
 function fmtSchema(s){ try{return JSON.stringify(JSON.parse(s),null,2);}catch(e){return s;} }
 
-/* ================= Fitur 4.5: Security & ACL + Audit ================= */
+/* Fitur 4.5: Security & ACL + Audit */
 function viewSecurity(){
   return `<div>
     <div class="card"><div class="row"><h3 style="margin-right:10px">Visual ACL Manager</h3>
@@ -1400,7 +1400,7 @@ window.delACL=async function(p,rt,rn){ try{ await api('/api/v1/acls',{method:'DE
 async function loadAudit(){ const b=document.getElementById('auditBody'); if(!b)return; try{ const log=await api('/api/v1/audit'); b.innerHTML=log.map(e=>`<tr><td class="mono">${new Date(e.time).toISOString()}</td><td>${esc(e.actor)}</td><td class="chip">${esc(e.action)}</td><td class="mono">${esc(e.resource)}</td><td>${esc(e.detail)}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">No activity yet.</td></tr>'; }catch(e){b.innerHTML='<tr><td colspan="5" class="muted">error</td></tr>';} }
 window.refreshSecurity=function(){loadACLs();loadAudit();};
 
-/* ================= Fitur 4.6: In-App Health Alarms ================= */
+/* Fitur 4.6: In-App Health Alarms */
 function activeAlerts(){
   const alerts=[];
   // Consumer lag > 1000
@@ -1439,8 +1439,8 @@ window.dismissAlarms=function(){
   try{ sessionStorage.setItem('pk_dismissed',JSON.stringify([...state.alarmsDismissed])); }catch(e){}
   const b=document.getElementById('alarmBanner'); if(b)b.remove();
 };
-/* ================= Batch 1-3: fitur frontend ================= */
-/* ---- URL sync + sorting helpers ---- */
+/* Batch 1-3: fitur frontend */
+/* URL sync + sorting helpers */
 function timeCell(ts){ return state.timeAbs
   ? '<div>'+new Date(ts).toISOString()+'</div><div class="rel">'+rel(ts)+'</div>'
   : '<div>'+rel(ts)+'</div><div class="rel">'+new Date(ts).toISOString()+'</div>'; }
@@ -1459,7 +1459,7 @@ function sortedGroups(){ const s=state.sort.groups; const arr=(state.groups||[])
     else {va=Object.values(a.lag||{}).reduce((x,y)=>x+y,0);vb=Object.values(b.lag||{}).reduce((x,y)=>x+y,0);}
     return (va>vb?1:va<vb?-1:0)*mul; }); }
 
-/* ---- Metrics view: throughput sparkline + MQTT status ---- */
+/* Metrics view: throughput sparkline + MQTT status */
 function viewMetrics(){ return `<div>
   <div class="card"><div class="kicker">Ingest</div><h3>Throughput</h3>
     <div class="statXL" id="tpRate">--<small>msg/s</small></div><div class="statSub" id="tpTotal"></div>
@@ -1501,7 +1501,7 @@ function patchConnections(){
   return true;
 }
 
-/* ---- Health view: broker health overview (GET /api/v1/health/overview) ---- */
+/* Health view: broker health overview (GET /api/v1/health/overview) */
 let healthTimer=null,healthData=null,healthErr=null,healthWindow=60,healthOpenTopics=new Set();
 function hStatusBadge(s){return s==='healthy'?'<span class="badge b-green">healthy</span>':s==='degraded'?'<span class="badge b-amber">degraded</span>':s==='critical'?'<span class="badge" style="color:var(--danger);border-color:var(--danger)">critical</span>':s==='idle'?'<span class="badge muted">idle</span>':'<span class="badge muted">'+esc(s||'-')+'</span>';}
 function hTrend(t){return t==='rising'?'^ rising':t==='falling'?'v falling':'- flat';}
@@ -1620,7 +1620,7 @@ window.toggleHealthTopic=function(n){ if(healthOpenTopics.has(n))healthOpenTopic
 function startHealthPoll(){ if(healthTimer)return; loadClusterList(); loadHealth(); healthTimer=setInterval(loadHealth,state.refreshMs); }
 function stopHealthPoll(){ if(healthTimer){clearInterval(healthTimer);healthTimer=null;} }
 
-/* ---- Multi-cluster: registry + pemilihan broker di view Health ----
+/* Multi-cluster: registry + pemilihan broker di view Health ----
    Daftar cluster adalah SATU-SATUNYA sumber URL yang boleh diambil broker,
    jadi yang ditampilkan di sini hanyalah apa yang dilaporkan /api/v1/clusters
    dan /api/v1/health/clusters. Token tidak pernah dikirim balik oleh broker:
@@ -1648,7 +1648,7 @@ window.setHealthCluster=function(v){
   render(); loadHealth();
 };
 
-/* ---- Clusters view: memantau banyak broker (GET /api/v1/health/clusters) ----
+/* Clusters view: memantau banyak broker (GET /api/v1/health/clusters) ----
    Satu tabel untuk semua broker yang dipantau, termasuk broker ini sendiri
    sebagai baris "local". Polling memakai pola yang sama dengan Health: markup
    dibangun di node terlepas lalu hanya bagian yang berubah disalin ke DOM
@@ -1804,7 +1804,7 @@ window.deleteCluster=async function(name){
   }catch(e){ toast('Error: '+e.message); }
 };
 
-/* ---- Broker logs viewer ---- */
+/* Broker logs viewer */
 function viewLogs(){ return `<div class="card"><div class="kicker">Diagnostics</div><h3 style="margin-bottom:10px">Broker Logs</h3>
   <div class="row" style="margin-bottom:10px"><select id="logLvl" style="width:auto" onchange="loadLogs()"><option value="">Semua level</option><option value="warn">Warn ke atas</option><option value="err">Error saja</option></select><button class="btn ghost" onclick="loadLogs()">Refresh</button><span class="updatedAgo">ring 500 baris terakhir</span></div>
   <div class="logView" id="logOut">${skel(120)}</div></div>`; }
@@ -1816,7 +1816,7 @@ async function loadLogs(){ const out=document.getElementById('logOut'); if(!out)
   }catch(e){ out.textContent='error: '+e.message; } }
 window.loadLogs=loadLogs;
 
-/* ---- Command palette (Ctrl+K / '/') ---- */
+/* Command palette (Ctrl+K / '/') */
 function palItems(){
   const items=navItems.map(([k,label])=>({label,run:()=>goView(k),hint:'view'}));
   (state.topics||[]).forEach(t=>items.push({label:t.name,run:()=>{state.topic=t.name;goView('databrowser').then(()=>loadMsgs());},hint:'topic'}));
@@ -1853,7 +1853,7 @@ if(!window._palBound){ window._palBound=1;
   });
 }
 
-/* ---- Snippet generators (curl via REST proxy + sarama consumer) ---- */
+/* Snippet generators (curl via REST proxy + sarama consumer) */
 window.copyCurl=function(topic){ if(!topic){toast('Select a topic first');return;}
   const cmd='curl -X POST http://localhost:8082/topics/'+encodeURIComponent(topic)+'/messages -H "Content-Type: application/json" -d \'{"key":"k1","value":"hello"}\'';
   navigator.clipboard.writeText(cmd).then(()=>toast('curl copied')); };
@@ -1861,7 +1861,7 @@ window.copyConsumer=function(topic){ if(!topic){toast('Select a topic first');re
   const code='// Go + sarama (protocol 0.11)\nconfig := sarama.NewConfig()\nconfig.Version = sarama.V0_11_0_0\ncg, err := sarama.NewConsumerGroup([]string{"localhost:9092"}, "my-group", config)\nif err != nil { panic(err) }\n// consume topic: '+topic+'\nfor {\n\tif err := cg.Consume(ctx, []string{"'+topic+'"}, handler); err != nil { break }\n}';
   navigator.clipboard.writeText(code).then(()=>toast('consumer snippet copied')); };
 
-/* ---- JSONL import (kebalikan export) ---- */
+/* JSONL import (kebalikan export) */
 window.doImportFile=async function(inp){ const f=inp.files&&inp.files[0]; inp.value='';
   if(!f)return; if(!state.topic){toast('Select a topic first');return;}
   try{ const text=await f.text();
@@ -1869,7 +1869,7 @@ window.doImportFile=async function(inp){ const f=inp.files&&inp.files[0]; inp.va
     toast('Imported '+r.imported+' messages'); loadMsgs();
   }catch(e){toast(e.message);} };
 
-/* ---- Group offset snapshot ---- */
+/* Group offset snapshot */
 window.exportGroupOffsets=async function(g){ try{ const d=await api('/api/v1/groups/'+encodeURIComponent(g)+'/offsets/export');
     const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'}); const a=document.createElement('a');
     a.href=URL.createObjectURL(blob); a.download=g+'-offsets.json'; a.click(); toast('Snapshot diunduh');
@@ -1882,20 +1882,20 @@ window.importGroupOffsets=async function(g){ const inp=document.createElement('i
     }catch(e){toast(e.message);} };
   inp.click(); };
 
-/* ---- Schema register ---- */
+/* Schema register */
 window.registerSchema=async function(){ const s=document.getElementById('nsSub').value, sc=document.getElementById('nsSchema').value, t=document.getElementById('nsType').value;
   if(!s||!sc){toast('subject and schema required');return;}
   try{ await api('/api/v1/schemas/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subject:s,schema:sc,schemaType:t})});
     toast('Schema registered'); await refresh(); render();
   }catch(e){toast(e.message);} };
 
-/* ---- Topic config (cleanup.policy) ---- */
+/* Topic config (cleanup.policy) */
 window.toggleTopicCompact=async function(){ const next=!(state.topicCfg&&state.topicCfg.compacted);
   try{ await api(`/api/v1/topics/${encodeURIComponent(state.topicDetail)}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({compacted:next})});
     state.topicCfg={compacted:next}; render();
   }catch(e){toast(e.message);} };
 
-/* ---- Live tail: pause on scroll-up ---- */
+/* Live tail: pause on scroll-up */
 /* Jumlah pesan terbaru yang ditahan di view selama tail. DOM dijaga sepadan
    dengan angka ini: sebelum ini baris lama tidak pernah dibuang sehingga DOM
    tumbuh tanpa batas selama tail menyala, dan itulah yang membuat halaman

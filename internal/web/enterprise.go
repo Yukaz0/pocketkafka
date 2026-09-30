@@ -19,10 +19,8 @@ func (s *Server) actorFrom(r *http.Request) string {
 	return "anonymous"
 }
 
-// ---------------------------------------------------------------------------
 // Fitur 4.4: Schema Registry Studio - expose per-subject schema versions so the
 // web UI can run compatibility checks and show a visual diff.
-// ---------------------------------------------------------------------------
 
 func (s *Server) handleSchemaDetail(w http.ResponseWriter, r *http.Request) {
 	if s.sr == nil {

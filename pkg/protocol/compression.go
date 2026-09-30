@@ -89,10 +89,8 @@ func gzipDecompress(src []byte) ([]byte, error) {
 	return io.ReadAll(r)
 }
 
-// ---------------------------------------------------------------------------
 // Snappy block format (as used by Kafka): the 4-byte big-endian length prefix
 // followed by the raw snappy block encoding of the data.
-// ---------------------------------------------------------------------------
 
 // snappyMaxEncodedLen estimates the upper bound of a snappy block encoding.
 func snappyMaxEncodedLen(srcLen int) int {
@@ -294,12 +292,10 @@ func snappyCopy(dst []byte, offset, length int) ([]byte, error) {
 	return dst, nil
 }
 
-// ---------------------------------------------------------------------------
 // LZ4 block format (as used by Kafka): 4-byte magic 0x184D2204 + 4-byte BE
 // compressed length + 4-byte BE uncompressed length + raw LZ4 block. The block
 // carries its own 4-byte little-endian xxHash32 at the end, which we ignore on
 // decode (we verify sizes instead).
-// ---------------------------------------------------------------------------
 
 const (
 	lz4FrameMagic    uint32 = 0x184D2204
