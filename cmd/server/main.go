@@ -255,6 +255,7 @@ func buildWebServer(cfg config.Config, store *storage.Store, gm *coordinator.Gro
 		WithDataDir(cfg.Storage.DataDir).
 		WithACLStore(aclStore).
 		WithBrokerInfo(listenerAddrs(cfg), advertisedString(cfg), securityModeOf(cfg))
+	ws.WithClusterMonitoring(cfg)
 	ws.InstallLogSink()
 	srv := newHTTPServer(cfg, cfg.Web.Listen, limitBody(ws.Handler(), cfg.Network.MaxRequestSizeBytes), true)
 	return ws, srv

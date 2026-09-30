@@ -48,7 +48,12 @@ func authPayloadToUser(payload string) string {
 // newAuthMiddleware protects /api/* and /metrics (but not the login endpoint or
 // static assets) when web auth is enabled. Unauthenticated API calls receive
 // 401 so the SPA can show the login screen.
-func newAuthMiddleware(users []config.SecurityUser, secret string, enabled bool) func(http.Handler) http.Handler {
+//
+// clusterToken, when non-empty, authorizes an aggregating peer that presents it
+// as `Authorization: Bearer <token>`: another broker's dashboard has no way to
+// hold an interactive session, and this is the only path it uses. It grants
+// reads only, because mutations additionally require an ACL grant.
+func newAuthMiddleware(users []config.SecurityUser, secret string, enabled bool, clusterToken string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !enabled {
@@ -61,6 +66,15 @@ func newAuthMiddleware(users []config.SecurityUser, secret string, enabled bool)
 				return
 			}
 			if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/metrics" {
+				if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+					presented := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+					if clusterToken == "" || subtle.ConstantTimeCompare([]byte(presented), []byte(clusterToken)) != 1 {
+						writeErr(w, http.StatusUnauthorized, "invalid cluster token")
+						return
+					}
+					next.ServeHTTP(w, r)
+					return
+				}
 				cookie, err := r.Cookie(authCookieName)
 				if err != nil {
 					writeErr(w, http.StatusUnauthorized, "authentication required")

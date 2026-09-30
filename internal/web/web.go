@@ -36,6 +36,14 @@ type Server struct {
 	// which the dashboard renders in its Health view.
 	monitor *Monitor
 
+	// Multi-cluster monitoring: the registry of peers this dashboard reports
+	// on, the bearer token this broker accepts from an aggregating peer, and a
+	// short-lived cache so a polling UI does not fan out on every tick.
+	clusters       *clusterStore
+	clusterToken   string
+	clusterCacheMu sync.Mutex
+	clusterCache   map[time.Duration]clusterCacheEntry
+
 	// Auth (Fitur 12).
 	users       []config.SecurityUser
 	authSecret  string
@@ -112,6 +120,7 @@ func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.
 		startTime: time.Now(),
 		metrics:   metrics.NewRegistry(),
 		monitor:   NewMonitor(),
+		clusters:  newClusterStore("", nil),
 		aclStore:  authz.NewInMemory(),
 		rrCounter: make(map[string]uint64),
 	}
@@ -217,7 +226,13 @@ func (s *Server) Handler() http.Handler {
 	// Health monitoring: the aggregate report. The dashboard renders it in the
 	// Health view of the embedded SPA (web/dist/index.html).
 	mux.HandleFunc("GET /api/v1/health/overview", s.handleHealthOverview)
-	authed := newAuthMiddleware(s.users, s.authSecret, s.authEnabled)(mux)
+	// Multi-cluster monitoring: the overview fans out to every registered peer
+	// (including this broker), while the registry endpoints edit the list.
+	mux.HandleFunc("GET /api/v1/health/clusters", s.handleClustersOverview)
+	mux.HandleFunc("GET /api/v1/clusters", s.handleClusters)
+	mux.HandleFunc("POST /api/v1/clusters", s.handleUpsertCluster)
+	mux.HandleFunc("DELETE /api/v1/clusters/{name}", s.handleDeleteCluster)
+	authed := newAuthMiddleware(s.users, s.authSecret, s.authEnabled, s.clusterToken)(mux)
 	return s.authorizeMutations(authed)
 }
 

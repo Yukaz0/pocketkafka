@@ -267,6 +267,17 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 		cfg.Web.Enabled = getBool(w, "enabled", cfg.Web.Enabled)
 		cfg.Web.Auth = getBool(w, "auth", cfg.Web.Auth)
 		cfg.Web.AuthSecret = getString(w, "auth_secret", cfg.Web.AuthSecret)
+		cfg.Web.ClusterToken = getString(w, "cluster_token", cfg.Web.ClusterToken)
+		if list, ok := w["clusters"].([]interface{}); ok {
+			for _, c := range list {
+				if cm, ok := c.(map[string]interface{}); ok {
+					cfg.Web.Clusters = append(cfg.Web.Clusters, WebCluster{
+						Name: getString(cm, "name", ""),
+						URL:  getString(cm, "url", ""),
+					})
+				}
+			}
+		}
 	}
 	if sr := asMap(m, "schema_registry"); sr != nil {
 		cfg.SchemaRegistry.Listen = getString(sr, "listen", cfg.SchemaRegistry.Listen)

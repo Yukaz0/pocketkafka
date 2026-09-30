@@ -72,6 +72,21 @@ web:
   # Signing key for the login cookie. MUST be changed: startup fails if it is
   # empty or still a placeholder while web.auth or security.enabled is true.
   auth_secret: "change-me-in-production"
+  # Multi-cluster monitoring. This dashboard can report the health of other
+  # brokers: entries here SEED the list, the UI can edit it afterwards, and the
+  # result persists in <data_dir>/__clusters.json (same pattern as the ACLs).
+  # Only URLs listed here or added through the UI are ever fetched, so the
+  # fan-out can never be turned into a request against an arbitrary address.
+  # Per-cluster bearer tokens are entered in the UI and stored write-only in
+  # <data_dir>/__cluster_tokens.json (0600); they never appear in any response.
+  # clusters:
+  #   - name: "staging"
+  #     url: "http://192.168.212.26:8080"
+  # Bearer token THIS broker accepts from another broker's dashboard that
+  # aggregates its health report. Empty means every bearer request is refused.
+  # Must be at least 16 characters. It grants reads only: mutations still
+  # require an ACL grant.
+  # cluster_token: ""
 
 schema_registry:
   listen: "0.0.0.0:8081"  # Confluent-compatible Schema Registry

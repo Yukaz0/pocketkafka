@@ -1,8 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 )
 
@@ -14,6 +16,45 @@ var defaultWebSecrets = map[string]bool{
 	"pocketkafka-web-secret":  true,
 	"change-me-in-production": true,
 	"changeme":                true,
+}
+
+// ValidateClusterName checks a monitored-cluster name. It is exported so the
+// web layer applies exactly the same rule as config validation.
+func ValidateClusterName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("must not be empty")
+	}
+	if len(name) > 64 {
+		return errors.New("too long (max 64)")
+	}
+	if strings.ContainsAny(name, "\n\r\t") {
+		return errors.New("must not contain control characters")
+	}
+	return nil
+}
+
+// ValidateClusterURL checks a monitored-cluster endpoint: plain http(s) with a
+// host and no embedded credentials. Only URLs that pass this ever get fetched,
+// which is what keeps the dashboard fan-out from being an SSRF primitive.
+func ValidateClusterURL(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return errors.New("is required")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("is not valid: %v", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("scheme must be http or https (got %q)", u.Scheme)
+	}
+	if u.Host == "" {
+		return errors.New("must include a host")
+	}
+	if u.User != nil {
+		return errors.New("must not embed credentials; use the token field instead")
+	}
+	return nil
 }
 
 // Validate checks the configuration for values that would make the broker
@@ -121,6 +162,28 @@ func validateSecurity(c *Config, add func(string, ...interface{})) {
 		if defaultWebSecrets[c.Web.AuthSecret] {
 			add("web.auth_secret: must be set to a non-default value when web.auth or security.enabled is true")
 		}
+	}
+	// Multi-cluster monitoring: a malformed entry would be persisted and then
+	// fail on every fan-out, so reject it at startup instead.
+	seenClusters := map[string]bool{}
+	for i, cl := range c.Web.Clusters {
+		name := strings.TrimSpace(cl.Name)
+		if err := ValidateClusterName(name); err != nil {
+			add("web.clusters[%d].name: %v", i, err)
+			continue
+		}
+		if seenClusters[name] {
+			add("web.clusters[%d].name: duplicate cluster name %q", i, name)
+		}
+		seenClusters[name] = true
+		if err := ValidateClusterURL(cl.URL); err != nil {
+			add("web.clusters[%d].url: %v", i, err)
+		}
+	}
+	// The bearer token this broker accepts from an aggregator: short values are
+	// guessable, so refuse them rather than shipping a weak shared secret.
+	if c.Web.ClusterToken != "" && len(c.Web.ClusterToken) < 16 {
+		add("web.cluster_token: must be at least 16 characters when set")
 	}
 	if c.Security.Enabled {
 		useful := 0

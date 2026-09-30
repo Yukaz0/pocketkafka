@@ -933,6 +933,25 @@ func (s *Server) handleHealthOverview(w http.ResponseWriter, r *http.Request) {
 			th.IdleAfter = time.Duration(n) * time.Second
 		}
 	}
+	// A named cluster is proxied from the peer, so the dashboard renders a
+	// remote broker through exactly the same code path as the local one.
+	if name := q.Get("cluster"); name != "" && name != "local" {
+		entry, ok := s.clusters.Get(name)
+		if !ok {
+			writeErr(w, http.StatusNotFound, "unknown cluster: "+name)
+			return
+		}
+		body, _, err := s.fetchClusterReport(r.Context(), entry, window, s.clusters.Token(name))
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, "cluster "+name+": "+err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-PocketKafka-Cluster", name)
+		w.WriteHeader(http.StatusOK)
+		w.Write(body)
+		return
+	}
 	now := time.Now()
 	s.monitor.Record(s.store, s.gm, now, false)
 	writeJSON(w, http.StatusOK, s.buildOverview(th, window, now))

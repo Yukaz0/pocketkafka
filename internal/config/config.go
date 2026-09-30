@@ -99,6 +99,13 @@ type Logging struct {
 	Format string `yaml:"format"`
 }
 
+// WebCluster is one remote broker the dashboard may monitor. It carries no
+// secret: a per-cluster bearer token is stored separately in the data dir.
+type WebCluster struct {
+	Name string `yaml:"name"`
+	URL  string `yaml:"url"`
+}
+
 // Web configures the embedded dashboard server.
 type Web struct {
 	Listen  string `yaml:"listen"`
@@ -107,6 +114,13 @@ type Web struct {
 	// cookie is HMAC-signed with the secret below.
 	Auth       bool   `yaml:"auth"`
 	AuthSecret string `yaml:"auth_secret"`
+	// Clusters seeds the list of monitored clusters; the UI can edit the list
+	// afterwards and it persists in <data_dir>/__clusters.json.
+	Clusters []WebCluster `yaml:"clusters"`
+	// ClusterToken is the bearer token THIS broker accepts from another
+	// broker's dashboard aggregating its health report. Empty disables the
+	// bearer path entirely.
+	ClusterToken string `yaml:"cluster_token"`
 }
 
 // SchemaRegistry configures the embedded Confluent-compatible registry.
