@@ -439,9 +439,7 @@ func (cg *ConsumerGroup) Close() {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // ConsumerProtocol subscription / assignment codecs (classic encoding).
-// ---------------------------------------------------------------------------
 
 func encodeSubscription(topics []string) []byte {
 	w := protocol.NewWriter(32)

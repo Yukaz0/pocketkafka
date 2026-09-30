@@ -1,8 +1,6 @@
 package protocol
 
-// ---------------------------------------------------------------------------
 // AddPartitionsToTxn (Key 24), v0-v1
-// ---------------------------------------------------------------------------
 
 // AddPartitionsToTxnRequestTopic groups partitions to add to a transaction.
 type AddPartitionsToTxnRequestTopic struct {
@@ -150,9 +148,7 @@ func DecodeAddPartitionsToTxnResponse(version int16, body []byte) (*AddPartition
 	return resp, nil
 }
 
-// ---------------------------------------------------------------------------
 // AddOffsetsToTxn (Key 25), v0-v1
-// ---------------------------------------------------------------------------
 
 // AddOffsetsToTxnRequest registers a consumer group's offsets with a transaction.
 type AddOffsetsToTxnRequest struct {
@@ -226,9 +222,7 @@ func DecodeAddOffsetsToTxnResponse(version int16, body []byte) (*AddOffsetsToTxn
 	return resp, nil
 }
 
-// ---------------------------------------------------------------------------
 // EndTxn (Key 26), v0-v2
-// ---------------------------------------------------------------------------
 
 // EndTxnRequest commits or aborts a transaction.
 type EndTxnRequest struct {

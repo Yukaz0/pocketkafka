@@ -1,8 +1,6 @@
 package protocol
 
-// ---------------------------------------------------------------------------
 // FindCoordinator (Key 10), v0-v3
-// ---------------------------------------------------------------------------
 
 // FindCoordinatorRequest requests the coordinator for a group.
 type FindCoordinatorRequest struct {
@@ -54,9 +52,7 @@ func EncodeFindCoordinatorResponse(resp *FindCoordinatorResponse) ([]byte, error
 	return w.Bytes(), nil
 }
 
-// ---------------------------------------------------------------------------
 // JoinGroup (Key 11), v0-v6
-// ---------------------------------------------------------------------------
 
 // JoinGroupRequestProtocol is a proposed rebalance protocol.
 type JoinGroupRequestProtocol struct {
@@ -175,9 +171,7 @@ func EncodeJoinGroupResponse(resp *JoinGroupResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// ---------------------------------------------------------------------------
 // SyncGroup (Key 14), v0-v4
-// ---------------------------------------------------------------------------
 
 // SyncGroupRequestAssignment is the leader's assignment for one member.
 type SyncGroupRequestAssignment struct {
@@ -270,9 +264,7 @@ func EncodeSyncGroupResponse(resp *SyncGroupResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// ---------------------------------------------------------------------------
 // Heartbeat (Key 12), v0-v3
-// ---------------------------------------------------------------------------
 
 // HeartbeatRequest keeps a group member alive.
 type HeartbeatRequest struct {
@@ -322,9 +314,7 @@ func EncodeHeartbeatResponse(resp *HeartbeatResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// ---------------------------------------------------------------------------
 // LeaveGroup (Key 13), v0-v3
-// ---------------------------------------------------------------------------
 
 // LeaveGroupRequestMember identifies a member leaving.
 type LeaveGroupRequestMember struct {
@@ -411,9 +401,7 @@ func EncodeLeaveGroupResponse(resp *LeaveGroupResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// ---------------------------------------------------------------------------
 // OffsetCommit (Key 8), v0-v7
-// ---------------------------------------------------------------------------
 
 // OffsetCommitRequestPartition commits one partition offset.
 type OffsetCommitRequestPartition struct {
@@ -550,9 +538,7 @@ func EncodeOffsetCommitResponse(resp *OffsetCommitResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// ---------------------------------------------------------------------------
 // OffsetFetch (Key 9), v0-v6
-// ---------------------------------------------------------------------------
 
 // OffsetFetchRequestTopic requests committed offsets for a topic's partitions.
 type OffsetFetchRequestTopic struct {

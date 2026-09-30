@@ -21,9 +21,7 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// ---------------------------------------------------------------------------
 // Broker log ring buffer + viewer
-// ---------------------------------------------------------------------------
 
 // logRing keeps the most recent broker log lines in memory for the UI viewer.
 type logRing struct {
@@ -80,9 +78,7 @@ func (s *Server) handleBrokerLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, brokerLogs.snapshot())
 }
 
-// ---------------------------------------------------------------------------
 // JSONL batch import (kebalikan export .jsonl di Data Browser)
-// ---------------------------------------------------------------------------
 
 func (s *Server) handleImportJSONL(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
@@ -159,9 +155,7 @@ func (s *Server) handleImportJSONL(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"topic": topic, "imported": count})
 }
 
-// ---------------------------------------------------------------------------
 // Group offset snapshot export / import
-// ---------------------------------------------------------------------------
 
 // offsetSnapshotRow is one committed offset in a group snapshot file.
 type offsetSnapshotRow struct {
@@ -217,9 +211,7 @@ func (s *Server) handleImportGroupOffsets(w http.ResponseWriter, r *http.Request
 	writeJSON(w, 200, map[string]any{"group": group, "applied": applied})
 }
 
-// ---------------------------------------------------------------------------
 // Topic config: cleanup policy (compaction) editor
-// ---------------------------------------------------------------------------
 
 func (s *Server) handleTopicConfig(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
@@ -251,9 +243,7 @@ func (s *Server) handleTopicConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"topic": topic, "compacted": req.Compacted})
 }
 
-// ---------------------------------------------------------------------------
 // Schema registration proxy (uses the embedded registry's Confluent API)
-// ---------------------------------------------------------------------------
 
 func (s *Server) handleRegisterSchema(w http.ResponseWriter, r *http.Request) {
 	if s.sr == nil {
@@ -306,9 +296,7 @@ func (c *captureResponse) Header() http.Header         { return c.header }
 func (c *captureResponse) Write(b []byte) (int, error) { return c.buf.Write(b) }
 func (c *captureResponse) WriteHeader(code int)        { c.code = code }
 
-// ---------------------------------------------------------------------------
 // MQTT bridge status
-// ---------------------------------------------------------------------------
 
 func (s *Server) handleMQTTStatus(w http.ResponseWriter, r *http.Request) {
 	if s.mqtt == nil {

@@ -267,9 +267,7 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// ---------------------------------------------------------------------------
 // Cluster
-// ---------------------------------------------------------------------------
 
 func (s *Server) handleCluster(w http.ResponseWriter, r *http.Request) {
 	topics := s.store.TopicsSnapshot()
@@ -297,9 +295,7 @@ func (s *Server) handleCluster(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // Topics
-// ---------------------------------------------------------------------------
 
 type topicInfo struct {
 	Name       string          `json:"name"`
@@ -383,9 +379,7 @@ func (s *Server) handleDeleteTopic(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"deleted": topic})
 }
 
-// ---------------------------------------------------------------------------
 // Messages
-// ---------------------------------------------------------------------------
 
 type messageRecord struct {
 	Topic     string            `json:"topic"`
@@ -528,9 +522,7 @@ func decodeRecords(topic string, partition int32, raw []byte) []messageRecord {
 	return out
 }
 
-// ---------------------------------------------------------------------------
 // Groups
-// ---------------------------------------------------------------------------
 
 func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	infos := s.gm.ListGroups()
@@ -572,9 +564,7 @@ func (s *Server) handleSchemas(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.sr.ListSubjects())
 }
 
-// ---------------------------------------------------------------------------
 // WebSocket live tail
-// ---------------------------------------------------------------------------
 
 func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
@@ -639,10 +629,8 @@ func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 					pending = append(pending, recs...)
 				}
 				if got < want {
-					// The read window did not cover every offset this tick, so
-					// those messages are being passed over. Counting them here is
-					// what makes the notice the dashboard shows the truth rather
-					// than only the part the frame cap dropped.
+					// The read window missed offsets this tick: counting them here
+					// is what makes the notice the dashboard shows truthful.
 					unread += want - got
 				}
 				tp.next = hwm
@@ -672,10 +660,9 @@ func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// tailMaxPerFrame bounds one live-tail frame. A browser cannot usefully render
-// forty thousand rows in a tick, so the newest are sent and the rest reported as
-// skipped: a live tail shows what just happened rather than replaying a backlog
-// it cannot display.
+// tailMaxPerFrame bounds one live-tail frame: a browser cannot render tens of
+// thousands of rows per tick, so the newest are sent and the rest reported as
+// skipped. A live tail shows what just happened, not a backlog it cannot display.
 const tailMaxPerFrame = 2000
 
 // capTailFrame keeps at most max records, preferring the newest, and returns how

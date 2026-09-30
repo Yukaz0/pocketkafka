@@ -1,14 +1,8 @@
 package web
 
-// Health monitoring for the embedded dashboard.
-//
-// The monitor keeps a small bounded ring of samples per topic and for the
-// cluster as a whole. Rates are derived from log-end-offset deltas instead of
-// producer counters, so they cover every ingress path (Kafka wire protocol,
-// REST proxy, MQTT bridge, dashboard produce) and remain accurate no matter
-// which client happens to be polling.
-//
-// Everything here is additive: no existing endpoint or behaviour changes.
+// Health monitoring for the embedded dashboard. Rates come from log-end-offset
+// deltas, not producer counters, so they cover every ingress path and stay
+// accurate whichever client happens to be polling.
 
 import (
 	"context"
@@ -71,9 +65,7 @@ func defaultThresholds() healthThresholds {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Samples
-// ---------------------------------------------------------------------------
 
 type partitionSample struct {
 	Partition int32
@@ -126,10 +118,9 @@ func NewMonitor() *Monitor {
 	}
 }
 
-// Record takes one sample of the live store. It returns false without
-// sampling when the previous sample is younger than the monitor interval and
-// force is false. force=true is used by the background sampler so the cadence
-// stays exact regardless of client polling.
+// Record takes one sample of the live store, or returns false when the previous
+// sample is younger than the monitor interval and force is false. The background
+// sampler sets force so its cadence stays exact regardless of client polling.
 func (m *Monitor) Record(store *storage.Store, gm *coordinator.GroupManager, now time.Time, force bool) bool {
 	if store == nil {
 		return false
@@ -237,9 +228,7 @@ func (m *Monitor) StartSampler(ctx context.Context, store *storage.Store, gm *co
 	}()
 }
 
-// ---------------------------------------------------------------------------
 // Response model
-// ---------------------------------------------------------------------------
 
 type healthReason struct {
 	Code     string `json:"code"`
@@ -341,11 +330,10 @@ type reportCtx struct {
 	capacity int
 }
 
-// rateReliable reports whether the sample series covers the requested window,
-// making the derived rate exact. While a topic (or the broker itself) has been
-// observed for less than the window, the baseline sample already contains the
-// traffic that arrived before monitoring started, so the rate understates
-// reality and must be presented as not yet measurable rather than as zero.
+// rateReliable reports whether the sample series covers the requested window.
+// Short of that the baseline already holds the traffic that arrived before
+// monitoring started, so the rate understates reality and must be presented as
+// not yet measurable rather than as zero.
 func (c reportCtx) rateReliable(first, last time.Time, n int) bool {
 	if n < 2 {
 		return false
@@ -396,9 +384,7 @@ type overviewResponse struct {
 	History       []historyPoint `json:"history"`
 }
 
-// ---------------------------------------------------------------------------
 // Verdict rules (pure, unit-tested)
-// ---------------------------------------------------------------------------
 
 // topicMetrics is the numeric view of one topic that the verdict depends on.
 type topicMetrics struct {
@@ -560,9 +546,7 @@ func statusRank(s string) int {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Report builder
-// ---------------------------------------------------------------------------
 
 // buildOverview renders the current health report. It never mutates anything
 // except the sample ring.
@@ -828,10 +812,9 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		row.LastAppendAgeMs = &ageMs
 	}
 
-	// Consumer groups attached to this topic, including groups that stopped
-	// consuming but still hold committed offsets. A group with no offsets on
-	// this topic is not a consumer of it and must not appear here (otherwise
-	// every topic would list every group).
+	// Consumer groups on this topic, including groups that stopped consuming but
+	// still hold committed offsets. A group without offsets here is not a
+	// consumer of this topic and must not appear.
 	stalled := []string{}
 	for _, g := range groups {
 		parts, ok := g.Offsets[name]
@@ -899,9 +882,7 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 	return row
 }
 
-// ---------------------------------------------------------------------------
 // HTTP
-// ---------------------------------------------------------------------------
 
 // handleHealthOverview serves the monitoring report rendered by the dashboard
 // Health view.
@@ -966,9 +947,7 @@ func (s *Server) StartSampler(ctx context.Context, store *storage.Store, gm *coo
 	s.monitor.StartSampler(ctx, store, gm, interval)
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 func nonNegative(v int64) int64 {
 	if v < 0 {
@@ -1057,10 +1036,8 @@ func mergedGroupViews(gm *coordinator.GroupManager) []groupView {
 	return out
 }
 
-// lagMaps derives, in one pass over the group views:
-//   - byTopicPart: topic -> partition -> lag of the worst group on it
-//   - byTopicGroup: topic -> group -> total lag, so a sample can carry the
-//     per-group backlog alongside the topic totals.
+// lagMaps derives in one pass: the worst per-partition lag per topic, and the
+// per-group backlog per topic so a sample can carry both.
 func lagMaps(views []groupView, store *storage.Store) (map[string]map[int32]int64, map[string]map[string]int64) {
 	byTopicPart := map[string]map[int32]int64{}
 	byTopicGroup := map[string]map[string]int64{}

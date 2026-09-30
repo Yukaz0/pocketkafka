@@ -38,9 +38,7 @@ func (s *Server) handleSchemaDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, versions)
 }
 
-// ---------------------------------------------------------------------------
 // Fitur 4.5: Visual ACL Manager + Audit Trail (in-memory).
-// ---------------------------------------------------------------------------
 
 // ACLRule grants a set of operations on a resource to a principal.
 type ACLRule struct {

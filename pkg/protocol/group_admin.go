@@ -1,8 +1,6 @@
 package protocol
 
-// ---------------------------------------------------------------------------
 // ListGroups (Key 16), v0-v3
-// ---------------------------------------------------------------------------
 
 // ListGroupsRequest lists all consumer groups.
 type ListGroupsRequest struct {
@@ -79,9 +77,7 @@ func DecodeListGroupsResponse(version int16, body []byte) (*ListGroupsResponse, 
 	return resp, nil
 }
 
-// ---------------------------------------------------------------------------
 // DescribeGroups (Key 15), v0-v3
-// ---------------------------------------------------------------------------
 
 // DescribeGroupsRequest asks for detail on one or more groups.
 type DescribeGroupsRequest struct {
@@ -249,9 +245,7 @@ func DecodeDescribeGroupsResponse(version int16, body []byte) (*DescribeGroupsRe
 	return resp, nil
 }
 
-// ---------------------------------------------------------------------------
 // DeleteGroups (Key 42), v0-v1
-// ---------------------------------------------------------------------------
 
 // DeleteGroupsRequest asks to delete one or more groups.
 type DeleteGroupsRequest struct {

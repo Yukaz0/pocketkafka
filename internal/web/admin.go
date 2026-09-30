@@ -11,9 +11,7 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 )
 
-// ---------------------------------------------------------------------------
 // Health endpoints (Fitur 10)
-// ---------------------------------------------------------------------------
 
 // isReady reports whether storage is usable and listeners are up. The web
 // server is embedded in the broker, so readiness is derived from the store.
@@ -44,9 +42,7 @@ func (s *Server) handleLivez(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok"))
 }
 
-// ---------------------------------------------------------------------------
 // Group detail & reset offset (Fitur 8)
-// ---------------------------------------------------------------------------
 
 type groupDetailMember struct {
 	MemberID   string             `json:"member_id"`
@@ -169,9 +165,7 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"deleted": groupID})
 }
 
-// ---------------------------------------------------------------------------
 // Topic detail / truncate / compact (Fitur 9)
-// ---------------------------------------------------------------------------
 
 type partitionDetail struct {
 	Partition     int32                 `json:"partition"`
@@ -247,14 +241,10 @@ func (s *Server) handleCompactTopic(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"compacted": topic})
 }
 
-// ---------------------------------------------------------------------------
 // Data browser search & pagination (Fitur 14)
-// ---------------------------------------------------------------------------
 
-// Anggaran pemindaian. `limit` membatasi HASIL, bukan pekerjaan yang dilakukan:
-// tanpa anggaran byte dan waktu, predikat yang tak selektif menelusuri seluruh
-// log dari offset ke LogEndOffset() tanpa cara berhenti - dulu bahkan memutus
-// koneksi klien tidak menghentikan loop di server.
+// Anggaran pemindaian: `limit` membatasi HASIL, bukan pekerjaan. Tanpa anggaran
+// byte dan waktu, predikat tak selektif menelusuri seluruh log tanpa cara berhenti.
 const (
 	searchDefaultByteBudget = 8 << 20  // 8 MiB
 	searchMaxByteBudget     = 64 << 20 // batas atas yang boleh diminta klien
@@ -263,10 +253,9 @@ const (
 	searchMaxConcurrent     = 4
 )
 
-// searchSem membatasi berapa banyak pemindaian yang boleh aktif di seluruh
-// broker. Pemindaian menahan I/O disk dan lewat Partition.Read memakai kunci
-// partisi bergantian dengan penulis, jadi N tab yang menekan Search bersamaan
-// tidak boleh berarti N pemindaian penuh paralel.
+// searchSem membatasi pemindaian aktif di seluruh broker: pemindaian menahan I/O
+// disk dan kunci partisi bergantian dengan penulis, jadi N tab yang menekan
+// Search tidak boleh berarti N pemindaian penuh paralel.
 var searchSem = make(chan struct{}, searchMaxConcurrent)
 
 // budgetInt64 membaca anggaran dari query string dan menjepitnya: nilai tak sah
@@ -320,11 +309,9 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	deadline := time.Now().Add(timeBudget)
 	ctx := r.Context()
 
-	// Scan forward from the requested offset, applying filters, until we have
-	// `limit` matches or reach the high watermark. The slice starts non-nil so an
-	// empty result serialises as [] and not as null: a client that does
-	// `records || (fallback)` otherwise stores the whole response object, and the
-	// next consumer of that list breaks on a non-array.
+	// Scan forward from the requested offset until `limit` matches or the high
+	// watermark is reached. The slice starts non-nil so an empty result serialises
+	// as [] rather than null, which would break the next consumer of that list.
 	matches := []messageRecord{}
 	next := offset
 	if next < p.EarliestOffset() {
@@ -419,12 +406,10 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// nextOffset adalah lanjutan yang bisa dipakai klien, dan truncated/stopReason
-	// menjawab "apakah ini seluruh jawabannya" - pemindaian yang berhenti karena
-	// anggaran tidak boleh tampak seperti sudah sampai ujung log. bytesRead
-	// melaporkan byte yang dibaca lewat Read; kalau remoteSegments > 0 sebagian
-	// bacaan itu menuntut restore segmen dari object storage, yang biayanya
-	// melekat pada segmen (bukan pada angka ini) dan sengaja tidak dihitung.
+	// truncated dan stopReason menjawab "apakah ini seluruh jawabannya": pemindaian
+	// yang berhenti karena anggaran tidak boleh tampak seperti sudah sampai ujung
+	// log. bytesRead melaporkan byte yang dibaca; byte yang menuntut restore segmen
+	// remote tidak masuk hitungan ini.
 	writeJSON(w, 200, map[string]any{
 		"records":        matches,
 		"offset":         offset,

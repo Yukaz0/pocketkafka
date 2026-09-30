@@ -277,9 +277,7 @@ func (s *clusterStore) BoxError() error {
 	return s.boxErr
 }
 
-// ---------------------------------------------------------------------------
 // Fan-out
-// ---------------------------------------------------------------------------
 
 // clusterSummary is one row of the cluster overview. It carries the few fields
 // an operator scans, not the whole report.
@@ -479,9 +477,7 @@ func (s *Server) clustersOverview(ctx context.Context, window time.Duration, now
 	}
 }
 
-// ---------------------------------------------------------------------------
 // HTTP
-// ---------------------------------------------------------------------------
 
 // handleClustersOverview serves one row per monitored cluster, including this
 // broker. Results are cached briefly so a 2s UI poll does not fan out at that

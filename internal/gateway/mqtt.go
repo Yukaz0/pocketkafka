@@ -146,9 +146,7 @@ func (b *MQTTBridge) Close() error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // MQTT client session
-// ---------------------------------------------------------------------------
 
 type mqttClient struct {
 	conn      net.Conn
@@ -346,9 +344,7 @@ func (b *MQTTBridge) forwardLoop(c *mqttClient, kafkaTopic string, next int64) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // MQTT packet parsing
-// ---------------------------------------------------------------------------
 
 func readMQTTPacket(br *bufio.Reader) (byte, []byte, error) {
 	first, err := br.ReadByte()
@@ -530,9 +526,7 @@ func u16(v uint16) []byte {
 	return []byte{byte(v >> 8), byte(v)}
 }
 
-// ---------------------------------------------------------------------------
 // Topic mapping
-// ---------------------------------------------------------------------------
 
 // mqttTopicToKafka maps an MQTT topic to a Kafka topic. Following the spec,
 // sensors/<device>/<metric> -> mqtt-<group>.
