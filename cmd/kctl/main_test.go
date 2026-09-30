@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -122,4 +124,81 @@ func captureStderr(t *testing.T, fn func()) string {
 	w.Close()
 	os.Stderr = old
 	return <-done
+}
+
+// TestSubcommandsRejectMissingArgs guards a bug that made the CLI useless for
+// data operations: the arity guards read fs.Args(), which only holds flags
+// written AFTER the subcommand, so it was empty for the documented flags-first
+// form and produce/create/delete/consume exited 1 with a usage message even
+// when their arguments were complete.
+//
+// The check now runs before the client is created, which is what makes this
+// test bite: pointed at a dead address the old code reported a connection error
+// for an incomplete command, while the fixed code names the missing argument.
+func TestSubcommandsRejectMissingArgs(t *testing.T) {
+	bin := buildCLI(t)
+	const dead = "127.0.0.1:1"
+
+	missing := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"produce without value", []string{"-b", dead, "produce", "orders"}, "usage: pkctl produce"},
+		{"produce without topic or value", []string{"-b", dead, "produce"}, "usage: pkctl produce"},
+		{"create without topic", []string{"-b", dead, "create"}, "usage: pkctl create"},
+		{"delete without topic", []string{"-b", dead, "delete"}, "usage: pkctl delete"},
+		{"consume without topic", []string{"-b", dead, "consume"}, "usage: pkctl consume"},
+	}
+	for _, tc := range missing {
+		out, _ := exec.Command(bin, tc.args...).CombinedOutput()
+		if !strings.Contains(string(out), tc.want) {
+			t.Errorf("%s: want %q, got: %s", tc.name, tc.want, strings.TrimSpace(string(out)))
+		}
+	}
+
+	// A complete invocation gets past the guard: with no broker listening the
+	// next failure is the connection, never a usage message. Both flag orders
+	// are exercised because the help text documents the flags-first form.
+	for _, args := range [][]string{
+		{"-b", dead, "produce", "orders", `{"n":1}`},
+		{"produce", "orders", `{"n":1}`, "-b", dead},
+		{"-b", dead, "create", "orders"},
+		{"-b", dead, "delete", "orders"},
+		{"-b", dead, "consume", "orders"},
+	} {
+		out, _ := exec.Command(bin, args...).CombinedOutput()
+		if strings.Contains(string(out), "usage: pkctl") {
+			t.Errorf("%v: complete invocation rejected: %s", args, strings.TrimSpace(string(out)))
+		}
+	}
+}
+
+func TestCheckArity(t *testing.T) {
+	for _, rest := range [][]string{
+		{"produce", "orders", `{"n":1}`}, {"create", "orders"}, {"delete", "orders"},
+		{"consume", "orders"}, {"topics"}, {"cluster"}, {"groups"}, {"offset", "reset"},
+	} {
+		if err := checkArity(rest); err != nil {
+			t.Errorf("checkArity(%v) = %v, want nil", rest, err)
+		}
+	}
+	for _, rest := range [][]string{
+		{"produce"}, {"produce", "orders"}, {"create"}, {"delete"}, {"consume"}, {},
+	} {
+		if err := checkArity(rest); err == nil {
+			t.Errorf("checkArity(%v) = nil, want an error", rest)
+		}
+	}
+}
+
+func buildCLI(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "pkctl")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/kctl")
+	cmd.Dir = "../.."
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build pkctl: %v\n%s", err, out)
+	}
+	return bin
 }

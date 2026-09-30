@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/Yukaz0/pocketkafka/pkg/client"
@@ -70,6 +71,12 @@ func main() {
 		os.Exit(1)
 	}
 	outputFormat = *output
+	// Validate arity before connecting: `pkctl produce` must say what it is
+	// missing, not try to reach a broker first. It also keeps the guard
+	// testable without a running broker.
+	if err := checkArity(rest); err != nil {
+		fatal("usage", err)
+	}
 
 	// Manual subcommand flag scanning.
 	subFlags := map[string]*string{
@@ -111,31 +118,26 @@ func main() {
 	defer kc.Close()
 
 	cmd := rest[0]
+	// Positional arity is checked against rest, not args: args is fs.Args(),
+	// which only collects flags written AFTER the subcommand, so it is empty
+	// for the documented `pkctl -b host produce <topic> <value>` form. Checking
+	// args here rejected every well-formed invocation with a usage message.
 	switch cmd {
 	case "cluster":
 		cmdCluster(kc)
 	case "topics", "list":
 		cmdTopics(kc)
 	case "create":
-		if len(args) < 2 {
-			fatal("usage", fmt.Errorf("pkctl create <topic> [-p partitions]"))
-		}
 		if err := kc.CreateTopic(rest[1], *partitions); err != nil {
 			fatal("create", err)
 		}
 		fmt.Printf("created topic %q (%d partition(s))\n", rest[1], *partitions)
 	case "delete":
-		if len(args) < 2 {
-			fatal("usage", fmt.Errorf("pkctl delete <topic>"))
-		}
 		if err := kc.DeleteTopic(rest[1]); err != nil {
 			fatal("delete", err)
 		}
 		fmt.Printf("deleted topic %q\n", rest[1])
 	case "produce":
-		if len(args) < 3 {
-			fatal("usage", fmt.Errorf("pkctl produce <topic> <value> [-k key]"))
-		}
 		p := client.NewProducer(kc, client.DefaultProducerConfig())
 		off, err := p.SendSync(context.Background(), &client.Message{Topic: rest[1], Key: []byte(*key), Value: []byte(rest[2])})
 		if err != nil {
@@ -143,9 +145,6 @@ func main() {
 		}
 		fmt.Printf("produced -> %s offset=%d\n", rest[1], off)
 	case "consume":
-		if len(args) < 2 {
-			fatal("usage", fmt.Errorf("pkctl consume <topic> [-g group] [-n count]"))
-		}
 		cmdConsume(kc, rest[1], *group, *count, *timeout)
 	case "groups":
 		cmdGroups(kc)
@@ -209,4 +208,37 @@ func splitBrokers(s string) []string {
 		}
 	}
 	return out
+}
+
+// checkArity reports the positional arguments a subcommand is missing. It is
+// called before any connection is attempted, so an incomplete command reports
+// what it needs instead of a connection error, and it deliberately reads rest
+// rather than fs.Args(): the flag package stops at the first positional token,
+// so fs.Args() holds only flags written AFTER the subcommand and is therefore
+// empty for the documented `pkctl -b <broker> <subcommand> ...` form. Using it
+// here once made every produce/create/delete/consume invocation exit 1 with a
+// usage message even when its arguments were complete.
+func checkArity(rest []string) error {
+	if len(rest) == 0 {
+		return errors.New("missing subcommand")
+	}
+	switch rest[0] {
+	case "create":
+		if len(rest) < 2 {
+			return errors.New("pkctl create <topic> [-p partitions]")
+		}
+	case "delete":
+		if len(rest) < 2 {
+			return errors.New("pkctl delete <topic>")
+		}
+	case "produce":
+		if len(rest) < 3 {
+			return errors.New("pkctl produce <topic> <value> [-k key]")
+		}
+	case "consume":
+		if len(rest) < 2 {
+			return errors.New("pkctl consume <topic> [-g group] [-n count]")
+		}
+	}
+	return nil
 }
