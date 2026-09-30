@@ -298,6 +298,15 @@
   .brokerBadge .dot{width:6px;height:6px;border-radius:50%;background:var(--live);animation:ping 2.4s cubic-bezier(0,0,.2,1) infinite}
 
   /* compact density */
+  /* Windowed message table. Saat daftar pesan besar, hanya potongan yang
+     terlihat yang ada di DOM. Tinggi baris dipatok lewat --virtRowH dan setiap
+     sel dipotong satu baris: tanpa pemaksaan ini sel Headers yang wrap membuat
+     tinggi baris berkisar 53..171 px, dan spacer atas/bawah menghitung posisi
+     yang salah. Nilai penuh tetap ada di inspector. */
+  #rows.virt td{box-sizing:border-box;height:var(--virtRowH);line-height:var(--virtLh);padding:0 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:none;vertical-align:middle}
+  #rows.virt .hdr{flex-wrap:nowrap;overflow:hidden}
+  #rows.virt tr.virtSpacer td{height:auto;line-height:0;padding:0;border:0}
+
   body.compact td{padding:4px 10px}
   body.compact th{padding:6px 10px}
   body.compact .card{padding:14px}
@@ -926,9 +935,67 @@ function filteredMsgs(){ return state.msgs.filter(passesFilters); }
 // baris yang difilter tidak pernah masuk DOM.
 function passesFilters(m){ if(!state.filters.length)return true; const v=jsonOf(m); return state.filters.every(f=>evalFilter(f,v)); }
 function rowHtml(m){const val=fmtValue(m);const sel=state.diffSel.includes(m.offset);return `<td class="chkCell"><input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleDiffSel(${m.offset})"></td><td>${timeCell(m.timestamp)}</td><td><span class="chip">P${m.partition}</span></td><td>${m.offset}</td><td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td><td><div class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</div></td>${state.projCols.map(c=>`<td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(getPath(jsonOf(m),c))}</td>`).join('')}<td style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td><td style="white-space:nowrap"><button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();replayOne(${m.offset})">Replay</button></td>`;}
-function renderMsgRows(){ const rows=$('#rows'); if(!rows)return; const all=filteredMsgs(); if(!all.length){rows.innerHTML='<tr><td colspan="'+(8+state.projCols.length)+'" class="muted" style="padding:20px">'+(state.filters.length?'No messages match filters.':'No messages.')+'</td></tr>';return;}
-rows.innerHTML=all.slice().reverse().map(m=>'<tr class="rowclick" onclick="insp('+JSON.stringify(m).replace(/"/g,'&quot;')+')">'+rowHtml(m)+'</tr>').join(''); }
+function rowTr(m){ return '<tr class="rowclick" onclick="insp('+JSON.stringify(m).replace(/"/g,'&quot;')+')">'+rowHtml(m)+'</tr>'; }
+/* Windowed rendering. Di atas VIRT_MIN baris hanya potongan yang terlihat (plus
+   cadangan di atas/bawah) yang dibangun, dengan spacer di kedua ujung supaya
+   panjang gulir tetap sepadan. Tinggi baris diukur dari baris nyata lalu gaya
+   #rows.virt memaksa semua baris setinggi itu (satu baris teks, sel dipotong):
+   tanpa itu sel Headers yang wrap membuat tinggi baris tidak seragam dan spacer
+   menghitung posisi yang salah. */
+const VIRT_MIN=300, VIRT_OVERSCAN=12;
+/* Tinggi baris dipatok per kerapatan, bukan diukur: pengukuran satu baris tidak
+   mewakili baris lain dan galatnya menumpuk di spacer. Nilai harus sejalan
+   dengan gaya #rows.virt di CSS: sel Timestamp selalu dua baris (waktu absolut
+   + relatif), jadi tinggi baris = 2 x line-height + 1 px garis pemisah. */
+const VIRT_ROW_H={comfortable:35,compact:27}, VIRT_LH={comfortable:17,compact:13};
+let msgVirtStart=-1, msgVirtEnd=-1, msgVirtKey='';
+function virtRowH(){ return VIRT_ROW_H[state.density]||VIRT_ROW_H.comfortable; }
+function msgCols(){ return 8+state.projCols.length; }
+/* Urutan tampilan ditentukan di sini, bukan diwarisi dari urutan array: jalur
+   paging menyimpan terlama-dulu (urutan dari API) sementara jalur tail
+   menyisipkan yang terbaru di depan. Tanpa penegasan ini, satu render ulang
+   (ganti filter, kolom, atau mode berjendela) membalik urutan yang terlihat. */
+function displayOrder(filtered){ return filtered.slice().sort((a,b)=>(b.offset-a.offset)||(b.timestamp-a.timestamp)); }
+function virtSpacer(n,h){ return n>0?'<tr class="virtSpacer"><td colspan="'+msgCols()+'" style="height:'+(n*h)+'px"></td></tr>':''; }
+function renderMsgRows(){
+  const rows=$('#rows'); if(!rows)return;
+  const all=filteredMsgs();
+  if(!all.length){ rows.classList.remove('virt'); msgVirtStart=msgVirtEnd=-1; msgVirtKey='';
+    rows.innerHTML='<tr><td colspan="'+msgCols()+'" class="muted" style="padding:20px">'+(state.filters.length?'No messages match filters.':'No messages.')+'</td></tr>'; return; }
+  const list=displayOrder(all);               /* terbaru di atas, apa pun urutan penyimpanannya */
+  const mainEl=$('main');
+  if(!mainEl||list.length<VIRT_MIN){         /* daftar kecil: render penuh, tanpa perubahan perilaku */
+    rows.classList.remove('virt'); msgVirtStart=msgVirtEnd=-1; msgVirtKey='';
+    rows.innerHTML=list.map(rowTr).join('');
+    return;
+  }
+  rows.classList.add('virt');
+  const h=virtRowH();
+  rows.style.setProperty('--virtRowH',h+'px');   /* tinggi baris nyata, sama dengan yang dipakai spacer */
+  rows.style.setProperty('--virtLh',(VIRT_LH[state.density]||VIRT_LH.comfortable)+'px');
+  const bodyTop=rows.getBoundingClientRect().top-mainEl.getBoundingClientRect().top+mainEl.scrollTop;
+  const view=mainEl.clientHeight||600;
+  let start=Math.floor((mainEl.scrollTop-bodyTop)/h)-VIRT_OVERSCAN;
+  if(start<0)start=0;
+  let end=start+Math.ceil(view/h)+2*VIRT_OVERSCAN;
+  if(end>list.length)end=list.length;
+  const key=list.length+'|'+(list[0]?list[0].offset:'')+'|'+state.filters.length+'|'+state.projCols.length+'|'+state.diffSel.length;
+  if(start===msgVirtStart&&end===msgVirtEnd&&key===msgVirtKey)return;   /* potongan dan data sama: jangan bangun ulang */
+  msgVirtStart=start; msgVirtEnd=end; msgVirtKey=key;
+  rows.innerHTML=virtSpacer(start,h)+list.slice(start,end).map(rowTr).join('')+virtSpacer(list.length-end,h);
+}
 window.renderMsgRows=renderMsgRows;
+/* Pemantauan berkala, bukan pendengar event scroll. Halaman tersembunyi (tab
+   latar) tidak mengirim event scroll sama sekali di beberapa browser - sudah
+   diukur: scrollTop berubah tetapi nol event - sehingga jendela akan tertinggal
+   basi. Penjaga di renderMsgRows() membuat pemeriksaan ini murah: kalau potongan
+   dan datanya sama, tidak ada DOM yang dibangun ulang. */
+let msgVirtTimer=null;
+function startMsgVirtWatch(){
+  if(msgVirtTimer)return;
+  msgVirtTimer=setInterval(()=>{ const rows=$('#rows'); if(rows&&rows.classList.contains('virt'))renderMsgRows(); },120);
+}
+function stopMsgVirtWatch(){ if(msgVirtTimer){clearInterval(msgVirtTimer);msgVirtTimer=null;} }
 let tnId=0;
 function prim(v){if(v===null)return '<span class="jnull">null</span>';if(typeof v==='boolean')return '<span class="jbool">'+v+'</span>';if(typeof v==='number')return '<span class="jnum">'+v+'</span>';return '<span class="jstr">"'+esc(v)+'"</span>';}
 function jnode(key,val,force){tnId++;const id=tnId;
@@ -1094,11 +1161,18 @@ function connectTail(){
     state.msgs=[...fresh,...state.msgs]; if(state.msgs.length>MSGS_MAX)state.msgs=state.msgs.slice(0,MSGS_MAX);
     const rows=$('#rows');
     if(rows){
-      fresh.forEach(m=>{ if(passesFilters(m))prependMsgRow(m); });
-      /* DOM dijaga sepadan dengan yang ditahan: baris terlama dibuang, jadi
-         jumlah baris tidak pernah melewati MSGS_MAX betapapun deras datanya. */
-      const want=filteredMsgs().length;
-      while(rows.children.length>want)rows.removeChild(rows.lastElementChild);
+      if(rows.classList.contains('virt')||state.msgs.length>=VIRT_MIN){
+        /* Naik ke mode berjendela begitu daftarnya besar (atau sudah berjendela):
+           potongannya kecil, jadi bangun ulang lebih murah dan lebih benar
+           daripada menyisipkan ribuan baris ke DOM. */
+        renderMsgRows();
+      }else{
+        fresh.forEach(m=>{ if(passesFilters(m))prependMsgRow(m); });
+        /* DOM dijaga sepadan dengan yang ditahan: baris terlama dibuang, jadi
+           jumlah baris tidak pernah melewati MSGS_MAX betapapun deras datanya. */
+        const want=filteredMsgs().length;
+        while(rows.children.length>want)rows.removeChild(rows.lastElementChild);
+      }
     }
     updateTailBar(); };
   ws.onclose=()=>{ if(!state.tail)return; const delay=Math.min(1000*Math.pow(1.5,state.retryCount++),10000); state.wsRetry=setTimeout(connectTail,delay); };
@@ -1834,7 +1908,7 @@ window.toggleTopicCompact=async function(){ const next=!(state.topicCfg&&state.t
    dengan angka ini: sebelum ini baris lama tidak pernah dibuang sehingga DOM
    tumbuh tanpa batas selama tail menyala, dan itulah yang membuat halaman
    berat saat broker menerima data terus-menerus. */
-const MSGS_MAX=200;
+const MSGS_MAX=5000;
 function updateTailBar(){ const bar=document.getElementById('tailBar'); if(!bar)return;
   if(state.tailPaused){ bar.innerHTML=`<div class="tailPausedBar" onclick="resumeTail()"><b>${state.pendingTail}</b> pesan baru ditahan - klik untuk ikut lagi</div>`; return; }
   if(state.tailSkipped){ bar.innerHTML=`<div class="tailPausedBar" style="cursor:default"><b>${state.tailSkipped}</b> pesan dilewati: broker menerima data lebih cepat daripada yang bisa ditampilkan. Pause atau matikan tail untuk menelusuri riwayat.</div>`; return; }
@@ -1843,7 +1917,7 @@ window.resumeTail=function(){ state.tailPaused=false; state.pendingTail=0; state
 function bindTailPause(){ const mainEl=$('main'); if(!mainEl||mainEl._tailBind)return; mainEl._tailBind=1;
   mainEl.addEventListener('scroll',()=>{ if(state.view==='databrowser'&&state.tail&&!state.tailPaused&&mainEl.scrollTop>40){ state.tailPaused=true; updateTailBar(); } }); }
 
-function bindView(){ if(state.view==='health')startHealthPoll(); else stopHealthPoll(); if(state.view==='clusters')startClusterPoll(); else stopClusterPoll(); if(state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();} if(state.view==='groups'&&state.group)loadGroupDetail(); if(state.view==='security'){loadACLs();loadAudit();} if(state.view==='metrics')loadThroughput(); if(state.view==='logs')loadLogs(); if(state.view==='topology')renderTopoSvg(); if(state.view==='databrowser')bindTailPause(); }
+function bindView(){ if(state.view==='health')startHealthPoll(); else stopHealthPoll(); if(state.view==='clusters')startClusterPoll(); else stopClusterPoll(); if(state.view==='databrowser')startMsgVirtWatch(); else stopMsgVirtWatch(); if(state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();} if(state.view==='groups'&&state.group)loadGroupDetail(); if(state.view==='security'){loadACLs();loadAudit();} if(state.view==='metrics')loadThroughput(); if(state.view==='logs')loadLogs(); if(state.view==='topology')renderTopoSvg(); if(state.view==='databrowser')bindTailPause(); }
 initTheme();
 (async function(){await refresh();applyHash();})();
 </script>
