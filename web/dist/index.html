@@ -73,6 +73,7 @@
   .plist input:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
   .plist[hidden]{display:none}
   .topicTools{display:none}
+  .topicTools[hidden]{display:none}
   .themeIconLight{display:none}
   html[data-theme="light"] .themeIconDark{display:none}
   html[data-theme="light"] .themeIconLight{display:block}
@@ -118,8 +119,8 @@
     .appNav.collapsed.mobileOpen .navGroupLabel,.appNav.collapsed.mobileOpen .navGroupToggle span:first-child,.appNav.collapsed.mobileOpen .navText,.appNav.collapsed.mobileOpen .navActionText{display:block}
     .appNav.collapsed.mobileOpen .navGroupToggle{justify-content:space-between;padding:6px 8px}
     .appNav.collapsed.mobileOpen .navLink,.appNav.collapsed.mobileOpen .navToggle,.appNav.collapsed.mobileOpen .themeToggle{justify-content:flex-start;padding:6px 9px}
-    .appNav.collapsed:not(.mobileOpen)~.ws .plist{display:none;width:0;min-width:0;border:0}
-    .appNav.collapsed:not(.mobileOpen)~.ws .plist.mobileOpen{display:flex;width:min(280px,84vw);border-right:1px solid var(--border)}
+    .appNav.collapsed:not(.mobileOpen)~.ws .plist:not([hidden]){display:none;width:0;min-width:0;border:0}
+    .appNav.collapsed:not(.mobileOpen)~.ws .plist:not([hidden]).mobileOpen{display:flex;width:min(280px,84vw);border-right:1px solid var(--border)}
     .appNav.collapsed:not(.mobileOpen)~.ws #burgerBtn{display:none}
     body .tb .chips{display:none}
     .appNav.collapsed:not(.mobileOpen)~.ws .topbar{padding:0 6px;gap:4px}
@@ -160,10 +161,6 @@
   .chip2 i{width:6px;height:6px;border-radius:50%;background:var(--live);display:inline-block}
   .ws{flex:1;display:flex;min-height:0}
   .content{flex:1;display:flex;flex-direction:column;min-width:0}
-  .plist{width:230px;border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;flex-shrink:0}
-  .plist .ph{padding:9px 12px;border-bottom:1px solid var(--border);font:600 10px var(--font-mono);text-transform:uppercase;letter-spacing:.14em;color:var(--muted)}
-  .plist input{margin:10px;background:var(--bg-canvas);border:1px solid var(--border);color:var(--text);font:11.5px var(--font-mono);padding:6px 9px;outline:none;width:calc(100% - 20px)}
-  .plist input:focus{border-color:var(--primary)}
   .titem{padding:7px 12px;cursor:pointer;border-left:2px solid transparent}
   .titem:hover{background:var(--surface2)}
   .titem.on{background:var(--surface2);border-left-color:var(--primary)}
@@ -813,7 +810,9 @@ function render(){
   try{
     const scroller=$('#view'),keepScroll=(scroller&&window.__renderedView===state.view)?scroller.scrollTop:0;
     buildNav();buildTList();buildStatusbar();updateChips();
-    const topicPane=document.getElementById('plist');if(topicPane)topicPane.hidden=state.view!=='databrowser';
+    const topicPane=document.getElementById('plist'),topicBtn=document.getElementById('topicBtn'),browsing=state.view==='databrowser';
+    if(topicPane){topicPane.hidden=!browsing;if(!browsing)topicPane.classList.remove('mobileOpen');}
+    if(topicBtn){topicBtn.hidden=!browsing;topicBtn.setAttribute('aria-expanded',String(browsing&&topicPane.classList.contains('mobileOpen')));}
     const item=navItems.find(([k])=>k===state.view);
     $('#title').textContent=item?item[1]:'Overview';
     $('#crumb').textContent=state.view==='databrowser'&&state.topic?('/ '+state.topic):(state.view==='groups'&&state.group?('/ '+state.group):'');
