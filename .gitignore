@@ -12,5 +12,6 @@
 .idea/
 .vscode/
 .commandcode/
+.worktrees/
 # Internal design docs (not published to GitHub)
 /docs/
