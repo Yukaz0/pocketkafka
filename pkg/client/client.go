@@ -111,6 +111,11 @@ func (c *KafkaClient) connect() error {
 	for _, addr := range c.brokers {
 		conn, err := net.DialTimeout("tcp", addr, c.timeout)
 		if err == nil {
+			if tcp, ok := conn.(*net.TCPConn); ok {
+				// A request/response protocol gains nothing from coalescing, and
+				// Nagle's delay is paid on every round trip.
+				_ = tcp.SetNoDelay(true)
+			}
 			c.conn = conn
 			return nil
 		}
