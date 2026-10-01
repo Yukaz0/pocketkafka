@@ -35,7 +35,7 @@ services:
   # 3. All-in-One Custom Go Kafka Engine (pocketkafka)
   #    Single Binary Container:
   #    - Port 9092 & 29092: Kafka Wire Protocol (Menggantikan Redpanda/Kafka)
-  #    - Port 8080: Embedded Web UI Dashboard (Menggantikan Kadeck Web)
+  #    - Port 8080: Embedded Web UI Dashboard (Control Center)
   #    - Port 8081: Embedded Schema Registry (Menggantikan cp-schema-registry)
   #    - Port 8082: HTTP REST Proxy
   #    Konsumsi RAM: < 60MB (Ultra Lightweight)

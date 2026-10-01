@@ -511,9 +511,9 @@ const state={view:'overview',theme:'dark',sidebarCollapsed:false,cluster:null,to
 const navItems=[['overview','Overview',I.overview,'overview'],['connections','Connections',I.server,'connections'],['health','Health',I.pulse,'operations'],['clusters','Clusters',I.cluster,'operations'],['metrics','Metrics',I.chart,'operations'],['logs','Broker Logs',I.document,'operations'],['security','Security & ACL',I.shield,'operations'],['databrowser','Data Browser',I.search,'developer'],['topics','Topics',I.tag,'developer'],['groups','Consumer Groups',I.users,'developer'],['schemas','Schemas',I.schema,'developer'],['producer','Producer Studio',I.send,'developer'],['devstudio','Dev Studio',I.flask,'developer'],['topology','Topology',I.topology,'developer'],['storage','Storage',I.archive,'developer'],['settings','Settings',I.gear,'connections']];
 
 function initTheme(){
-  const saved=localStorage.getItem('pk_theme'),legacy=localStorage.getItem('kadeck_theme');
-  state.theme=(saved==='dark'||saved==='light')?saved:(legacy==='dark'||legacy==='light')?legacy:(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
-  localStorage.setItem('pk_theme',state.theme);localStorage.removeItem('kadeck_theme');
+  const saved=localStorage.getItem('pk_theme');
+  state.theme=(saved==='dark'||saved==='light')?saved:(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  localStorage.setItem('pk_theme',state.theme);
   document.documentElement.dataset.theme=state.theme;
   state.sidebarCollapsed=localStorage.getItem('pk_sidebar_collapsed')==='1';
   try{state.navGroupsCollapsed=Object.assign({operations:false,developer:false},JSON.parse(localStorage.getItem('pk_nav_groups')||'{}'));}catch(e){state.navGroupsCollapsed={operations:false,developer:false};}
@@ -528,6 +528,13 @@ function renderFatal(err){ const v=document.getElementById('view'); if(!v)return
 window.recoverFatal=function(){ state.group=null; state.topicDetail=null; goView('connections'); };
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmtBytes(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(1)+' MB';}
+/* Klaster yang dipantau sebagai klien tidak bisa melaporkan semua angka: ukuran
+   di disk dan laju byte tidak punya API-nya di protokol Kafka, jadi field itu
+   datang sebagai null. null ditampilkan n/a, bukan 0 yang menyesatkan. */
+function isNum(v){return typeof v==='number'&&isFinite(v);}
+function fmtBytesOpt(v){return isNum(v)?fmtBytes(v):'n/a';}
+function fmtRateOpt(v){return isNum(v)?fmtBytes(v)+'/s':'n/a';}
+function fmtPctOpt(v){return isNum(v)?v.toFixed(1)+'%':'n/a';}
 function rel(t){const d=Math.max(0,Date.now()-t);if(d<1000)return 'now';if(d<60000)return Math.floor(d/1000)+'s ago';if(d<3600000)return Math.floor(d/60000)+'m ago';return Math.floor(d/3600000)+'h ago';}
 function online(s){s=(s||'').toLowerCase();return s==='stable'||s==='green';}
 
@@ -1729,6 +1736,7 @@ function viewHealth(){
   if(!healthData)return `<div>${pageHeader('Health','Broker status, traffic, lag, and topic-level signals.')}<div class="card"><h3>Health</h3><div style="margin-top:10px">${skel(220)}<div style="margin-top:8px">${skel(160)}</div></div></div></div>`;
   const d=healthData,c=d.cluster||{},samp=d.sampling||{};
   const rateOk=samp.rateReliable!==false;
+  const diskKnown=isNum(c.diskUsagePct);
   const msgsRate=rateOk?(c.messagesPerSec||0).toFixed(1):'n/a';
   const attention=d.attention||[];
   const topics=sortedHealthTopics();
@@ -1743,28 +1751,30 @@ function viewHealth(){
     const open=healthOpenTopics.has(t.name);
     const spk=t.sparkline||[],smax=Math.max(1,...spk);
     const mini=spk.length>1?`<div class="spark" style="height:20px">${spk.map(v=>`<span style="height:${Math.max(3,v/smax*100)}%"></span>`).join('')}</div>`:'<span class="muted">-</span>';
-    const row=`<tr class="rowclick" tabindex="0" role="button" aria-expanded="${open}" onclick="toggleHealthTopic('${esc(t.name)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleHealthTopic('${esc(t.name)}')}"><td>${hStatusBadge(t.status)}</td><td class="mono">${esc(t.name)}</td><td>${t.partitions??'-'}</td><td>${hRate(t.rateReliable,t.messagesPerSec)}</td><td>${t.rateReliable===false?'n/a':fmtBytes(t.bytesPerSec||0)+'/s'}</td><td>${(t.messages||0).toLocaleString()}</td><td>${fmtBytes(t.bytes||0)}</td><td>${t.lag??0}</td><td>${hRate(t.rateReliable,t.lagPerSec)}</td><td>${hTrend(t.trend)}</td><td>${t.lastAppendAgeMs==null?'-':rel(Date.now()-t.lastAppendAgeMs)}</td><td>${mini}</td></tr>`;
+    const row=`<tr class="rowclick" tabindex="0" role="button" aria-expanded="${open}" onclick="toggleHealthTopic('${esc(t.name)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleHealthTopic('${esc(t.name)}')}"><td>${hStatusBadge(t.status)}</td><td class="mono">${esc(t.name)}</td><td>${t.partitions??'-'}</td><td>${hRate(t.rateReliable,t.messagesPerSec)}</td><td>${t.rateReliable===false?'n/a':fmtRateOpt(t.bytesPerSec)}</td><td>${(t.messages||0).toLocaleString()}</td><td>${fmtBytesOpt(t.bytes)}</td><td>${t.lag??0}</td><td>${hRate(t.rateReliable,t.lagPerSec)}</td><td>${hTrend(t.trend)}</td><td>${t.lastAppendAgeMs==null?'-':rel(Date.now()-t.lastAppendAgeMs)}</td><td>${mini}</td></tr>`;
     const detail=open?`<tr><td colspan="12" style="background:var(--bg-canvas)"><div style="padding:10px 4px">
       <div class="muted" style="font-size:11px;margin-bottom:8px">Replication factor ${t.replicationFactor??'-'} &middot; skew ratio ${(t.skewRatio||0).toFixed(2)}</div>
       ${(t.reasons||[]).length?(t.reasons.map(r=>`<div class="row" style="gap:8px"><span class="chip">${esc(r.code)}</span><span class="muted" style="font-size:11px">${esc(r.severity)}: ${esc(r.message)}</span></div>`).join('')):''}
       <div class="tableScroll"><table><thead><tr><th>Partition</th><th>Leader</th><th>LEO</th><th>Earliest</th><th>Messages</th><th>Bytes</th><th>Lag</th><th>Msgs/s</th><th>Bytes/s</th><th>Skew</th></tr></thead><tbody>
-      ${(t.partitionsDetail||[]).map(p=>`<tr><td>${p.partition}</td><td>${p.leader}</td><td>${p.logEndOffset}</td><td>${p.earliestOffset}</td><td>${p.messages}</td><td>${fmtBytes(p.bytes||0)}</td><td>${p.lag}</td><td>${(p.messagesPerSec||0).toFixed(1)}</td><td>${fmtBytes(p.bytesPerSec||0)}/s</td><td>${p.skewRatio??0}</td></tr>`).join('')||'<tr><td colspan="10" class="muted">No partition detail.</td></tr>'}
+      ${(t.partitionsDetail||[]).map(p=>`<tr><td>${p.partition}</td><td>${p.leader}</td><td>${p.logEndOffset}</td><td>${p.earliestOffset}</td><td>${p.messages}</td><td>${fmtBytesOpt(p.bytes)}</td><td>${p.lag}</td><td>${(p.messagesPerSec||0).toFixed(1)}</td><td>${fmtRateOpt(p.bytesPerSec)}</td><td>${p.skewRatio??0}</td></tr>`).join('')||'<tr><td colspan="10" class="muted">No partition detail.</td></tr>'}
       </tbody></table></div></div></td></tr>`:'';
     return row+detail;
   }).join('')||'<tr><td colspan="12" class="muted" style="padding:20px">No topics reported by the broker yet. Create a topic, or wait for the next health poll.</td></tr>';
   const groupRows=groups.map(g=>`<tr><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span>${g.stalled?' <span class="badge muted">stalled</span>':''}</td><td>${g.members??0}</td><td class="mono">${(g.topics||[]).join(', ')||'-'}</td><td>${g.lag??0}</td><td>${hRate(samp.rateReliable,g.lagPerSec)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted" style="padding:20px">No consumer groups active right now. Consume from a topic to create one.</td></tr>';
   const warmupNote=samp.warmup?`<div class="muted" style="font-size:11px;margin-top:6px">Warmup: still collecting samples (started ${samp.ageSeconds??0}s ago). Numbers below may still change.</div>`:'';
   const rateNote=!rateOk?`<div class="muted" style="font-size:11px;margin-top:6px">Rate not reliable yet over the ${samp.windowSeconds??healthWindow}s window: the baseline may include traffic from before monitoring started, so n/a is shown instead of 0.</div>`:'';
+  const extNote=c.source==='external'?`<div class="muted" style="font-size:11px;margin-top:6px">Read-only client view of an external cluster: on-disk size, byte rates, and the broker's own durability and retention state have no equivalent in the Kafka protocol, so they read n/a. Topic and group figures come from the cluster's own metadata and committed offsets.</div>`:'';
+  const unknownNote=c.status==='unknown'?`<div class="muted" style="font-size:11px;margin-top:6px">First read of this cluster is still running. Figures appear once the first pass finishes.</div>`:'';
   return `<div>${pageHeader('Health','Broker status, traffic, lag, and topic-level signals.')}<div class="card">
     <div class="row" style="justify-content:space-between">
       <div><div class="kicker">Cluster &middot; ${esc(healthClusterLabel())}</div><h3 style="display:flex;align-items:center;gap:8px">${esc(c.clusterId||'broker')} <span id="hClusterStatus">${hStatusBadge(c.status)}</span></h3></div>
       <div class="row"><label class="muted" for="healthClusterSel" style="font-size:11px">Broker</label><select id="healthClusterSel" onchange="setHealthCluster(this.value)">${clusterOptions()}</select><label class="muted" for="healthWinSel" style="font-size:11px">Window</label><select id="healthWinSel" onchange="setHealthWindow(this.value)"><option value="60" ${healthWindow==60?'selected':''}>60s</option><option value="300" ${healthWindow==300?'selected':''}>5m</option><option value="900" ${healthWindow==900?'selected':''}>15m</option></select><button class="btn ghost" onclick="loadHealth()">Refresh</button></div>
     </div>
-    <span id="hNotes">${warmupNote}${rateNote}</span>
+    <span id="hNotes">${warmupNote}${rateNote}${extNote}${unknownNote}</span>
     <div class="row" style="gap:32px;margin-top:14px">
       <div><div class="kicker">Throughput</div><div class="statXL"><span id="hMsgsRate">${msgsRate}</span><small>msg/s</small></div><div class="statSub" id="hSubTop">${c.topics??0} topics &middot; ${c.partitions??0} partitions</div></div>
       <div><div class="kicker">Consumer Lag</div><div class="statXL"><span id="hLag">${c.lag??0}</span><small>total</small></div><div class="statSub" id="hSubLag">max partition lag ${c.maxPartitionLag??0}</div></div>
-      <div><div class="kicker">Disk</div><div class="statXL"><span id="hDisk">${(c.diskUsagePct||0).toFixed(1)}</span><small>%</small></div><div class="statSub" id="hSubDisk">uptime ${Math.floor((c.uptimeSeconds||0)/60)}m</div></div>
+      <div><div class="kicker">Disk</div><div class="statXL"><span id="hDisk">${diskKnown?c.diskUsagePct.toFixed(1):'n/a'}</span><small>${diskKnown?'%':''}</small></div><div class="statSub" id="hSubDisk">${diskKnown?`uptime ${Math.floor((c.uptimeSeconds||0)/60)}m`:'not observable from a client'}</div></div>
     </div>
   </div>
   <div class="card"><div class="kicker">History</div>
@@ -1829,7 +1839,7 @@ function stopHealthPoll(){ if(healthTimer){clearInterval(healthTimer);healthTime
    jadi yang ditampilkan di sini hanyalah apa yang dilaporkan /api/v1/clusters
    dan /api/v1/health/clusters. Token tidak pernah dikirim balik oleh broker:
    yang tersedia hanya penanda hasToken. */
-let clusterRegistry=null;              /* [{name,url,hasToken}] dari /api/v1/clusters */
+let clusterRegistry=null;   /* [{name,kind,url,brokers,saslUser,saslMechanism,hasToken,hasSaslPassword}] dari /api/v1/clusters */
 async function loadClusterList(){
   try{ const d=await api('/api/v1/clusters'); clusterRegistry=d.clusters||[]; }
   catch(e){ clusterRegistry=clusterRegistry||[]; return; }
@@ -1872,40 +1882,73 @@ function clusterSummaryHtml(){
   return `${rows.length} cluster(s) &middot; worst ${esc(clusterData.worst||'-')}${unreach?` &middot; <span style="color:var(--warn)">${unreach} tidak terjawab</span>`:''}`;
 }
 
+/* Dua macam target. PocketKafka peer: fan-out HTTP ke dashboard broker lain,
+   token hanya bila login web peer itu aktif. Kafka cluster: klien read-only
+   langsung ke broker, dengan kredensial SASL. Kedua himpunan isian selalu ada
+   di DOM dan hanya yang relevan yang ditampilkan, supaya berpindah kind tidak
+   menghapus apa yang sudah diketik. Konfigurasi (kind, brokers, user, ada
+   sandi tersimpan atau tidak) dibaca dari registry; angka datang dari laporan
+   health. */
 function clusterFormCard(){
   const ed=editingCluster;
+  const reg=ed?((clusterRegistry||[]).find(c=>c.name===ed.name)||null):null;
+  const kafka=ed?(ed.kind||'peer')==='kafka':false;
+  const vis=(on,extra)=>`style="${extra?extra+';':''}${on?'':'display:none'}"`;
   return `<div class="card"><h3 style="margin-bottom:10px">${ed?'Edit cluster':'Add cluster'}</h3>
     <form onsubmit="event.preventDefault();saveCluster();">
-      <div class="row" style="gap:10px;align-items:flex-end">
-        <div><label class="muted" for="clName" style="font-size:11px;display:block;margin-bottom:4px">Name</label><input id="clName" style="width:170px" placeholder="staging" autocomplete="off" value="${ed?esc(ed.name):''}" ${ed?'readonly':''}></div>
-        <div style="flex:1;min-width:230px"><label class="muted" for="clUrl" style="font-size:11px;display:block;margin-bottom:4px">Dashboard URL</label><input id="clUrl" placeholder="http://10.0.0.26:8080" autocomplete="off" value="${ed?esc(ed.url):''}"></div>
-        <div><label class="muted" for="clToken" style="font-size:11px;display:block;margin-bottom:4px">Cluster token</label><input id="clToken" type="password" autocomplete="new-password" style="width:210px" placeholder="${ed&&ed.hasToken?'unchanged':'optional'}"></div>
+      <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div><label class="muted" for="clKind" style="font-size:11px;display:block;margin-bottom:4px">Kind</label><select id="clKind" style="width:150px" onchange="clusterKindChanged(this.value)"><option value="peer" ${kafka?'':'selected'}>PocketKafka peer</option><option value="kafka" ${kafka?'selected':''}>Kafka cluster</option></select></div>
+        <div><label class="muted" for="clName" style="font-size:11px;display:block;margin-bottom:4px">Name</label><input id="clName" style="width:150px" placeholder="scada25" autocomplete="off" value="${ed?esc(ed.name):''}" ${ed?'readonly':''}></div>
+        <div style="flex:1;min-width:230px" id="clUrlWrap" ${vis(!kafka)}><label class="muted" for="clUrl" style="font-size:11px;display:block;margin-bottom:4px">Dashboard URL</label><input id="clUrl" placeholder="http://10.0.0.26:8080" autocomplete="off" value="${ed?esc(ed.url||''):''}"></div>
+        <div style="flex:1;min-width:230px" id="clBrokersWrap" ${vis(kafka)}><label class="muted" for="clBrokers" style="font-size:11px;display:block;margin-bottom:4px">Brokers</label><input id="clBrokers" placeholder="192.168.212.25:9092" autocomplete="off" value="${ed?esc((ed.brokers||[]).join(', ')):''}"></div>
+        <div id="clSaslUserWrap" ${vis(kafka)}><label class="muted" for="clSaslUser" style="font-size:11px;display:block;margin-bottom:4px">SASL user</label><input id="clSaslUser" style="width:130px" autocomplete="off" value="${ed?esc(ed.saslUser||''):''}"></div>
+        <div id="clSaslPassWrap" ${vis(kafka)}><label class="muted" for="clSaslPassword" style="font-size:11px;display:block;margin-bottom:4px">SASL password</label><input id="clSaslPassword" type="password" autocomplete="new-password" style="width:170px" placeholder="${reg&&reg.hasSaslPassword?'unchanged':'required'}"></div>
+        <div id="clSaslMechWrap" ${vis(kafka)}><label class="muted" for="clSaslMechanism" style="font-size:11px;display:block;margin-bottom:4px">Mechanism</label><input id="clSaslMechanism" style="width:110px" placeholder="PLAIN" value="${ed?esc(ed.saslMechanism||''):''}"></div>
+        <div id="clTokenWrap" ${vis(!kafka)}><label class="muted" for="clToken" style="font-size:11px;display:block;margin-bottom:4px">Cluster token</label><input id="clToken" type="password" autocomplete="new-password" style="width:180px" placeholder="${ed&&ed.hasToken?'unchanged':'optional'}"></div>
         <button class="btn" type="submit">${ed?'Save changes':'Add cluster'}</button>
         <button class="btn ghost" type="button" onclick="testCluster()">Test connection</button>
         ${ed?'<button class="btn ghost" type="button" onclick="cancelEditCluster()">Cancel</button>':''}
       </div>
-      ${ed?'<label class="row" style="gap:6px;margin-top:10px;font-size:11px"><input type="checkbox" id="clClearToken" style="width:auto"> remove the stored token</label>':''}
+      <div id="clClearWrap" ${vis(kafka,'margin-top:10px')}>${ed&&reg&&reg.hasSaslPassword?'<label class="row" style="gap:6px;font-size:11px"><input type="checkbox" id="clClearSaslPassword" style="width:auto"> remove the stored SASL password</label>':''}</div>
+      ${ed?`<label class="row" id="clClearTokenWrap" ${vis(!kafka,'margin-top:10px')}><input type="checkbox" id="clClearToken" style="width:auto"> remove the stored token</label>`:''}
     </form>
     <div class="statSub" id="clTest" style="margin-top:10px"></div>
-    <div class="muted" style="font-size:11px;margin-top:8px">${ed?'Leave the token empty to keep the stored one.':'A token is needed only when the other broker has web login enabled; it is stored write-only and never shown again.'} The broker only ever fetches URLs listed here. Name: letters, digits, dot, underscore or dash.</div>
+    <div class="muted" style="font-size:11px;margin-top:8px">${kafka
+      ? (ed?'Leave the SASL password empty to keep the stored one.':'SASL credentials are stored sealed and write-only, and never shown again. A Kafka cluster is always read: this broker opens every connection read-only.')
+      : (ed?'Leave the token empty to keep the stored one.':'A token is needed only when the other broker has web login enabled; it is stored write-only and never shown again.')} Only endpoints listed here are ever connected to. Name: letters, digits, dot, underscore or dash.</div>
   </div>`;
 }
+/* Kind mengubah isian mana yang berlaku; isian yang tersembunyi tidak dikirim
+   (clusterFormBody), jadi tidak ada nilai lama yang ikut tersimpan diam-diam. */
+window.clusterKindChanged=function(v){
+  const kafka=v==='kafka';
+  const show=(id,on)=>{const el=document.getElementById(id); if(el)el.style.display=on?'':'none';};
+  show('clUrlWrap',!kafka); show('clTokenWrap',!kafka); show('clClearTokenWrap',!kafka);
+  show('clBrokersWrap',kafka); show('clSaslUserWrap',kafka); show('clSaslPassWrap',kafka); show('clSaslMechWrap',kafka); show('clClearWrap',kafka);
+  const t=document.getElementById('clTest'); if(t){t.textContent='';t.style.color='';}
+};
 
+/* Baris ringkasan klaster eksternal datang dari struct angka (bukan pointer),
+   jadi diskUsagePct-nya 0 dan bukan null: kolom itu harus diputuskan dari kind.
+   Laporan penuh (view Health) memakai null + unavailable, di sana cukup isNum. */
 function clusterRow(r){
+  const kafka=r.kind==='kafka';
+  const reg=kafka?((clusterRegistry||[]).find(c=>c.name===r.name)||null):null;
   const status=r.ok?hStatusBadge(r.status):'<span class="badge b-amber">unreachable</span>';
   const err=r.error?`<div class="muted" style="font-size:11px;margin-top:3px">${esc(r.error)}</div>`:'';
-  const tok=r.hasToken?' <span class="badge muted">token</span>':'';
+  const badge=r.self?'':(kafka?(reg&&reg.hasSaslPassword?' <span class="badge muted">sasl</span>':''):(r.hasToken?' <span class="badge muted">token</span>':''));
   const acts=r.self
     ?'<button class="btn ghost" onclick="openClusterHealth(\'local\')">Open</button>'
     :`<button class="btn ghost" onclick="openClusterHealth(${jsArg(r.name)})">Open</button><button class="btn ghost" onclick="editCluster(${jsArg(r.name)})">Edit</button><button class="btn ghost" onclick="deleteCluster(${jsArg(r.name)})">Remove</button>`;
   const n=v=>r.ok?(v??0):'-';
-  return `<tr><td class="mono">${esc(clLabel(r))}${tok}${err}<div class="muted" style="font-size:11px">${r.self?'served by this broker':esc(r.url)}</div></td>`
+  const endpoint=r.self?'served by this broker':(kafka?esc((r.brokers||[]).join(', ')):esc(r.url));
+  return `<tr><td class="mono">${esc(clLabel(r))}${badge}${err}<div class="muted" style="font-size:11px">${endpoint}</div></td>`
     +`<td>${status}</td><td>${n(r.topics)}</td>`
     +`<td>${r.ok?hRate(r.rateReliable,r.messagesPerSec):'-'}</td>`
     +`<td>${n(r.lag)}</td>`
-    +`<td>${r.ok?(r.diskUsagePct||0).toFixed(1)+'%':'-'}</td>`
+    +`<td>${r.ok?(kafka?'n/a':fmtPctOpt(r.diskUsagePct)):'-'}</td>`
     +`<td>${n(r.attention)}</td>`
-    +`<td class="mono" style="font-size:11px">${r.ok?r.latencyMs+' ms':'-'}</td>`
+    +`<td class="mono" style="font-size:11px">${r.ok&&r.latencyMs>0?r.latencyMs+' ms':'-'}</td>`
     +`<td>${acts}</td></tr>`;
 }
 
@@ -1914,7 +1957,7 @@ function viewClusters(){
   if(clusterErr)return head+`<div class="card"><h3 style="margin-bottom:10px">Cannot load clusters</h3><div class="muted">${esc(clusterErr)}</div><button class="btn" style="margin-top:12px" onclick="loadClusters()">Retry</button></div>`+clusterFormCard();
   if(!clusterData)return head+`<div class="card">${skel(260)}<div style="margin-top:8px">${skel(190)}</div></div>`+clusterFormCard();
   const rows=clusterData.clusters||[],peers=rows.filter(r=>!r.self);
-  const note=peers.length?'':'<div class="muted" style="font-size:11px;margin-top:10px">No other broker is monitored yet. Add one above with its dashboard URL to see its health here.</div>';
+  const note=peers.length?'':'<div class="muted" style="font-size:11px;margin-top:10px">No other cluster is monitored yet. Add one above: another PocketKafka dashboard by URL, or a Kafka cluster reachable over SASL.</div>';
   const unreach=clusterData.unreachable?`<div class="muted" style="font-size:11px;margin-top:10px">${clusterData.unreachable} cluster(s) did not answer. A broker that cannot be reached keeps its row and shows the error instead of its numbers.</div>`:'';
   return head+clusterFormCard()+`<div class="card"><h3 style="margin-bottom:10px">Monitored clusters</h3>
     <div class="tableScroll"><table><thead><tr><th>Cluster</th><th>Status</th><th>Topics</th><th>Msgs/s</th><th>Lag</th><th>Disk</th><th>Attention</th><th>Reply</th><th></th></tr></thead>
@@ -1948,28 +1991,52 @@ window.openClusterHealth=function(name){ state.healthCluster=name||'local'; heal
 window.editCluster=function(name){
   const r=((clusterData&&clusterData.clusters)||[]).find(c=>c.name===name);
   if(!r)return;
-  editingCluster={name:r.name,url:r.url,hasToken:!!r.hasToken};
+  const reg=(clusterRegistry||[]).find(c=>c.name===name)||{};
+  editingCluster={name:r.name,kind:r.kind||'peer',url:r.url||'',brokers:r.brokers||[],
+    saslUser:reg.saslUser||'',saslMechanism:reg.saslMechanism||'',hasToken:!!r.hasToken};
   render();
-  const el=document.getElementById('clUrl'); if(el)el.focus();
+  const el=document.getElementById(r.kind==='kafka'?'clBrokers':'clUrl'); if(el)el.focus();
 };
 window.cancelEditCluster=function(){ editingCluster=null; render(); };
-/* Test connection memakai URL dan token yang sedang ada di form, tanpa
-   mendaftarkan cluster: salah ketik ketahuan sebelum tersimpan. Token kosong
-   saat mode edit berarti "pakai token tersimpan", ditangani broker. */
+/* Body dari isian yang sedang berlaku. Himpunan isian kind yang tidak aktif
+   tidak ikut dikirim sama sekali, supaya sandi atau token tersimpan tidak
+   tertimpa nilai kosong dari field yang disembunyikan. */
+function clusterFormBody(){
+  const kind=$('#clKind')?.value==='kafka'?'kafka':'peer';
+  const body={kind,name:($('#clName')?.value||'').trim()};
+  if(kind==='kafka'){
+    body.brokers=($('#clBrokers')?.value||'').split(',').map(s=>s.trim()).filter(Boolean);
+    body.saslUser=($('#clSaslUser')?.value||'').trim();
+    body.saslMechanism=($('#clSaslMechanism')?.value||'').trim();
+    const pw=$('#clSaslPassword')?.value||'';
+    if(pw)body.saslPassword=pw;                       /* kosong = sandi lama dipertahankan */
+    if($('#clClearSaslPassword')?.checked)body.clearSaslPassword=true;
+  }else{
+    body.url=($('#clUrl')?.value||'').trim();
+    const tok=$('#clToken')?.value||'';
+    if(tok)body.token=tok;                            /* kosong = token lama dipertahankan */
+    if($('#clClearToken')?.checked)body.clearToken=true;
+  }
+  return body;
+}
+/* Test memakai isian form tanpa mendaftarkan cluster; nama ikut dikirim supaya
+   broker bisa memakai sandi/token tersimpan saat form mengosongkannya. */
 window.testCluster=async function(){
-  const name=($('#clName')?.value||'').trim(),url=($('#clUrl')?.value||'').trim(),token=($('#clToken')?.value||'').trim();
-  const out=document.getElementById('clTest');
-  if(!url){ toast('Enter the dashboard URL first'); return; }
-  if(out){ out.style.color='var(--muted)'; out.textContent='Testing '+url+' ...'; }
-  const body={url};
-  if(name)body.name=name;
-  if(token)body.token=token;
+  const body=clusterFormBody(),out=document.getElementById('clTest');
+  if(body.kind==='kafka'&&!body.brokers.length){ toast('Enter at least one broker address'); return; }
+  if(body.kind!=='kafka'&&!body.url){ toast('Enter the dashboard URL first'); return; }
+  const target=body.kind==='kafka'?body.brokers.join(', '):body.url;
+  if(out){ out.style.color='var(--muted)'; out.textContent='Testing '+target+' ...'; }
   try{
     const r=await api('/api/v1/clusters/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const ok=!!r.ok;
     if(out){
       out.style.color=ok?'var(--success)':'var(--danger)';
-      out.textContent=ok?`Reachable: ${r.clusterId||'broker'} - ${r.topics??0} topics, ${r.latencyMs} ms`:`Not reachable: ${r.error||'unknown error'}`;
+      const bits=[];
+      if(r.topics>0)bits.push(r.topics+' topics');
+      if(r.groups>0)bits.push(r.groups+' groups');
+      if(r.latencyMs>0)bits.push(r.latencyMs+' ms');
+      out.textContent=ok?`Reachable: ${r.clusterId||'cluster'}${bits.length?' - '+bits.join(', '):''}`:`Not reachable: ${r.error||'unknown error'}`;
     }
     toast(ok?'Connection OK':'Connection failed');
   }catch(e){
@@ -1978,13 +2045,10 @@ window.testCluster=async function(){
   }
 };
 window.saveCluster=async function(){
-  const name=($('#clName')?.value||'').trim(),url=($('#clUrl')?.value||'').trim(),token=($('#clToken')?.value||'').trim();
-  const clearEl=document.getElementById('clClearToken');
-  const clear=!!(clearEl&&clearEl.checked);
-  if(!name||!url){ toast('Name and URL are required'); return; }
-  const body={name,url};
-  if(token)body.token=token;          /* kosong = token lama dipertahankan */
-  if(clear)body.clearToken=true;
+  const body=clusterFormBody();
+  if(!body.name){ toast('Name is required'); return; }
+  if(body.kind==='kafka'&&!body.brokers.length){ toast('Enter at least one broker address'); return; }
+  if(body.kind!=='kafka'&&!body.url){ toast('Name and URL are required'); return; }
   try{
     await api('/api/v1/clusters',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     toast(editingCluster?'Cluster updated':'Cluster added');

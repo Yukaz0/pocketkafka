@@ -1,4 +1,4 @@
-# Minimal single-service stack: pocketkafka only (no portainer/kadeck/postgres).
+# Minimal single-service stack: pocketkafka only (no portainer/postgres).
 services:
   kafka-engine:
     build:
