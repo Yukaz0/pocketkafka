@@ -118,6 +118,9 @@ type DescribeGroupsResponseGroup struct {
 	ProtocolType string
 	Protocol     string
 	Members      []DescribeGroupsResponseMember
+	// AuthorizedOperations is present from v3 (INT32_MIN when the request did
+	// not ask for it, as the protocol prescribes).
+	AuthorizedOperations int32
 }
 
 // DescribeGroupsResponseMember is one member of a described group.
@@ -166,6 +169,12 @@ func EncodeDescribeGroupsResponse(resp *DescribeGroupsResponse) ([]byte, error) 
 			} else {
 				w.WriteBytes(m.MemberAssignment)
 			}
+		}
+		if resp.Version >= 4 {
+			w.WriteNullableString(nil)
+		}
+		if resp.Version >= 3 {
+			w.WriteInt32(g.AuthorizedOperations)
 		}
 	}
 	return w.Bytes(), nil
@@ -238,7 +247,21 @@ func DecodeDescribeGroupsResponse(version int16, body []byte) (*DescribeGroupsRe
 			if m.MemberAssignment, err = r.ReadBytes(); err != nil {
 				return nil, err
 			}
+			if version >= 4 {
+				// v4 added the static membership instance id per member.
+				if _, err = r.ReadNullableString(); err != nil {
+					return nil, err
+				}
+			}
 			g.Members = append(g.Members, m)
+		}
+		if version >= 3 {
+			// v3 appends the group's authorized operations. Skipping it shifts
+			// every following group by four bytes, which shows up as a decode
+			// failure on the second group, not the first.
+			if g.AuthorizedOperations, err = r.ReadInt32(); err != nil {
+				return nil, err
+			}
 		}
 		resp.Groups = append(resp.Groups, g)
 	}

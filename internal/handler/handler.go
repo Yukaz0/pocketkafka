@@ -6,6 +6,7 @@ package handler
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -586,7 +587,9 @@ func (h *Handler) handleDescribeGroups(version int16, body []byte) ([]byte, erro
 	}
 	resp := &protocol.DescribeGroupsResponse{Version: req.Version}
 	for _, id := range req.GroupIDs {
-		g := protocol.DescribeGroupsResponseGroup{GroupID: id}
+		// No group ACLs are modelled, so authorized operations are reported as
+		// "not available", which is what the protocol reserves INT32_MIN for.
+		g := protocol.DescribeGroupsResponseGroup{GroupID: id, AuthorizedOperations: math.MinInt32}
 		info := h.coord.DescribeGroup(id)
 		if info == nil {
 			g.ErrorCode = protocol.ErrGroupIDNotFound
