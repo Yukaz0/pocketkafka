@@ -37,21 +37,43 @@ type KafkaClient struct {
 	metadata    map[string][]PartitionMeta
 	timeout     time.Duration
 	apiVersions map[int16]int16 // negotiated max version per key
+	sasl        SASL
+	readOnly    bool
+}
+
+// Options configure a client beyond the broker list.
+type Options struct {
+	// SASL authenticates the connection. Empty Mechanism disables it.
+	SASL SASL
+	// ReadOnly refuses every API that can change the cluster, so a monitoring
+	// client cannot write by accident or by a bug in a caller.
+	ReadOnly bool
 }
 
 // NewClient connects to the given brokers and refreshes cluster metadata.
 func NewClient(brokers []string, clientID string) (*KafkaClient, error) {
+	return NewClientWithOptions(brokers, clientID, Options{})
+}
+
+// NewClientWithOptions connects, authenticates when configured, and refreshes
+// cluster metadata.
+func NewClientWithOptions(brokers []string, clientID string, opts Options) (*KafkaClient, error) {
 	c := &KafkaClient{
 		brokers:     brokers,
 		clientID:    clientID,
 		metadata:    make(map[string][]PartitionMeta),
 		timeout:     10 * time.Second,
 		apiVersions: defaultAPIVersions(),
+		sasl:        opts.SASL,
+		readOnly:    opts.ReadOnly,
 	}
 	if err := c.connect(); err != nil {
 		return nil, err
 	}
 	if err := c.negotiate(); err != nil {
+		return nil, err
+	}
+	if err := c.authenticate(); err != nil {
 		return nil, err
 	}
 	if err := c.RefreshMetadata(); err != nil {
@@ -118,6 +140,9 @@ func (c *KafkaClient) negotiate() error {
 // roundTrip sends a request body and returns the response body (excluding the
 // correlation ID). Requests on one client are serialized.
 func (c *KafkaClient) roundTrip(apiKey, version int16, reqBody []byte) ([]byte, error) {
+	if err := c.checkAPI(apiKey); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -158,22 +183,29 @@ func (c *KafkaClient) roundTrip(apiKey, version int16, reqBody []byte) ([]byte, 
 	return body[4:], nil
 }
 
-// RefreshMetadata updates the topic -> partition leader cache.
-func (c *KafkaClient) RefreshMetadata() error {
+// fetchMetadata requests and decodes the cluster metadata. A read-only client
+// never asks the broker to create a topic: metadata for a named topic that does
+// not exist must fail, not create it on someone's production cluster.
+func (c *KafkaClient) fetchMetadata() (*protocol.MetadataResponse, error) {
 	req := &protocol.MetadataRequest{
 		Version:                c.version(protocol.APKMetadata),
 		Topics:                 nil,
-		AllowAutoTopicCreation: true,
+		AllowAutoTopicCreation: !c.readOnly,
 	}
 	body, err := protocol.EncodeMetadataRequest(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	respBody, err := c.roundTrip(protocol.APKMetadata, req.Version, body)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	resp, err := protocol.DecodeMetadataResponse(req.Version, respBody)
+	return protocol.DecodeMetadataResponse(req.Version, respBody)
+}
+
+// RefreshMetadata updates the topic -> partition leader cache.
+func (c *KafkaClient) RefreshMetadata() error {
+	resp, err := c.fetchMetadata()
 	if err != nil {
 		return err
 	}

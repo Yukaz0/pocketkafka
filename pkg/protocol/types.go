@@ -95,28 +95,31 @@ const (
 
 // maxVersions advertises the maximum API version the broker supports for each
 // key. All chosen maxima are at or below the "flexible" protocol threshold, so
-// the codecs only need to handle the classic (non-compact) wire format.
+// the codecs only need to handle the classic (non-compact) wire format. The
+// threshold differs per API, so each entry names it where the two are close: a
+// key advertised one version too high is not a cosmetic error - a real broker
+// fails to parse the body and closes the connection.
 var maxVersions = map[int16]int16{
-	APKProduce:          3, // v3 makes clients use RecordBatch v2 (magic 2)
-	APKFetch:            5,
-	APKListOffsets:      5,
-	APKMetadata:         8,
-	APKOffsetCommit:     7,
-	APKOffsetFetch:      5, // v6+ is flexible
-	APKFindCoordinator:  2, // v3+ is flexible
-	APKJoinGroup:        5, // v6+ is flexible (cooperative-sticky needs v5)
-	APKHeartbeat:        3,
-	APKLeaveGroup:       3,
-	APKSyncGroup:        3, // v4+ is flexible
-	APKDescribeGroups:   3, // v6+ is flexible
-	APKListGroups:       3, // v3+ is flexible
-	APKSaslHandshake:    1,
-	APKApiVersions:      2,
-	APKCreateTopics:     4,
-	APKDeleteTopics:     3,
-	APKInitProducerID:   2, // v3+ is flexible
-	APKSaslAuthenticate: 2,
-	APKDeleteGroups:     1, // v2+ is flexible
+	APKProduce:          3, // v3 makes clients use RecordBatch v2 (magic 2); v9+ flexible
+	APKFetch:            5, // v12+ flexible
+	APKListOffsets:      5, // v6+ flexible
+	APKMetadata:         8, // v9+ flexible
+	APKOffsetCommit:     7, // v8+ flexible
+	APKOffsetFetch:      5, // v6+ flexible
+	APKFindCoordinator:  2, // v3+ flexible
+	APKJoinGroup:        5, // v6+ flexible (cooperative-sticky needs v5)
+	APKHeartbeat:        3, // v4+ flexible
+	APKLeaveGroup:       3, // v4+ flexible
+	APKSyncGroup:        3, // v4+ flexible
+	APKDescribeGroups:   3, // v5+ flexible
+	APKListGroups:       2, // v3 is flexible, and the request body is empty
+	APKSaslHandshake:    1, // not flexible
+	APKApiVersions:      2, // v3+ flexible
+	APKCreateTopics:     4, // v5+ flexible
+	APKDeleteTopics:     3, // v4+ flexible
+	APKInitProducerID:   2, // v3+ flexible
+	APKSaslAuthenticate: 1, // v2 is flexible; v1 carries the session lifetime
+	APKDeleteGroups:     1, // v2+ flexible
 }
 
 // SupportsKey reports whether the broker implements the given API key.

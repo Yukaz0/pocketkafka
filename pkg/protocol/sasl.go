@@ -16,6 +16,13 @@ func DecodeSASLHandshakeRequest(version int16, body []byte) (*SASLHandshakeReque
 	return &SASLHandshakeRequest{Version: version, Mechanism: m}, nil
 }
 
+// EncodeSASLHandshakeRequest serializes the request body for the client side.
+func EncodeSASLHandshakeRequest(req *SASLHandshakeRequest) ([]byte, error) {
+	w := NewWriter(32)
+	w.WriteString(req.Mechanism)
+	return w.Bytes(), nil
+}
+
 // SASLHandshakeResponse lists the mechanisms the broker supports.
 type SASLHandshakeResponse struct {
 	Version    int16
@@ -75,6 +82,13 @@ func DecodeSaslAuthenticateRequest(version int16, body []byte) (*SaslAuthenticat
 		return nil, err
 	}
 	return &SaslAuthenticateRequest{Version: version, AuthBytes: b}, nil
+}
+
+// EncodeSaslAuthenticateRequest serializes the request body for the client side.
+func EncodeSaslAuthenticateRequest(req *SaslAuthenticateRequest) ([]byte, error) {
+	w := NewWriter(len(req.AuthBytes) + 8)
+	w.WriteBytes(req.AuthBytes)
+	return w.Bytes(), nil
 }
 
 // SaslAuthenticateResponse reports the result of SASL authentication.
