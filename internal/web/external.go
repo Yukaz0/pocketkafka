@@ -435,7 +435,7 @@ func (e *externalCluster) build(
 		row.BytesPerSec = nil
 		row.MessagesPerSec = e.topicRate(t.Name, func(s topicSample) int64 { return s.Messages })
 		row.RateSpanSeconds = e.topicSpanSeconds(t.Name)
-		row.RateReliable = row.RateSpanSeconds > 0
+		row.RateReliable = e.rateReliableFor(row.RateSpanSeconds, defaultWindow)
 		row.Trend = trendOf(lag, e.topicLagRate(t.Name))
 		row.LagPerSec = e.topicLagRate(t.Name)
 		row.Broker = nil
@@ -538,7 +538,7 @@ func (e *externalCluster) build(
 		WindowSeconds:    int(defaultWindow / time.Second),
 		RetentionSeconds: int(historyRetention / time.Second),
 		HistoryPoints:    len(report.History),
-		RateReliable:     report.Cluster.RateSpanSeconds > 0,
+		RateReliable:     e.rateReliableFor(report.Cluster.RateSpanSeconds, defaultWindow),
 		StartedAtMs:      now.UnixMilli(),
 	}
 	return report
@@ -602,6 +602,17 @@ func (e *externalCluster) spanSeconds(now time.Time) float64 {
 		return 0
 	}
 	return now.Sub(e.series[0].At).Seconds()
+}
+
+// rateReliableFor mirrors the local monitor's rule: a rate is only trustworthy
+// when the measured span covers the requested window, with one sampling interval
+// of slack for ring trimming. A shorter span means the baseline predates the
+// window's edge, so the derived rate understates reality.
+func (e *externalCluster) rateReliableFor(span float64, window time.Duration) bool {
+	if span <= 0 {
+		return false
+	}
+	return span >= window.Seconds()-externalSampleInterval.Seconds()
 }
 
 func (e *externalCluster) history() []historyPoint {
@@ -757,6 +768,13 @@ func (e *externalCluster) overview(window time.Duration, now time.Time) (overvie
 	out.Cluster.Reasons = copySlice(e.last.Cluster.Reasons)
 	out.Sampling.WindowSeconds = int(window.Seconds())
 	out.Sampling.HistoryPoints = len(out.History)
+	// The stored snapshot is built for the default window; a caller asking for a
+	// different one must get reliability recomputed against ITS window, or a
+	// wide window would be presented as trustworthy on a short span.
+	out.Sampling.RateReliable = e.rateReliableFor(out.Cluster.RateSpanSeconds, window)
+	for i := range out.Topics {
+		out.Topics[i].RateReliable = e.rateReliableFor(e.topicSpanSeconds(out.Topics[i].Name), window)
+	}
 	return out, nil
 }
 
