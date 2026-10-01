@@ -16,7 +16,7 @@
   <a href="#-quick-start">Quick Start</a> •
   <a href="#-why-pocketkafka">Why PocketKafka?</a> •
   <a href="#-components--ports">Components & Ports</a> •
-  <a href="#-embedded-web-ui-kadeck-5-aesthetic">Embedded Web UI</a> •
+  <a href="#-embedded-web-ui">Embedded Web UI</a> •
   <a href="#-client-sdk--multi-language-usage">Client SDK</a> •
   <a href="#-testing">Testing</a>
 </p>
@@ -25,7 +25,7 @@
 
 </div>
 
-PocketKafka is a from-scratch implementation of the Apache Kafka binary wire protocol and a modern commit-log storage engine. It packs a **high-performance Kafka Broker**, an **embedded Kadeck-grade Web UI**, a **Confluent-compatible Schema Registry**, **HTTP REST & MQTT Gateways**, **Log Compaction**, **S3 Tiered Storage**, and **SASL/SCRAM + TLS Security** into a **single static binary under 30MB**.
+PocketKafka is a from-scratch implementation of the Apache Kafka binary wire protocol and a modern commit-log storage engine. It packs a **high-performance Kafka Broker**, an **embedded Control Center UI**, a **Confluent-compatible Schema Registry**, **HTTP REST & MQTT Gateways**, **Log Compaction**, **S3 Tiered Storage**, and **SASL/SCRAM + TLS Security** into a **single static binary under 30MB**.
 
 `go.mod` has **zero third-party dependencies**.
 
@@ -38,7 +38,7 @@ PocketKafka is a from-scratch implementation of the Apache Kafka binary wire pro
 | **Language & Runtime** | **Pure Go (Static Binary)** | Java / JVM | C++ (Seastar) |
 | **Idle Memory Footprint** | **< 60 MB** | ~1.5 GB+ (JVM) | ~512 MB - 1 GB |
 | **Docker Image Size** | **< 29 MB** | ~600 MB+ | ~300 MB |
-| **Embedded Web UI** | **Yes (Kadeck 5 grade, :8080)** | ❌ Needs extra container | Optional Console |
+| **Embedded Web UI** | **Yes (Control Center, :8080)** | ❌ Needs extra container | Optional Console |
 | **Built-in Schema Registry** | **Yes (Port 8081)** | ❌ Needs `cp-schema-registry` | Built-in |
 | **HTTP REST & MQTT Gateways**| **Yes (:8082 / :1883)** | ❌ Needs separate proxies | ❌ Needs separate proxies |
 | **External Dependencies** | **Zero (`go.mod` is clean)** | Java, ZooKeeper/KRaft | C++ libs |
@@ -53,7 +53,7 @@ All services are baked into a single binary and boot in milliseconds:
 | Component | Port | Description |
 | :--- | :---: | :--- |
 | **Kafka Wire Protocol** | `9092` / `29092` | Core broker listener (`PLAINTEXT` / internal network) |
-| **Embedded Web UI** | `8080` | Kadeck-grade dashboard with WebSocket live tail & message inspector |
+| **Embedded Web UI** | `8080` | Control Center dashboard with grouped navigation, health monitoring, live tail, and message inspector |
 | **Schema Registry** | `8081` | Confluent-compatible Avro / Protobuf / JSON schema registry |
 | **HTTP REST Proxy** | `8082` | Publish and consume messages over standard HTTP POST/GET |
 | **MQTT 3.1.1 Bridge** | `1883` | Direct IoT sensor telemetry bridged to Kafka topics |
@@ -196,16 +196,23 @@ curl -X POST http://localhost:8082/topics/orders/messages \
 
 ---
 
-## 🎨 Embedded Web UI (Kadeck 5 Aesthetic)
+## 🎨 Embedded Web UI
 
-PocketKafka includes a built-in Single Page Application at `http://localhost:8080` served directly from the Go binary via `//go:embed`:
+PocketKafka ships a single-file SPA at `http://localhost:8080`, served directly from the Go binary via `//go:embed`. No Node.js, no build step, no external fonts or CDN.
 
-- **56px Slim Navigation Rail**: Connections, Data Browser, Topics, Schema Registry, Producer Studio, Dark/Light Mode.
-- **Realtime Live Tail**: WebSocket streaming with smooth row-entry animations.
-- **Deep Message Inspector**: Syntax-highlighted collapsible JSON tree viewer (String, Number, Boolean, Key).
-- **Producer Simulator Studio**: Compose and inject test records directly from the browser.
-- **Consumer Group Lag Visualizer**: Real-time progress bars indicating unconsumed lag per partition.
-- **Topic Partitions & Disk Metrics**: Monitor Log End Offset (LEO) vs High Watermark (HWM).
+- **Grouped sidebar navigation** with collapsible rail (56 px collapsed / 224 px expanded), organized into *Overview*, *Operations*, *Developer Tools*, and *Connections* groups.
+- **Overview dashboard**: broker health status, attention items, throughput and consumer lag summary cards with links to detailed views.
+- **Health view**: per-broker health report with configurable time window, consumed rate, and attention alerts from `GET /api/v1/health/overview`.
+- **Multi-cluster monitoring**: add remote clusters, view reachability and latency, and switch the Health view to any monitored cluster.
+- **Data Browser**: WebSocket live-tail with message inspector (collapsible JSON tree, syntax-highlighted), topic explorer panel, and message diff.
+- **Topics & Consumer Groups**: partition detail, log-end/high-watermark offsets, per-partition lag visualization.
+- **Producer Studio & Dev Studio**: compose and inject test records; experiment with schema payloads.
+- **Topology map**: SVG-rendered broker-to-topic-to-consumer-group graph.
+- **Metrics**: message throughput charts and MQTT bridge status.
+- **Broker Logs**: filterable log viewer by severity level.
+- **Security & ACL**: manage SASL users and ACL rules.
+- **Dark / Light theme toggle** with `localStorage` persistence.
+- **Responsive**: full mobile layout with hamburger drawer and slide-out topic explorer at narrow viewports.
 
 ---
 
