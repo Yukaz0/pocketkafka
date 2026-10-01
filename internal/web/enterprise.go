@@ -13,7 +13,7 @@ import (
 // actorFrom returns the verified authenticated user for an audit entry, or
 // "anonymous".
 func (s *Server) actorFrom(r *http.Request) string {
-	if u := s.sessionUser(r); u != "" {
+	if u := s.requestPrincipal(r); u != "" {
 		return u
 	}
 	return "anonymous"

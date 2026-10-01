@@ -49,11 +49,9 @@ func authPayloadToUser(payload string) string {
 // static assets) when web auth is enabled. Unauthenticated API calls receive
 // 401 so the SPA can show the login screen.
 //
-// clusterToken, when non-empty, authorizes an aggregating peer that presents it
-// as `Authorization: Bearer <token>`: another broker's dashboard has no way to
-// hold an interactive session, and this is the only path it uses. It grants
-// reads only, because mutations additionally require an ACL grant.
-func newAuthMiddleware(users []config.SecurityUser, secret string, enabled bool, clusterToken string) func(http.Handler) http.Handler {
+// clusterToken authorizes read-only aggregating peers. Delegated tokens map to
+// configured users and are still subject to ACL checks for mutations.
+func newAuthMiddleware(users []config.SecurityUser, secret string, enabled bool, clusterToken string, delegatedPrincipal func(string) (string, bool)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !enabled {
@@ -68,11 +66,18 @@ func newAuthMiddleware(users []config.SecurityUser, secret string, enabled bool,
 			if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/metrics" {
 				if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
 					presented := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
-					if clusterToken == "" || subtle.ConstantTimeCompare([]byte(presented), []byte(clusterToken)) != 1 {
-						writeErr(w, http.StatusUnauthorized, "invalid cluster token")
+					if clusterToken != "" && subtle.ConstantTimeCompare([]byte(presented), []byte(clusterToken)) == 1 {
+						next.ServeHTTP(w, r)
 						return
 					}
-					next.ServeHTTP(w, r)
+					if delegatedPrincipal != nil {
+						principal, ok := delegatedPrincipal(presented)
+						if ok && userExists(users, principal) {
+							next.ServeHTTP(w, r)
+							return
+						}
+					}
+					writeErr(w, http.StatusUnauthorized, "invalid bearer token")
 					return
 				}
 				cookie, err := r.Cookie(authCookieName)

@@ -8,6 +8,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -47,6 +48,25 @@ type externalGroupData struct {
 	offsets map[string]map[int32]int64
 }
 
+// externalClusterClient is deliberately read-only; the same client backs the
+// sampler and the registered target API adapter.
+type externalClusterClient interface {
+	Close() error
+	Topics() []client.TopicInfo
+	ListOffsetsBulk(int64) (map[string]map[int32]int64, error)
+	ListEndOffsets(string) (map[int32]int64, error)
+	ListStartOffsets(string) (map[int32]int64, error)
+	ListGroups() ([]string, error)
+	DescribeGroupsAll([]string) (map[string]client.GroupState, error)
+	DescribeGroup(string) (client.GroupState, error)
+	GroupOffsets(string) (map[string]map[int32]int64, error)
+	ClusterID() string
+	Controller() int32
+	Brokers() []client.Broker
+}
+
+var errExternalClientClosed = errors.New("external Kafka client is closed")
+
 // externalCluster samples one registered "kafka" entry.
 type externalCluster struct {
 	name     string
@@ -58,8 +78,12 @@ type externalCluster struct {
 	maxTopics int
 	maxGroups int
 
-	mu        sync.Mutex
-	cc        *client.ClusterClient
+	mu sync.Mutex
+	// clientMu protects cc/closed and serializes creation, reads, failure, and close.
+	// When both locks are needed, acquire clientMu before mu.
+	clientMu  sync.Mutex
+	cc        externalClusterClient
+	closed    bool
 	series    []clusterSample
 	topicRing map[string][]topicSample
 	last      *overviewResponse
@@ -112,15 +136,22 @@ func (s *Server) dropExternal(name string) {
 // Close stops the sampler and its connections.
 func (e *externalCluster) Close() {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	select {
-	case <-e.stop:
-	default:
-		close(e.stop)
+	if e.stop != nil {
+		select {
+		case <-e.stop:
+		default:
+			close(e.stop)
+		}
 	}
-	if e.cc != nil {
-		e.cc.Close()
-		e.cc = nil
+	e.mu.Unlock()
+
+	e.clientMu.Lock()
+	e.closed = true
+	cc := e.cc
+	e.cc = nil
+	e.clientMu.Unlock()
+	if cc != nil {
+		cc.Close()
 	}
 }
 
@@ -146,11 +177,15 @@ func (e *externalCluster) run() {
 func (e *externalCluster) sample() {
 	started := time.Now()
 	now := started
-	cc, err := e.connect()
+	err := e.withClient(func(cc externalClusterClient) error {
+		return e.sampleWithClient(cc, started, now)
+	})
 	if err != nil {
 		e.fail(err, now)
-		return
 	}
+}
+
+func (e *externalCluster) sampleWithClient(cc externalClusterClient, started, now time.Time) error {
 	topics := cc.Topics()
 	maxTopics, maxGroups := e.maxTopics, e.maxGroups
 	if maxTopics <= 0 {
@@ -163,13 +198,11 @@ func (e *externalCluster) sample() {
 	// Every partition's log end and earliest offset: two requests per broker.
 	latest, err := cc.ListOffsetsBulk(-1)
 	if err != nil {
-		e.fail(fmt.Errorf("list end offsets: %w", err), now)
-		return
+		return fmt.Errorf("list end offsets: %w", err)
 	}
 	earliest, err := cc.ListOffsetsBulk(-2)
 	if err != nil {
-		e.fail(fmt.Errorf("list start offsets: %w", err), now)
-		return
+		return fmt.Errorf("list start offsets: %w", err)
 	}
 
 	topicData := make(map[string]externalTopicData, len(latest))
@@ -193,8 +226,7 @@ func (e *externalCluster) sample() {
 
 	groups, err := cc.ListGroups()
 	if err != nil {
-		e.fail(fmt.Errorf("list groups: %w", err), now)
-		return
+		return fmt.Errorf("list groups: %w", err)
 	}
 	skippedGroups := 0
 	if len(groups) > maxGroups {
@@ -203,8 +235,7 @@ func (e *externalCluster) sample() {
 	}
 	states, err := cc.DescribeGroupsAll(groups)
 	if err != nil {
-		e.fail(fmt.Errorf("describe groups: %w", err), now)
-		return
+		return fmt.Errorf("describe groups: %w", err)
 	}
 	groupData := make(map[string]externalGroupData, len(groups))
 	for _, g := range groups {
@@ -283,42 +314,49 @@ func (e *externalCluster) sample() {
 	}
 
 	e.last = e.build(cc, topics, topicData, groupData, skippedTopics, skippedGroups, now)
+	return nil
 }
 
 // fail records a pass that could not read the cluster, keeping the previous
-// snapshot so the view degrades instead of going blank.
+// snapshot so the view degrades instead of going blank. The caller has released
+// its client operation before failure invalidates and closes the connection.
 func (e *externalCluster) fail(err error, now time.Time) {
+	e.clientMu.Lock()
+	cc := e.cc
+	e.cc = nil
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.lastErr = err.Error()
 	e.sampledAt = now
-	if e.cc != nil {
-		e.cc.Close()
-		e.cc = nil
+	e.mu.Unlock()
+	e.clientMu.Unlock()
+	if cc != nil {
+		cc.Close()
 	}
 }
 
-// connect returns a live cluster client, reconnecting after a failure.
-func (e *externalCluster) connect() (*client.ClusterClient, error) {
-	e.mu.Lock()
-	cc := e.cc
-	e.mu.Unlock()
-	if cc != nil {
-		return cc, nil
+// withClient makes client creation single-flight and serializes the complete
+// read operation against other reads, failure invalidation, and shutdown.
+// Callbacks run while clientMu is held and may acquire mu, so code must not hold
+// mu while trying to acquire clientMu.
+func (e *externalCluster) withClient(read func(externalClusterClient) error) error {
+	e.clientMu.Lock()
+	defer e.clientMu.Unlock()
+	if e.closed {
+		return errExternalClientClosed
 	}
-	cc, err := client.NewClusterClient(e.seeds, e.clientID, client.Options{SASL: e.sasl, ReadOnly: true})
-	if err != nil {
-		return nil, err
+	if e.cc == nil {
+		cc, err := client.NewClusterClient(e.seeds, e.clientID, client.Options{SASL: e.sasl, ReadOnly: true})
+		if err != nil {
+			return err
+		}
+		e.cc = cc
 	}
-	e.mu.Lock()
-	e.cc = cc
-	e.mu.Unlock()
-	return cc, nil
+	return read(e.cc)
 }
 
 // build turns one pass into a report. The caller holds e.mu.
 func (e *externalCluster) build(
-	cc *client.ClusterClient,
+	cc externalClusterClient,
 	topics []client.TopicInfo,
 	topicData map[string]externalTopicData,
 	groupData map[string]externalGroupData,
@@ -544,7 +582,7 @@ func (e *externalCluster) build(
 	return report
 }
 
-func brokerAddrs(cc *client.ClusterClient) []string {
+func brokerAddrs(cc externalClusterClient) []string {
 	out := []string{}
 	for _, b := range cc.Brokers() {
 		out = append(out, b.Addr())

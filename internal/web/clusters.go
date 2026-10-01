@@ -66,6 +66,10 @@ const (
 // they cannot be mistaken for a peer's bearer token.
 const saslSecretPrefix = "sasl:"
 
+// dashboardSecretPrefix namespaces delegated dashboard credentials separately
+// from read-only Health tokens and Kafka SASL passwords.
+const dashboardSecretPrefix = "dashboard:"
+
 // normalizeKind maps the empty kind to its default.
 func normalizeKind(kind string) string {
 	if kind == "" {
@@ -107,13 +111,17 @@ func validateEntry(e ClusterEntry) error {
 	if err := validateClusterName(e.Name); err != nil {
 		return err
 	}
-	if normalizeKind(e.Kind) == clusterKindKafka {
+	switch normalizeKind(e.Kind) {
+	case clusterKindKafka:
 		return validateKafkaEntry(e)
+	case clusterKindPeer:
+		if e.URL == "" {
+			return errors.New("peer cluster needs a url")
+		}
+		return validateClusterURL(e.URL)
+	default:
+		return fmt.Errorf("unsupported cluster kind %q", e.Kind)
 	}
-	if e.URL == "" {
-		return errors.New("peer cluster needs a url")
-	}
-	return validateClusterURL(e.URL)
 }
 
 // validateClusterURL and validateClusterName live in the config package so the
@@ -245,6 +253,18 @@ func (s *clusterStore) HasToken(name string) bool {
 	return s.Token(name) != ""
 }
 
+// DashboardToken returns a peer's stored delegated dashboard token, or "".
+func (s *clusterStore) DashboardToken(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tokens[dashboardSecretPrefix+name]
+}
+
+// HasDashboardToken reports whether a delegated dashboard token is stored.
+func (s *clusterStore) HasDashboardToken(name string) bool {
+	return s.DashboardToken(name) != ""
+}
+
 // SASLPassword returns the stored SASL password for a cluster, or "".
 func (s *clusterStore) SASLPassword(name string) string {
 	s.mu.Lock()
@@ -260,6 +280,10 @@ func (s *clusterStore) HasSASLPassword(name string) bool {
 // Upsert adds or replaces one cluster. A nil secret leaves the stored one alone;
 // a non-nil empty secret clears it.
 func (s *clusterStore) Upsert(e ClusterEntry, token, saslPassword *string) error {
+	return s.upsert(e, token, saslPassword, nil)
+}
+
+func (s *clusterStore) upsert(e ClusterEntry, token, saslPassword, dashboardToken *string) error {
 	e.Name = strings.TrimSpace(e.Name)
 	e.Kind = normalizeKind(e.Kind)
 	e.URL = strings.TrimSpace(e.URL)
@@ -271,9 +295,16 @@ func (s *clusterStore) Upsert(e ClusterEntry, token, saslPassword *string) error
 	if err := validateEntry(e); err != nil {
 		return err
 	}
+	if dashboardToken != nil && *dashboardToken != "" && e.Kind != clusterKindPeer {
+		return errors.New("dashboard tokens are supported only for peer clusters")
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	dashboardKey := dashboardSecretPrefix + e.Name
+	if e.Kind != clusterKindPeer && dashboardToken == nil && s.tokens[dashboardKey] != "" {
+		return errors.New("clear the dashboard token before changing this cluster away from peer")
+	}
 	replaced := false
 	for i := range s.entries {
 		if s.entries[i].Name == e.Name {
@@ -306,6 +337,16 @@ func (s *clusterStore) Upsert(e ClusterEntry, token, saslPassword *string) error
 			return err
 		}
 	}
+	if dashboardToken != nil {
+		if *dashboardToken == "" {
+			delete(s.tokens, dashboardKey)
+		} else {
+			s.tokens[dashboardKey] = *dashboardToken
+		}
+		if err := s.persistTokensLocked(); err != nil {
+			return err
+		}
+	}
 	return s.persistEntriesLocked()
 }
 
@@ -328,6 +369,7 @@ func (s *clusterStore) Remove(name string) error {
 	s.entries = kept
 	delete(s.tokens, name)
 	delete(s.tokens, saslSecretPrefix+name)
+	delete(s.tokens, dashboardSecretPrefix+name)
 	if err := s.persistTokensLocked(); err != nil {
 		return err
 	}
@@ -603,13 +645,17 @@ func (s *Server) clustersOverview(ctx context.Context, window time.Duration, now
 				rows[i+1] = summarizeExternal(e, report)
 				return
 			}
-			token := s.clusters.Token(e.Name)
+			healthToken := s.clusters.Token(e.Name)
+			token := s.clusters.DashboardToken(e.Name)
+			if token == "" {
+				token = healthToken
+			}
 			body, latency, err := s.fetchClusterReport(ctx, e, window, token)
 			if err != nil {
-				rows[i+1] = clusterSummary{Name: e.Name, Kind: clusterKindPeer, URL: e.URL, OK: false, Error: err.Error(), LatencyMs: latency.Milliseconds(), HasToken: token != ""}
+				rows[i+1] = clusterSummary{Name: e.Name, Kind: clusterKindPeer, URL: e.URL, OK: false, Error: err.Error(), LatencyMs: latency.Milliseconds(), HasToken: healthToken != ""}
 				return
 			}
-			rows[i+1] = summarize(e, token != "", body, latency)
+			rows[i+1] = summarize(e, healthToken != "", body, latency)
 		}(i, e)
 	}
 	wg.Wait()
@@ -671,31 +717,55 @@ func (s *Server) handleClustersOverview(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, payload)
 }
 
+var externalKafkaCapabilities = []string{"cluster", "topics.read", "topic.partitions.read", "groups.read", "group.detail.read", "health.read"}
+
+var peerTargetCapabilities = []string{
+	"cluster", "topics.read", "topics.write", "topics.delete", "topic.messages.read", "topic.messages.write",
+	"topic.partitions.read", "topic.truncate", "topic.compact", "topic.import", "topic.config.read", "topic.config.write", "topic.tail",
+	"groups.read", "groups.delete", "group.offsets.export", "group.offsets.reset", "group.offsets.import",
+	"schemas.read", "schemas.write", "acls.read", "acls.write", "logs.read", "throughput.read", "mqtt.read", "audit.read", "health.read",
+}
+
+func targetCapabilities(kind string) []string {
+	switch normalizeKind(kind) {
+	case clusterKindKafka:
+		return append([]string(nil), externalKafkaCapabilities...)
+	case clusterKindPeer:
+		return append([]string(nil), peerTargetCapabilities...)
+	default:
+		return []string{}
+	}
+}
+
 // handleClusters lists the registry. Tokens are write-only: the response only
 // says whether one is stored.
 func (s *Server) handleClusters(w http.ResponseWriter, r *http.Request) {
 	entries := s.clusters.List()
 	type row struct {
-		Name            string   `json:"name"`
-		Kind            string   `json:"kind"`
-		URL             string   `json:"url,omitempty"`
-		Brokers         []string `json:"brokers,omitempty"`
-		SASLUser        string   `json:"saslUser,omitempty"`
-		SASLMechanism   string   `json:"saslMechanism,omitempty"`
-		HasToken        bool     `json:"hasToken"`
-		HasSASLPassword bool     `json:"hasSaslPassword"`
+		Name              string   `json:"name"`
+		Capabilities      []string `json:"capabilities"`
+		Kind              string   `json:"kind"`
+		URL               string   `json:"url,omitempty"`
+		Brokers           []string `json:"brokers,omitempty"`
+		SASLUser          string   `json:"saslUser,omitempty"`
+		SASLMechanism     string   `json:"saslMechanism,omitempty"`
+		HasToken          bool     `json:"hasToken"`
+		HasDashboardToken bool     `json:"hasDashboardToken"`
+		HasSASLPassword   bool     `json:"hasSaslPassword"`
 	}
 	out := make([]row, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, row{
-			Name:            e.Name,
-			Kind:            normalizeKind(e.Kind),
-			URL:             e.URL,
-			Brokers:         e.Brokers,
-			SASLUser:        e.SASLUser,
-			SASLMechanism:   e.SASLMechanism,
-			HasToken:        s.clusters.HasToken(e.Name),
-			HasSASLPassword: s.clusters.HasSASLPassword(e.Name),
+			Name:              e.Name,
+			Kind:              normalizeKind(e.Kind),
+			URL:               e.URL,
+			Brokers:           e.Brokers,
+			SASLUser:          e.SASLUser,
+			SASLMechanism:     e.SASLMechanism,
+			HasToken:          s.clusters.HasToken(e.Name),
+			HasSASLPassword:   s.clusters.HasSASLPassword(e.Name),
+			HasDashboardToken: s.clusters.HasDashboardToken(e.Name),
+			Capabilities:      targetCapabilities(e.Kind),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"clusters": out})
@@ -704,16 +774,18 @@ func (s *Server) handleClusters(w http.ResponseWriter, r *http.Request) {
 // handleUpsertCluster adds or updates one monitored cluster.
 func (s *Server) handleUpsertCluster(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name              string   `json:"name"`
-		Kind              string   `json:"kind"`
-		URL               string   `json:"url"`
-		Brokers           []string `json:"brokers"`
-		SASLUser          string   `json:"saslUser"`
-		SASLMechanism     string   `json:"saslMechanism"`
-		SASLPassword      string   `json:"saslPassword"`
-		ClearSASLPassword bool     `json:"clearSaslPassword"`
-		Token             string   `json:"token"`
-		ClearToken        bool     `json:"clearToken"`
+		Name                string   `json:"name"`
+		Kind                string   `json:"kind"`
+		URL                 string   `json:"url"`
+		Brokers             []string `json:"brokers"`
+		SASLUser            string   `json:"saslUser"`
+		SASLMechanism       string   `json:"saslMechanism"`
+		SASLPassword        string   `json:"saslPassword"`
+		ClearSASLPassword   bool     `json:"clearSaslPassword"`
+		Token               string   `json:"token"`
+		ClearToken          bool     `json:"clearToken"`
+		DashboardToken      string   `json:"dashboardToken"`
+		ClearDashboardToken bool     `json:"clearDashboardToken"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
@@ -727,6 +799,7 @@ func (s *Server) handleUpsertCluster(w http.ResponseWriter, r *http.Request) {
 		SASLUser:      req.SASLUser,
 		SASLMechanism: req.SASLMechanism,
 	}
+	var dashboardToken *string
 	var token, saslPassword *string
 	switch {
 	case req.ClearToken:
@@ -736,13 +809,20 @@ func (s *Server) handleUpsertCluster(w http.ResponseWriter, r *http.Request) {
 		token = &req.Token
 	}
 	switch {
+	case req.ClearDashboardToken:
+		empty := ""
+		dashboardToken = &empty
+	case req.DashboardToken != "":
+		dashboardToken = &req.DashboardToken
+	}
+	switch {
 	case req.ClearSASLPassword:
 		empty := ""
 		saslPassword = &empty
 	case req.SASLPassword != "":
 		saslPassword = &req.SASLPassword
 	}
-	if token != nil || saslPassword != nil {
+	if token != nil || saslPassword != nil || dashboardToken != nil {
 		// A stored secret can only be written sealed. When the key is missing or
 		// wrong this refuses the write instead of dropping the credential.
 		if err := s.clusters.BoxError(); err != nil {
@@ -750,19 +830,20 @@ func (s *Server) handleUpsertCluster(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.clusters.Upsert(entry, token, saslPassword); err != nil {
+	if err := s.clusters.upsert(entry, token, saslPassword, dashboardToken); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	s.recordAudit(s.actorFrom(r), "cluster.upsert", entry.Name,
 		fmt.Sprintf("monitored %s cluster", normalizeKind(entry.Kind)))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"name":            entry.Name,
-		"kind":            normalizeKind(entry.Kind),
-		"url":             entry.URL,
-		"brokers":         entry.Brokers,
-		"hasToken":        s.clusters.HasToken(entry.Name),
-		"hasSaslPassword": s.clusters.HasSASLPassword(entry.Name),
+		"name":              entry.Name,
+		"kind":              normalizeKind(entry.Kind),
+		"url":               entry.URL,
+		"brokers":           entry.Brokers,
+		"hasToken":          s.clusters.HasToken(entry.Name),
+		"hasSaslPassword":   s.clusters.HasSASLPassword(entry.Name),
+		"hasDashboardToken": s.clusters.HasDashboardToken(entry.Name),
 	})
 }
 
@@ -771,14 +852,17 @@ func (s *Server) handleUpsertCluster(w http.ResponseWriter, r *http.Request) {
 // test RESULT, not a failed request: it answers 200 with ok=false.
 func (s *Server) handleTestCluster(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name          string   `json:"name"`
-		Kind          string   `json:"kind"`
-		URL           string   `json:"url"`
-		Brokers       []string `json:"brokers"`
-		SASLUser      string   `json:"saslUser"`
-		SASLMechanism string   `json:"saslMechanism"`
-		SASLPassword  string   `json:"saslPassword"`
-		Token         string   `json:"token"`
+		Name                string   `json:"name"`
+		Kind                string   `json:"kind"`
+		URL                 string   `json:"url"`
+		Brokers             []string `json:"brokers"`
+		SASLUser            string   `json:"saslUser"`
+		SASLMechanism       string   `json:"saslMechanism"`
+		SASLPassword        string   `json:"saslPassword"`
+		Token               string   `json:"token"`
+		DashboardToken      string   `json:"dashboardToken"`
+		ClearDashboardToken bool     `json:"clearDashboardToken"`
+		ClearToken          bool     `json:"clearToken"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
@@ -820,21 +904,30 @@ func (s *Server) handleTestCluster(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	token := req.Token
-	if token == "" && req.Name != "" {
-		// The edit form leaves the token empty to keep the stored one, so the
-		// test must use that stored token instead of probing unauthenticated.
-		token = s.clusters.Token(req.Name)
+	healthToken := req.Token
+	if req.ClearToken {
+		healthToken = ""
+	} else if healthToken == "" && req.Name != "" {
+		healthToken = s.clusters.Token(req.Name)
+	}
+	token := req.DashboardToken
+	if req.ClearDashboardToken {
+		token = ""
+	} else if token == "" && req.Name != "" {
+		token = s.clusters.DashboardToken(req.Name)
+	}
+	if token == "" {
+		token = healthToken
 	}
 	body, latency, err := s.fetchClusterReport(r.Context(), entry, defaultWindow, token)
 	if err != nil {
 		writeJSON(w, http.StatusOK, clusterSummary{
 			Name: req.Name, URL: req.URL, OK: false, Error: err.Error(),
-			LatencyMs: latency.Milliseconds(), HasToken: token != "",
+			LatencyMs: latency.Milliseconds(), HasToken: healthToken != "",
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, summarize(entry, token != "", body, latency))
+	writeJSON(w, http.StatusOK, summarize(entry, healthToken != "", body, latency))
 }
 
 // handleDeleteCluster removes one monitored cluster.

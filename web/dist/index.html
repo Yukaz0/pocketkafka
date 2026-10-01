@@ -158,6 +158,16 @@
   .tab.on{color:var(--text);background:var(--bg);box-shadow:inset 0 2px 0 var(--primary)}
   .chips{display:flex;align-items:center;gap:6px;font:10.5px var(--font-mono);color:var(--muted)}
   .chip2{border:1px solid var(--border);padding:2px 8px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.navLink:disabled{cursor:not-allowed;opacity:.48}
+.navLink:disabled:hover{background:none;color:var(--muted)}
+.clRowActions{display:flex;gap:6px;flex-wrap:wrap}
+.clusterRowActions{display:flex;gap:10px;flex-wrap:nowrap;white-space:nowrap}
+.brokerPicker{display:flex;align-items:center;gap:6px;padding:0 10px;font-size:11px;color:var(--muted);white-space:nowrap}
+.brokerPicker label{font:500 10px var(--font-mono);letter-spacing:.04em}
+.brokerPicker select{width:180px;min-width:90px;padding:4px 7px;font-size:11px;background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.brokerPicker select:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+@media(max-width:520px){.brokerPicker{gap:4px;padding:0 5px}.brokerPicker select{width:112px;font-size:10px}}
+@media(max-width:360px){.brokerPicker select{width:86px}}
   .chip2 i{width:6px;height:6px;border-radius:50%;background:var(--live);display:inline-block}
   .ws{flex:1;display:flex;min-height:0}
   .content{flex:1;display:flex;flex-direction:column;min-width:0}
@@ -429,6 +439,7 @@
 <body>
 <div class="tb">
   <div class="wm" onclick="goView('overview')" title="PocketKafka Overview"><i></i>pocketkafka</div>
+  <div class="brokerPicker"><label for="activeClusterSelect">Broker</label><select id="activeClusterSelect" aria-label="Broker" onchange="switchActiveCluster(this.value)"><option value="local">local (this broker)</option></select></div>
   <div class="chips">
     <span class="chip2" id="chipBroker"><i></i>broker -</span>
     <span class="chip2" id="chipSec">PLAINTEXT</span>
@@ -493,7 +504,7 @@ const I={
   moon:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>'
 };
 
-const state={view:'overview',theme:'dark',sidebarCollapsed:false,cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,healthCluster:'local',alarmsDismissed:new Set((()=>{try{return JSON.parse(sessionStorage.getItem('pk_dismissed')||'[]');}catch(e){return [];}})()),
+const state={view:'overview',theme:'dark',sidebarCollapsed:false,cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,activeCluster:localStorage.getItem('pk_active_cluster')||'local',targetGeneration:0,targetRequests:new Set(),targetSwitching:false,alarmsDismissed:new Set((()=>{try{return JSON.parse(sessionStorage.getItem('pk_dismissed')||'[]');}catch(e){return [];}})()),
   /* pengaturan persisten */
   refreshMs:+(localStorage.getItem('pk_refreshMs')||5000)||5000,
   density:localStorage.getItem('pk_density')||'comfortable',
@@ -519,12 +530,89 @@ function initTheme(){
   try{state.navGroupsCollapsed=Object.assign({operations:false,developer:false},JSON.parse(localStorage.getItem('pk_nav_groups')||'{}'));}catch(e){state.navGroupsCollapsed={operations:false,developer:false};}
 }
 
-async function api(p,o){o=Object.assign({},o||{});const m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=Object.assign({'X-PocketKafka-Request':'1'},o.headers||{});}const r=await fetch(p,o);let j;try{j=await r.json();}catch(e){j={};}if(r.status===401&&state.auth&&state.auth.enabled){showLogin();throw new Error('Authentication required');}if(!r.ok)throw new Error(j.error||r.status);return j;}
-function toast(t){const m=$('#msg');m.textContent=t;m.classList.add('show');setTimeout(()=>m.classList.remove('show'),2500);}
+const KAFKA_UNSUPPORTED_VIEWS={databrowser:'Message browsing and live tail are not supported for Kafka targets.',producer:'Producing messages is disabled for read-only Kafka targets.',devstudio:'Developer Studio writes are not supported for Kafka targets.',schemas:'Schema Registry APIs are not supported for Kafka targets.',topology:'Topology is not available for Kafka targets.',storage:'Storage inspection is not available for Kafka targets.',logs:'Broker logs are not available for Kafka targets.',metrics:'Broker metrics are not available for Kafka targets.'};
+function navUnavailableReason(view){
+  if(isTargetUnavailable()&&!['clusters','settings','security'].includes(view))return targetUnavailableMessage();
+  if(!isKafkaTarget())return '';
+  if(KAFKA_UNSUPPORTED_VIEWS[view])return KAFKA_UNSUPPORTED_VIEWS[view];
+  const needed={overview:'health.read',health:'health.read',connections:'cluster',topics:'topics.read',groups:'groups.read'}[view];
+  if(needed&&!hasTargetCapability(needed))return `Selected Kafka target does not provide ${needed}.`;
+  if(view==='topics'&&state.topicDetail&&!hasTargetCapability('topic.partitions.read'))return 'Topic partition details are not supported by this Kafka target.';
+  if(view==='groups'&&state.group&&!hasTargetCapability('group.detail.read'))return 'Consumer group details are not supported by this Kafka target.';
+  return '';
+}
+function targetUnavailablePanel(){return `<div class="card" role="alert"><h3>Broker unavailable</h3><p class="muted" style="margin-top:8px">${esc(targetUnavailableMessage())}</p><p class="muted" style="margin-top:8px">The saved selection is preserved. Choose a registered broker from the global Broker selector to continue.</p></div>`;}
+function unsupportedPanel(view){
+  const reason=navUnavailableReason(view)||'This feature is not supported by the selected broker.';
+  const back=view==='topics'&&state.topicDetail?`<button class="btn ghost" style="margin-top:12px" onclick="state.topicDetail=null;state.topicParts=[];state.topicCfg=null;render()">Back to Topics</button>`:
+    view==='groups'&&state.group?`<button class="btn ghost" style="margin-top:12px" onclick="state.group=null;state.groupDetail=null;location.hash='#/groups';render()">Back to Consumer Groups</button>`:'';
+  return `<div class="card" role="status"><h3>Unavailable for ${esc(activeClusterLabel())}</h3><p class="muted" style="margin-top:8px">${esc(reason)}</p>${back}</div>`;
+}
+function targetSwitchingPanel(){return `<div class="card" role="status" aria-live="polite"><h3>Switching broker</h3><p class="muted" style="margin-top:8px">Loading ${esc(activeClusterLabel())}. Data from the previous broker has been cleared.</p></div>`;}
+const LOCAL_API_PATH=/^\/api\/v1\/(?:auth(?:\/|$)|clusters(?:\/|$)|health\/clusters(?:\/|$))/;
+function kafkaCapabilityFor(path,method){
+  const u=new URL(path,location.href),p=u.pathname,m=(method||'GET').toUpperCase();
+  if(p==='/api/v1/cluster'&&m==='GET')return 'cluster';
+  if(p==='/api/v1/topics'&&m==='GET')return 'topics.read';
+  if(/^\/api\/v1\/topics\/[^/]+\/partitions$/.test(p)&&m==='GET')return 'topic.partitions.read';
+  if(p==='/api/v1/groups'&&m==='GET')return 'groups.read';
+  if(/^\/api\/v1\/groups\/[^/]+$/.test(p)&&m==='GET')return 'group.detail.read';
+  if(p==='/api/v1/health/overview'&&m==='GET')return 'health.read';
+  return null;
+}
+function activeTargetEntry(){return (clusterRegistry||[]).find(c=>c.name===state.activeCluster)||null;}
+function activeTargetKind(){return state.activeCluster==='local'?'local':(activeTargetEntry()?.kind||'');}
+function isTargetUnavailable(){return state.activeCluster!=='local'&&!activeTargetEntry();}
+function targetUnavailableMessage(){return `Selected broker "${state.activeCluster}" is unavailable. Select a registered broker; requests are not sent to this broker.`;}
+function isKafkaTarget(){return activeTargetKind()==='kafka';}
+async function apiError(r,j,targetRequest){
+  if(r.status===401){
+    if(targetRequest){
+      let localSessionExpired=false;
+      try{localSessionExpired=(await fetch('/api/v1/auth/status')).status===401;}catch(e){}
+      if(!localSessionExpired)throw new Error(redactTargetEndpoint(j.error||r.status));
+    }
+    if(targetRequest||(state.auth&&state.auth.enabled)){showLogin();throw new Error('Authentication required');}
+    throw new Error(redactTargetEndpoint(j.error||r.status));
+  }
+  if(!r.ok)throw new Error(redactTargetEndpoint(j.error||r.status));
+  return j;
+}
+async function requestApi(p,o,targetRequest){
+  o=Object.assign({},o||{});const m=(o.method||'GET').toUpperCase();
+  if(m!=='GET'&&m!=='HEAD')o.headers=Object.assign({'X-PocketKafka-Request':'1'},o.headers||{});
+  const r=await fetch(p,o);let j;try{j=await r.json();}catch(e){j={};}
+  return apiError(r,j,targetRequest);
+}
+async function apiLocal(p,o){return requestApi(p,o);}
+async function api(p,o){
+  const u=new URL(p,location.href),method=(o&&o.method||'GET').toUpperCase();
+  if(LOCAL_API_PATH.test(u.pathname))return apiLocal(p,o);
+  const name=state.activeCluster,entry=name==='local'?null:activeTargetEntry();
+  if(name!=='local'&&!entry)throw new Error(targetUnavailableMessage());
+  if(entry&&(entry.kind||'').toLowerCase()==='kafka'){
+    const capability=kafkaCapabilityFor(p,method);
+    if(!capability)throw new Error(`Unsupported for Kafka targets: ${method} ${u.pathname}`);
+    if(!(entry.capabilities||[]).includes(capability))throw new Error(`Selected broker "${name}" does not provide ${capability}.`);
+  }
+  const generation=state.targetGeneration,controller=new AbortController(),callerSignal=o&&o.signal;
+  if(callerSignal?.aborted)throw new DOMException('Request aborted','AbortError');
+  const abortFromCaller=()=>controller.abort();callerSignal?.addEventListener('abort',abortFromCaller,{once:true});state.targetRequests.add(controller);
+  try{
+    const path=name==='local'?p:`/api/v1/target/${encodeURIComponent(name)}${u.pathname}${u.search}`;
+    const result=await requestApi(path,Object.assign({},o||{},{signal:controller.signal}),name!=='local');
+    if(generation!==state.targetGeneration||name!==state.activeCluster){const stale=new Error('Target changed while request was in flight');stale.staleTargetResponse=true;throw stale;}
+    return result;
+  }catch(e){
+    if(generation!==state.targetGeneration||name!==state.activeCluster){const stale=new Error('Target changed while request was in flight');stale.staleTargetResponse=true;throw stale;}
+    throw e;
+  }finally{state.targetRequests.delete(controller);callerSignal?.removeEventListener('abort',abortFromCaller);}
+}
+function toast(t){const m=$('#msg');m.textContent=redactTargetEndpoint(t);m.classList.add('show');setTimeout(()=>m.classList.remove('show'),2500);}
 /* error tak tertangkap (inline onclick dsb) -> toast, tidak lagi senyap */
 window.addEventListener('error',function(e){ if(e&&e.message&&!/ResizeObserver|Script error/.test(e.message)){ try{toast('Error: '+e.message);}catch(_){} } });
 /* lapisan 2: render gagal -> error page, bukan halaman kosong */
-function renderFatal(err){ const v=document.getElementById('view'); if(!v)return; const msg=esc(String((err&&err.message)||err||'unknown')); v.innerHTML='<div class="card"><h3>Something went wrong</h3><div class="muted" style="font-family:var(--font-mono);font-size:11px;margin:8px 0 14px;word-break:break-word">'+msg+'</div><button class="btn" onclick="recoverFatal()">Back to Overview</button></div>'; }
+function renderFatal(err){ const v=document.getElementById('view'); if(!v)return; const msg=esc(redactTargetEndpoint(String((err&&err.message)||err||'unknown'))); v.innerHTML='<div class="card"><h3>Something went wrong</h3><div class="muted" style="font-family:var(--font-mono);font-size:11px;margin:8px 0 14px;word-break:break-word">'+msg+'</div><button class="btn" onclick="recoverFatal()">Back to Overview</button></div>'; }
 window.recoverFatal=function(){ state.group=null; state.topicDetail=null; goView('connections'); };
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmtBytes(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(1)+' MB';}
@@ -539,16 +627,18 @@ function rel(t){const d=Math.max(0,Date.now()-t);if(d<1000)return 'now';if(d<600
 function online(s){s=(s||'').toLowerCase();return s==='stable'||s==='green';}
 
 async function refresh(){
-  await Promise.allSettled([api('/api/v1/cluster').then(d=>state.cluster=d).catch(()=>{}),
+  const generation=state.targetGeneration;
+  const tasks=[api('/api/v1/cluster').then(d=>state.cluster=d).catch(()=>{}),
     api('/api/v1/topics').then(d=>state.topics=d||[]).catch(()=>{}),
     api('/api/v1/groups').then(d=>state.groups=d||[]).catch(()=>{}),
-    api('/api/v1/schemas').then(d=>state.schemas=d||[]).catch(()=>{}),
-    api('/api/v1/auth/status').then(d=>state.auth=d).catch(()=>{})]);
-  state.lastRefresh=Date.now();
-  updAgo();
-  checkAlarms();
+    apiLocal('/api/v1/auth/status').then(d=>state.auth=d).catch(()=>{})];
+  if(!isKafkaTarget()||hasTargetCapability('schemas.read'))tasks.push(api('/api/v1/schemas').then(d=>state.schemas=d||[]).catch(()=>{}));
+  await Promise.allSettled(tasks);
+  if(generation!==state.targetGeneration)return;
+  state.lastRefresh=Date.now();updAgo();checkAlarms();
   if(state.view==='topology')renderTopoSvg();
 }
+function hasTargetCapability(cap){if(state.activeCluster==='local')return true;const target=activeTargetEntry();if(!target)return false;if((target.kind||'').toLowerCase()!=='kafka')return true;return (target.capabilities||[]).includes(cap);}
 
 /* dinamis: auto-refresh berkala + indikator "updated Xs ago" */
 function updAgo(){
@@ -572,7 +662,10 @@ function buildNav(){
     const collapsible=group==='operations'||group==='developer';
     const collapsed=collapsible&&state.navGroupsCollapsed[group];
     const heading=label?`<button class="navGroupToggle" type="button" onclick="toggleNavGroup('${group}')" aria-label="Toggle ${esc(label)} navigation" aria-expanded="${collapsed?'false':'true'}" aria-controls="navGroup-${group}"><span>${esc(label)}</span><span class="navGroupChevron" aria-hidden="true"></span></button>`:'';
-    const links=items.map(([key,name,icon])=>`<button class="navLink ${state.view===key?'active':''}" type="button" onclick="goView('${key}')" ${state.view===key?'aria-current="page"':''} title="${esc(name)}"><span>${icon}</span><span class="navText">${esc(name)}</span></button>`).join('');
+    const links=items.map(([key,name,icon])=>{
+      const unavailable=navUnavailableReason(key);
+      return `<button class="navLink ${state.view===key?'active':''}" type="button" ${unavailable?'disabled aria-disabled="true" title="'+esc(unavailable)+'"':'onclick="goView(\''+key+'\')"'} ${state.view===key?'aria-current="page"':''}><span>${icon}</span><span class="navText">${esc(name)}</span></button>`;
+    }).join('');
     return `<section class="navGroup ${collapsed?'is-collapsed':''}" aria-label="${label||'Primary'}">${heading}<div class="navGroupLinks" ${label?`id="navGroup-${group}"`:''}>${links}</div></section>`;
   }).join('');
   const navEl=document.getElementById('appNav');
@@ -655,8 +748,8 @@ function nodeDrw(title,meta,tableHtml,actions){
 function fallbackCopy(t){
   const ta=document.createElement('textarea'); ta.value=t; ta.style.position='fixed'; ta.style.opacity='0';
   document.body.appendChild(ta); ta.select();
-  try{document.execCommand('copy');}catch(e){}
-  document.body.removeChild(ta);
+  let copied=false;try{copied=document.execCommand('copy');}catch(e){}
+  document.body.removeChild(ta);return copied;
 }
 function copyText2(t,btn){
   const done=()=>{ if(!btn)return; const old=btn.textContent; btn.textContent='copied'; btn.classList.add('ok');
@@ -816,8 +909,9 @@ window.addEventListener('keydown',e=>{if(e.key==='Escape'&&window.matchMedia('(m
 function render(){
   try{
     const scroller=$('#view'),keepScroll=(scroller&&window.__renderedView===state.view)?scroller.scrollTop:0;
-    buildNav();buildTList();buildStatusbar();updateChips();
-    const topicPane=document.getElementById('plist'),topicBtn=document.getElementById('topicBtn'),browsing=state.view==='databrowser';
+    updateBrokerPicker();buildNav();buildTList();buildStatusbar();updateChips();
+    const unavailableNav=navUnavailableReason(state.view),localOnlyView=['clusters','settings','security'].includes(state.view);
+    const topicPane=document.getElementById('plist'),topicBtn=document.getElementById('topicBtn'),browsing=state.view==='databrowser'&&!unavailableNav;
     if(topicPane){topicPane.hidden=!browsing;if(!browsing)topicPane.classList.remove('mobileOpen');}
     if(topicBtn){topicBtn.hidden=!browsing;topicBtn.setAttribute('aria-expanded',String(browsing&&topicPane.classList.contains('mobileOpen')));}
     const item=navItems.find(([k])=>k===state.view);
@@ -827,6 +921,9 @@ function render(){
       state.view==='databrowser'?`<button class="btn" style="padding:5px 12px;font-size:12px" onclick="goView('connections')">Connections</button>`:'');
     const v=$('#view');
     if(state.auth&&state.auth.enabled&&!state.auth.authenticated){v.innerHTML=viewLogin();bindLogin();}
+    else if(state.targetSwitching&&!['clusters','settings'].includes(state.view))v.innerHTML=targetSwitchingPanel();
+    else if(isTargetUnavailable()&&!localOnlyView)v.innerHTML=targetUnavailablePanel();
+    else if(unavailableNav&&!localOnlyView)v.innerHTML=unsupportedPanel(state.view);
     else if(state.view==='overview')v.innerHTML=viewOverview();
     else if(state.view==='connections')v.innerHTML=viewConnections();
     else if(state.view==='databrowser')v.innerHTML=viewDataBrowser();
@@ -889,7 +986,7 @@ window.doLogin=async function(){
     if(!r.ok){toast('Invalid credentials');return;}
     state.auth={enabled:true,authenticated:true};
     toast('Welcome, '+u);
-    await refresh();render();
+    await loadClusterList();if(!state.targetSwitching)await refresh();render();
   }catch(e){toast(e.message);}
 };
 window.logout=async function(){
@@ -1278,89 +1375,108 @@ function updatePosInfo(){
   if(first!=null)txt+=' \u00b7 window '+first+'-'+last;
   el.textContent=txt;
 }
-function toggleTail(){ state.tail=!state.tail; const b=$('#liveBtn'); if(b)b.innerHTML=state.tail?'<span class="live-dot"></span> Pause':'Live Tail'; if(!state.topic){state.tail=false;return;}
-  state.tailSkipped=0; state.pendingTail=0;
-  if(state.ws)state.ws.close();
-  if(!state.tail)return;
-  connectTail(); }
+function closeTailSocket(){
+  if(state.ws){state.ws.onclose=null;state.ws.onmessage=null;state.ws.onerror=null;state.ws.onopen=null;state.ws.close();state.ws=null;}
+  if(state.wsRetry){clearTimeout(state.wsRetry);state.wsRetry=null;}
+}
+function toggleTail(){
+  if(!state.topic){state.tail=false;const button=$('#liveBtn');if(button)button.textContent='Live Tail';return;}
+  if(isTargetUnavailable()||isKafkaTarget()){
+    state.tail=false;const button=$('#liveBtn');if(button)button.textContent='Live Tail';
+    toast(isTargetUnavailable()?targetUnavailableMessage():'Message browsing and live tail are not supported for Kafka targets.');return;
+  }
+  state.tail=!state.tail;const button=$('#liveBtn');if(button)button.innerHTML=state.tail?'<span class="live-dot"></span> Pause':'Live Tail';
+  closeTailSocket();if(!state.tail)return;
+  state.tailSkipped=0;state.pendingTail=0;connectTail();
+}
 window.toggleTail=toggleTail;
 
 /* Fitur 13: WebSocket auto-reconnect with exponential backoff */
 function connectTail(){
-  if(!state.tail)return;
-  const proto=location.protocol==='https:'?'wss':'ws';
-  const part=(!state.partition||state.partition==='all')?'all':state.partition;
-  const ws=new WebSocket(`${proto}://${location.host}/api/v1/topics/${encodeURIComponent(state.topic)}/tail?partition=${encodeURIComponent(part)}`);
-  state.ws=ws; state.retryCount=state.retryCount||0;
-  ws.onopen=()=>{state.retryCount=0;};
-  ws.onmessage=e=>{ const data=JSON.parse(e.data);
+  if(!state.tail||!state.topic)return;
+  const targetName=state.activeCluster,generation=state.targetGeneration;
+  if(targetName!=='local'){
+    const entry=activeTargetEntry();
+    if(!entry){state.tail=false;toast(targetUnavailableMessage());return;}
+    if((entry.kind||'').toLowerCase()==='kafka'){state.tail=false;toast('Message browsing and live tail are not supported for Kafka targets.');return;}
+  }
+  const proto=location.protocol==='https:'?'wss':'ws',part=(!state.partition||state.partition==='all')?'all':state.partition;
+  const apiPath=`/api/v1/topics/${encodeURIComponent(state.topic)}/tail?partition=${encodeURIComponent(part)}`;
+  const path=targetName==='local'?apiPath:`/api/v1/target/${encodeURIComponent(targetName)}${apiPath}`;
+  const ws=new WebSocket(`${proto}://${location.host}${path}`),isCurrent=()=>generation===state.targetGeneration&&targetName===state.activeCluster&&state.ws===ws;
+  state.ws=ws;state.retryCount=state.retryCount||0;
+  ws.onopen=()=>{if(isCurrent())state.retryCount=0;};
+  ws.onmessage=e=>{if(!isCurrent()||!state.tail)return;const data=JSON.parse(e.data);
     /* Bukan array = frame pemberitahuan: broker melewati pesan karena satu tick
        memuat lebih banyak daripada yang layak dikirim/ditampilkan. */
-    if(!Array.isArray(data)){ if(data&&data.skipped){ state.tailSkipped=(state.tailSkipped||0)+data.skipped; updateTailBar(); } return; }
-    const recs=data; if(!recs.length)return;
-    if(state.tailPaused){ state.pendingTail+=recs.length; updateTailBar(); return; }
-    const fresh=recs.slice().reverse();
-    state.msgs=[...fresh,...state.msgs]; if(state.msgs.length>MSGS_MAX)state.msgs=state.msgs.slice(0,MSGS_MAX);
+    if(!Array.isArray(data)){if(data&&data.skipped){state.tailSkipped=(state.tailSkipped||0)+data.skipped;updateTailBar();}return;}
+    const recs=data;if(!recs.length)return;
+    if(state.tailPaused){state.pendingTail+=recs.length;updateTailBar();return;}
+    const fresh=recs.slice().reverse();state.msgs=[...fresh,...state.msgs];if(state.msgs.length>MSGS_MAX)state.msgs=state.msgs.slice(0,MSGS_MAX);
     const rows=$('#rows');
     if(rows){
-      if(rows.classList.contains('virt')||state.msgs.length>=VIRT_MIN){
-        /* Naik ke mode berjendela begitu daftarnya besar (atau sudah berjendela):
-           potongannya kecil, jadi bangun ulang lebih murah dan lebih benar
-           daripada menyisipkan ribuan baris ke DOM. */
-        renderMsgRows();
-      }else{
-        fresh.forEach(m=>{ if(passesFilters(m))prependMsgRow(m); });
-        /* DOM dijaga sepadan dengan yang ditahan: baris terlama dibuang, jadi
-           jumlah baris tidak pernah melewati MSGS_MAX betapapun deras datanya. */
-        const want=filteredMsgs().length;
-        while(rows.children.length>want)rows.removeChild(rows.lastElementChild);
-      }
+      if(rows.classList.contains('virt')||state.msgs.length>=VIRT_MIN)renderMsgRows();
+      else{fresh.forEach(m=>{if(passesFilters(m))prependMsgRow(m);});const want=filteredMsgs().length;while(rows.children.length>want)rows.removeChild(rows.lastElementChild);}
     }
-    updateTailBar(); };
-  ws.onclose=()=>{ if(!state.tail)return; const delay=Math.min(1000*Math.pow(1.5,state.retryCount++),10000); state.wsRetry=setTimeout(connectTail,delay); };
-  ws.onerror=()=>{ ws.close(); };
+    updateTailBar();
+  };
+  ws.onclose=()=>{
+    if(!isCurrent())return;state.ws=null;if(!state.tail)return;
+    const delay=Math.min(1000*Math.pow(1.5,state.retryCount++),10000);
+    state.wsRetry=setTimeout(()=>{state.wsRetry=null;if(generation!==state.targetGeneration||targetName!==state.activeCluster||!state.tail||state.ws)return;connectTail();},delay);
+  };
+  ws.onerror=()=>{if(isCurrent())ws.close();};
 }
 function prependMsgRow(m){const rows=$('#rows');if(!rows)return;const tr=document.createElement('tr');tr.className='rowclick animate-row-entry';tr.innerHTML=rowHtml(m);tr.onclick=()=>insp(m);rows.prepend(tr);}
 
 /* Topics */
-function viewTopics(){ return `<div>${pageHeader('Topics','Create and inspect topics, partitions, and log positions.')}<div class="card"><div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;flex-wrap:wrap">
-  <div><div class="kicker">Namespace</div><div class="statXL">${(state.topics||[]).length}<small>topics</small></div></div>
-  <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input id="newT" placeholder="new topic name" style="max-width:220px"><input id="newP" type="number" min="1" max="64" value="1" title="Partitions" style="max-width:70px"><button class="btn" onclick="createTopic()">Create</button></div>
-  </div>
+function viewTopics(){
+  const readOnly=isKafkaTarget(),readOnlyNote='Kafka targets are read-only; topic mutations are disabled.',canDetail=!isKafkaTarget()||hasTargetCapability('topic.partitions.read'),detailUnavailable='Topic partition details are not supported by this Kafka target.';
+  const createControl=readOnly?`<button class="btn" disabled title="${readOnlyNote}">Create</button>`:`<input id="newT" placeholder="new topic name" style="max-width:220px"><input id="newP" type="number" min="1" max="64" value="1" title="Partitions" style="max-width:70px"><button class="btn" onclick="createTopic()">Create</button>`;
+  return `<div>${pageHeader('Topics','Create and inspect topics, partitions, and log positions.')}<div class="card"><div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap">
+    <div><div class="kicker">Namespace</div><div class="statXL">${(state.topics||[]).length}<small>topics</small></div></div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${createControl}</div>
+  </div>${readOnly?`<p class="muted" style="font-size:11px;margin-bottom:10px">${readOnlyNote}</p>`:''}
   <div class="tableScroll"><table><thead><tr><th class="sortable" onclick="sortRows('topics','name')">Topic<span class="sortInd">${sortInd('topics','name')}</span></th><th class="sortable" onclick="sortRows('topics','leo')">Log End<span class="sortInd">${sortInd('topics','leo')}</span></th><th class="sortable" onclick="sortRows('topics','size')">Size<span class="sortInd">${sortInd('topics','size')}</span></th><th>Partitions</th><th></th></tr></thead><tbody>
-  ${sortedTopics().map(t=>{const ps=t.partitions||[];const max=Math.max(1,...ps.map(p=>p.logEndOffset||0));const bars=ps.map(p=>`<div class="pbar" title="P${p.partition}: LEO ${p.logEndOffset||0}"><span style="width:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"></span></div>`).join('')||'<span class="muted">-</span>';const p=ps[0]||{};return `<tr><td class="mono"><a style="color:var(--primary-text);cursor:pointer" onclick="openTopicDetail('${esc(t.name)}')">${esc(t.name)}</a></td><td>${p.logEndOffset??0}</td><td>${fmtBytes(t.totalBytes||0)}</td><td style="min-width:90px">${bars}</td><td style="white-space:nowrap"><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="openTopicDetail('${esc(t.name)}')">Detail</button> <button class="btn danger" style="padding:4px 10px;font-size:11px" onclick="delTopic('${esc(t.name)}')">Delete</button></td></tr>`;}).join('')||'<tr><td colspan="5" class="muted" style="padding:20px">No topics yet. <button class="btn" style="padding:4px 12px;font-size:12px" onclick="document.getElementById(\'newT\').focus()">Create the first one</button></td></tr>'}
-  </tbody></table></div></div></div>`; }
+  ${sortedTopics().map(t=>{
+    const ps=t.partitions||[],max=Math.max(1,...ps.map(p=>p.logEndOffset||0));
+    const bars=ps.map(p=>`<div class="pbar" title="P${p.partition}: LEO ${p.logEndOffset||0}"><span style="width:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"></span></div>`).join('')||'<span class="muted">-</span>',p=ps[0]||{};
+    const topicLink=canDetail?`<a style="color:var(--primary-text);cursor:pointer" onclick="openTopicDetail('${esc(t.name)}')">${esc(t.name)}</a>`:`<span title="${detailUnavailable}">${esc(t.name)}</span>`;
+    const detail=canDetail?`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="openTopicDetail('${esc(t.name)}')">Detail</button>`:`<button class="btn ghost" disabled title="${detailUnavailable}">Detail</button>`;
+    const remove=readOnly?`<button class="btn danger" disabled title="${readOnlyNote}">Delete</button>`:`<button class="btn danger" style="padding:4px 10px;font-size:11px" onclick="delTopic('${esc(t.name)}')">Delete</button>`;
+    return `<tr><td class="mono">${topicLink}</td><td>${p.logEndOffset??0}</td><td>${fmtBytesOpt(t.totalBytes)}</td><td style="min-width:90px">${bars}</td><td><div class="clRowActions">${detail}${remove}</div></td></tr>`;
+  }).join('')||`<tr><td colspan="5" class="muted" style="padding:20px">No topics yet.${readOnly?'':' <button class="btn" style="padding:4px 12px;font-size:12px" onclick="document.getElementById(\'newT\').focus()">Create the first one</button>'}</td></tr>`}
+  </tbody></table></div></div></div>`;
+}
 window.openTopic=async n=>{state.topic=n;state.partition='all';await goView('databrowser');loadMsgs();};
-window.openTopicDetail=async n=>{state.view='topics';state.topicDetail=n;render();loadTopicDetail();};
-async function loadTopicDetail(){ if(!state.topicDetail)return; try{
-  state.topicParts=await api(`/api/v1/topics/${encodeURIComponent(state.topicDetail)}/partitions`);
-  render();
-}catch(e){toast(e.message);} }
+window.openTopicDetail=async n=>{
+  if(isTargetUnavailable()){toast(targetUnavailableMessage());return;}
+  if(isKafkaTarget()&&!hasTargetCapability('topic.partitions.read')){toast('Topic partition details are not supported by this Kafka target.');return;}
+  state.view='topics';state.topicDetail=n;state.topicParts=[];state.topicCfg=null;render();loadTopicDetail();
+};
+async function loadTopicDetail(){
+  const generation=state.targetGeneration,name=state.topicDetail;if(!name)return;
+  try{const parts=await api(`/api/v1/topics/${encodeURIComponent(name)}/partitions`);if(generation!==state.targetGeneration||name!==state.topicDetail)return;state.topicParts=parts;render();}
+  catch(e){if(generation!==state.targetGeneration||e.staleTargetResponse)return;toast(e.message);}
+}
 window.loadTopicDetail=loadTopicDetail;
-function viewTopicDetail(){ const t=state.topicDetail; if(!t)return '';
-  const ps=state.topicParts||[];
-  const max=Math.max(1,...ps.map(p=>Math.max(p.logEndOffset,p.highWatermark)));
-  const bars=ps.map(p=>{const leo=((p.logEndOffset||0)/max)*100;const hwm=((p.highWatermark||0)/max)*100;
-    return `<div style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;margin-bottom:4px"><span>P${p.partition}</span><span class="muted">LEO ${p.logEndOffset} / HWM ${p.highWatermark} / earliest ${p.earliestOffset}</span></div>
-      <div class="pbar" style="height:14px"><span style="width:${leo}%"></span></div>
-      <div class="pbar" style="height:6px;margin-top:2px"><span style="width:${hwm}%;background:var(--live)"></span></div>
-      <div class="muted" style="font-size:10px;margin-top:4px">${fmtBytes(p.bytes)} &middot; ${(p.segments||[]).length} segment(s)</div>
-      <div style="margin-top:6px;display:flex;gap:6px">
-        <button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="truncateTopic(${p.partition})">Truncate</button>
-      </div>
-    </div>`;}).join('');
-  return `<div>${pageHeader(esc(t),'Partition offsets, watermarks, and compaction controls.')}<div class="card">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-      <h3 style="font-size:15px">${esc(t)}</h3>
-      <span class="badge ${state.topicCfg&&state.topicCfg.compacted?'b-purple':'b-amber'}">${state.topicCfg&&state.topicCfg.compacted?'cleanup.policy=compact':'cleanup.policy=delete'}</span>
-      <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="toggleTopicCompact()">${state.topicCfg&&state.topicCfg.compacted?'Disable compaction':'Enable compaction'}</button>
-      <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="compactTopic()">Compact now</button>
-      <button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.topicDetail=null;render()">Back</button>
-    </div>
-    <div style="margin-bottom:6px" class="muted">LEO (log end) vs HWM (high watermark) per partition</div>
-    ${bars||'<div class="muted">No partitions</div>'}
-  </div></div>`; }
+function viewTopicDetail(){
+  const t=state.topicDetail;if(!t)return '';
+  const readOnly=isKafkaTarget(),reason='Kafka targets are read-only; topic mutations are disabled.',ps=state.topicParts||[];
+  const max=Math.max(1,...ps.map(p=>Math.max(p.logEndOffset||0,p.highWatermark||0)));
+  const bars=ps.map(p=>{const leo=((p.logEndOffset||0)/max)*100,hwm=((p.highWatermark||0)/max)*100;
+    return `<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;margin-bottom:4px"><span>P${p.partition}</span><span class="muted">LEO ${p.logEndOffset??'n/a'} / HWM ${p.highWatermark??'n/a'} / earliest ${p.earliestOffset??'n/a'}</span></div>
+      <div class="pbar" style="height:14px"><span style="width:${leo}%"></span></div><div class="pbar" style="height:6px;margin-top:2px"><span style="width:${hwm}%;background:var(--live)"></span></div>
+      <div class="muted" style="font-size:10px;margin-top:4px">${fmtBytesOpt(p.bytes)} &middot; ${(p.segments||[]).length} segment(s)</div><div style="margin-top:6px;display:flex;gap:6px">${readOnly?`<button class="btn ghost" disabled title="${reason}">Truncate</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="truncateTopic(${p.partition})">Truncate</button>`}</div></div>`;
+  }).join('');
+  const policy=readOnly?'cleanup.policy unavailable':(state.topicCfg&&state.topicCfg.compacted?'cleanup.policy=compact':'cleanup.policy=delete');
+  return `<div>${pageHeader(esc(t),'Partition offsets, watermarks, and compaction controls.')}<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+    <h3 style="font-size:15px">${esc(t)}</h3><span class="badge ${state.topicCfg&&state.topicCfg.compacted?'b-purple':'b-amber'}">${policy}</span>
+    ${readOnly?`<button class="btn ghost" disabled title="${reason}">Enable/disable compaction</button><button class="btn ghost" disabled title="${reason}">Compact now</button>`:`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="toggleTopicCompact()">${state.topicCfg&&state.topicCfg.compacted?'Disable compaction':'Enable compaction'}</button><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="compactTopic()">Compact now</button>`}
+    <button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.topicDetail=null;render()">Back</button></div>
+    ${readOnly?`<p class="muted" style="font-size:11px;margin-bottom:8px">${reason}</p>`:''}<div style="margin-bottom:6px" class="muted">LEO (log end) vs HWM (high watermark) per partition</div>${bars||'<div class="muted">No partitions</div>'}
+  </div></div>`;
+}
 window.truncateTopic=async function(p){const o=prompt('Truncate partition '+p+' to offset:');if(o===null)return;try{await api(`/api/v1/topics/${encodeURIComponent(state.topicDetail)}/truncate`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({partition:p,offset:parseInt(o,10)})});toast('Truncated');loadTopicDetail();}catch(e){toast(e.message);}};
 window.compactTopic=async function(){try{await api(`/api/v1/topics/${encodeURIComponent(state.topicDetail)}/compact`,{method:'POST'});toast('Compaction triggered');}catch(e){toast(e.message);}};
 async function createTopic(){const n=$('#newT').value;if(!n)return;const parts=Math.max(1,Math.min(64,parseInt($('#newP')?.value||'1',10)||1));try{await api('/api/v1/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,partitions:parts})});toast('Created '+n+' ('+parts+'p)');await refresh();render();}catch(e){toast(e.message);}}
@@ -1369,46 +1485,53 @@ async function delTopic(n){if(!confirm('Delete topic '+n+'?'))return;try{await a
 window.delTopic=delTopic;
 
 /* Groups */
-function viewGroups(){ if(!(state.groups||[]).length)return `<div>${pageHeader('Consumer Groups','Review consumer membership, offsets, and lag.')}<div class="card" style="padding:32px;text-align:center"><div class="muted" style="margin-bottom:12px">No consumer groups yet.</div><button class="btn" onclick="goView('databrowser')">Browse data to create one</button></div></div>`;
-  return `<div>${pageHeader('Consumer Groups','Review consumer membership, offsets, and lag.')}<div class="card"><div class="tableScroll"><table><thead><tr><th class="sortable" onclick="sortRows('groups','name')">Group<span class="sortInd">${sortInd('groups','name')}</span></th><th>State</th><th class="sortable" onclick="sortRows('groups','members')">Members<span class="sortInd">${sortInd('groups','members')}</span></th><th class="sortable" onclick="sortRows('groups','lag')">Lag<span class="sortInd">${sortInd('groups','lag')}</span></th><th></th></tr></thead><tbody>
-  ${sortedGroups().map(g=>{const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0);return `<tr class="rowclick" onclick="openGroup('${esc(g.name)}')"><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span></td><td class="mono">${(g.members||[]).join(', ')||'-'}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td><td style="white-space:nowrap"><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();exportGroupOffsets('${esc(g.name)}')" title="Export offset snapshot">Export</button> <button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();importGroupOffsets('${esc(g.name)}')" title="Import offset snapshot">Import</button> <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();delGroup('${esc(g.name)}')">Delete</button></td></tr>`;}).join('')}
-  </tbody></table></div></div></div>`; }
-window.openGroup=async g=>{state.group=g;location.hash='#/groups/'+encodeURIComponent(g);render();loadGroupDetail();};
-async function loadGroupDetail(){ if(!state.group)return; try{
-  state.groupDetail=await api(`/api/v1/groups/${encodeURIComponent(state.group)}`);
-  // lag history sampling untuk sparkline
-  const lag=((state.groupDetail.offsets)||[]).reduce((a,o)=>a+(o.lag||0),0);
-  state.lagHist=state.lagHist||{}; const h=(state.lagHist[state.group]=state.lagHist[state.group]||[]);
-  h.push(lag); if(h.length>60)h.shift();
-  render();
-}catch(e){toast(e.message);} }
-window.loadGroupDetail=loadGroupDetail;
-function viewGroupDetail(){ const g=state.groupDetail; if(!g)return '<div class="card">'+skel(140)+' '+skel(90)+' '+skel(60)+'</div>';
-  const lagRows=((g.offsets)||[]).map(o=>`<tr><td class="mono">${esc(o.topic)}</td><td>${o.partition}</td><td>${o.current_offset}</td><td>${o.log_end_offset}</td><td><span class="badge ${o.lag>0?'b-amber':'b-green'}">${o.lag}</span></td>
-    <td><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="resetGroupOffset('${esc(o.topic)}',${o.partition})">Reset</button></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No committed offsets</td></tr>';
-  const members=(g.members||[]).map(m=>`<div class="chip" style="padding:3px 10px;margin:2px">${esc(m.member_id)}${m.client_host?' @ '+esc(m.client_host):''}</div>`).join('')||'<span class="muted">-</span>';
-  const lh=(state.lagHist||{})[g.group_id]||[];
-  const maxLag=Math.max(1,...lh);
-  const spark=lh.length>1?`<div class="spark" title="Lag history (last ${lh.length} polls)">${lh.map(v=>`<span style="height:${Math.max(3,v/maxLag*100)}%"></span>`).join('')}</div>`:'';
-  return `<div>${pageHeader(esc(g.group_id),'Consumer membership and committed offsets.')}<div class="card">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-      <h3 style="font-size:15px">${esc(g.group_id)}</h3>
-      <span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span>
-      <button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.group=null;location.hash='#/groups';">Back</button>
-    </div>
-    <div class="muted" style="margin-bottom:14px">Protocol: ${esc(g.protocol||'range')} &middot; ${(g.members||[]).length} member(s)</div>
-    <div style="margin-bottom:16px">${members}</div>
-    ${spark}
-    ${tableScroll(`<table><thead><tr><th>Topic</th><th>Partition</th><th>Current</th><th>Log End</th><th>Lag</th><th></th></tr></thead><tbody>${lagRows}</tbody></table>`)}
-  </div></div>`; }
-window.resetGroupOffset=async function(topic,part){
-  const strategy=prompt('Reset strategy (to_earliest | to_latest | to_offset):','to_latest');
-  if(!strategy)return;
-  const body={topic,partition:part,strategy};
-  if(strategy==='to_offset'){const o=prompt('Target offset:');if(o===null)return;body.target_offset=parseInt(o,10);}
-  try{await api(`/api/v1/groups/${encodeURIComponent(state.group)}/offsets/reset`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast('Offset reset');loadGroupDetail();}catch(e){toast(e.message);}
+function viewGroups(){
+  const readOnly=isKafkaTarget(),readOnlyNote='Kafka consumer groups are read-only; offset import/reset and deletion are disabled.',canDetail=!isKafkaTarget()||hasTargetCapability('group.detail.read'),detailUnavailable='Consumer group details are not supported by this Kafka target.';
+  if(!(state.groups||[]).length)return `<div>${pageHeader('Consumer Groups','Review consumer membership, offsets, and lag.')}<div class="card" style="padding:32px;text-align:center"><div class="muted">No consumer groups reported by this broker.</div>${readOnly?`<p class="muted" style="font-size:11px;margin-top:10px">${readOnlyNote}</p>`:''}</div></div>`;
+  return `<div>${pageHeader('Consumer Groups','Review consumer membership, offsets, and lag.')}<div class="card">${readOnly?`<p class="muted" style="font-size:11px;margin-bottom:10px">${readOnlyNote}</p>`:''}<div class="tableScroll"><table><thead><tr><th class="sortable" onclick="sortRows('groups','name')">Group<span class="sortInd">${sortInd('groups','name')}</span></th><th>State</th><th class="sortable" onclick="sortRows('groups','members')">Members<span class="sortInd">${sortInd('groups','members')}</span></th><th class="sortable" onclick="sortRows('groups','lag')">Lag<span class="sortInd">${sortInd('groups','lag')}</span></th><th></th></tr></thead><tbody>
+  ${sortedGroups().map(g=>{
+    const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0),memberText=Array.isArray(g.members)?(g.members.join(', ')||'-'):'n/a',rowAttrs=canDetail?`class="rowclick" onclick="openGroup('${esc(g.name)}')"`:`title="${detailUnavailable}"`;
+    const detail=canDetail?'':`<button class="btn ghost" disabled title="${detailUnavailable}">Details</button>`;
+    const mutations=readOnly?`<button class="btn ghost" disabled title="Group offset export is not supported by Kafka targets">Export</button><button class="btn ghost" disabled title="${readOnlyNote}">Import</button><button class="btn danger" disabled title="${readOnlyNote}">Delete</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();exportGroupOffsets('${esc(g.name)}')" title="Export offset snapshot">Export</button><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();importGroupOffsets('${esc(g.name)}')" title="Import offset snapshot">Import</button><button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();delGroup('${esc(g.name)}')">Delete</button>`;
+    return `<tr ${rowAttrs}><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span></td><td class="mono">${memberText}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td><td><div class="clRowActions">${detail}${mutations}</div></td></tr>`;
+  }).join('')}
+  </tbody></table></div></div></div>`;
+}
+window.openGroup=async g=>{
+  if(isTargetUnavailable()){toast(targetUnavailableMessage());return;}
+  if(isKafkaTarget()&&!hasTargetCapability('group.detail.read')){toast('Consumer group details are not supported by this Kafka target.');return;}
+  state.group=g;state.groupDetail=null;location.hash='#/groups/'+encodeURIComponent(g);render();loadGroupDetail();
 };
-window.delGroup=async function(g){if(!confirm('Delete group '+g+'?'))return;try{await api('/api/v1/groups/'+encodeURIComponent(g),{method:'DELETE'});toast('Deleted '+g);await refresh();render();}catch(e){toast(e.message);}};
+async function loadGroupDetail(){
+  const generation=state.targetGeneration,name=state.group;if(!name)return;
+  try{const detail=await api(`/api/v1/groups/${encodeURIComponent(name)}`);if(generation!==state.targetGeneration||name!==state.group)return;state.groupDetail=detail;
+    const lag=((detail.offsets)||[]).reduce((a,o)=>a+(o.lag||0),0);state.lagHist=state.lagHist||{};const h=(state.lagHist[name]=state.lagHist[name]||[]);h.push(lag);if(h.length>60)h.shift();render();
+  }catch(e){if(generation!==state.targetGeneration||e.staleTargetResponse)return;toast(e.message);}
+}
+window.loadGroupDetail=loadGroupDetail;
+function viewGroupDetail(){
+  const g=state.groupDetail;if(!g)return '<div class="card">'+skel(140)+' '+skel(90)+' '+skel(60)+'</div>';
+  const readOnly=isKafkaTarget(),reason='Kafka consumer groups are read-only; offset reset is disabled.';
+  const lagRows=((g.offsets)||[]).map(o=>`<tr><td class="mono">${esc(o.topic)}</td><td>${o.partition}</td><td>${o.current_offset}</td><td>${o.log_end_offset}</td><td><span class="badge ${o.lag>0?'b-amber':'b-green'}">${o.lag}</span></td><td>${readOnly?`<button class="btn ghost" disabled title="${reason}">Reset</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="resetGroupOffset('${esc(o.topic)}',${o.partition})">Reset</button>`}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">No committed offsets</td></tr>';
+  const memberRecords=Array.isArray(g.members)?g.members:null;
+  const members=memberRecords?memberRecords.map(m=>`<div class="chip" style="padding:3px 10px;margin:2px">${esc(m.member_id)}${m.client_host?' @ '+esc(m.client_host):''}</div>`).join('')||'<span class="muted">No members reported.</span>':'<span class="muted">Member details unavailable.</span>';
+  const memberCount=memberRecords?`${memberRecords.length} member(s)`:'n/a (member details unavailable)';
+  const lh=(state.lagHist||{})[g.group_id]||[],maxLag=Math.max(1,...lh),spark=lh.length>1?`<div class="spark" title="Lag history (last ${lh.length} polls)">${lh.map(v=>`<span style="height:${Math.max(3,v/maxLag*100)}%"></span>`).join('')}</div>`:'';
+  return `<div>${pageHeader(esc(g.group_id),'Consumer membership and committed offsets.')}<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap"><h3 style="font-size:15px">${esc(g.group_id)}</h3><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span><button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.group=null;state.groupDetail=null;location.hash='#/groups';">Back</button></div>
+    <div class="muted" style="margin-bottom:14px">Protocol: ${esc(g.protocol||'range')} &middot; ${memberCount}</div><div style="margin-bottom:16px">${members}</div>${spark}${readOnly?`<p class="muted" style="font-size:11px;margin:8px 0">${reason}</p>`:''}${tableScroll(`<table><thead><tr><th>Topic</th><th>Partition</th><th>Current</th><th>Log End</th><th>Lag</th><th></th></tr></thead><tbody>${lagRows}</tbody></table>`)}</div></div>`;
+}
+window.resetGroupOffset=async function(topic,part){
+  const strategy=prompt('Reset strategy (to_earliest | to_latest | to_offset):','to_latest');if(!strategy)return;
+  const group=state.group,generation=state.targetGeneration,body={topic,partition:part,strategy};
+  if(strategy==='to_offset'){const offset=prompt('Target offset:');if(offset===null)return;body.target_offset=parseInt(offset,10);}
+  try{await api(`/api/v1/groups/${encodeURIComponent(group)}/offsets/reset`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(generation!==state.targetGeneration||group!==state.group)return;toast('Offset reset');loadGroupDetail();}
+  catch(e){if(generation!==state.targetGeneration||e.staleTargetResponse)return;toast(e.message);}
+};
+window.delGroup=async function(g){
+  if(!confirm('Delete group '+g+'?'))return;const generation=state.targetGeneration;
+  try{await api('/api/v1/groups/'+encodeURIComponent(g),{method:'DELETE'});if(generation!==state.targetGeneration)return;toast('Deleted '+g);await refresh();if(generation===state.targetGeneration)render();}
+  catch(e){if(generation!==state.targetGeneration||e.staleTargetResponse)return;toast(e.message);}
+};
 
 /* Producer Studio */
 function viewProducer(){ const opts=(state.topics||[]).map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
@@ -1429,16 +1552,6 @@ async function sendMsg(){ const body={value:$('#pValue').value,key:$('#pKey').va
   if(btn){btn.disabled=false;btn.textContent='Publish Message';} }
 window.sendMsg=sendMsg;
 
-/* Fitur 4.6: Multi-Cluster Switcher */
-function clusterList(){ return JSON.parse(localStorage.getItem('pk_clusters')||'[]'); }
-function clusterSwitcherHtml(){
-  const cl=clusterList();
-  const current=state.cluster?.clusterId||'current';
-  const opts=cl.map(c=>`<option value="${esc(JSON.stringify(c))}">${esc(c.name)} (${esc(c.broker)})</option>`).join('');
-  return `<select id="clusterSel" style="width:150px;font-size:11px;border:none;background:transparent;padding:3px 4px" title="Cluster" onchange="switchCluster(this.value)"><option value="">${esc(current)}</option>${opts}</select>`;
-}
-window.switchCluster=function(json){ if(!json)return; const c=JSON.parse(json); toast('Switching to '+c.name+' (demo: single-broker build)'); };
-window.addCluster=function(){ const nm=prompt('Cluster name:','Local Docker'); const bk=prompt('Broker address:','localhost:9092'); if(!nm)return; const cl=clusterList(); cl.push({name:nm,broker:bk}); localStorage.setItem('pk_clusters',JSON.stringify(cl)); render(); };
 
 /* Fitur 4.1: Developer Studio */
 function viewDevStudio(){
@@ -1531,24 +1644,49 @@ window.schemaDiff=function(subj,ver){ const el=document.getElementById('schVersi
 function fmtSchema(s){ try{return JSON.stringify(JSON.parse(s),null,2);}catch(e){return s;} }
 
 /* Fitur 4.5: Security & ACL + Audit */
+function delegatedTokenCard(){return `<div class="card"><h3>Delegated dashboard credentials</h3>
+  <p class="muted" style="font-size:11px;margin:6px 0 10px">On the destination broker, issue a token for an existing security user with the required ACLs. The current signed-in user must have cluster Admin permission. Copy the raw token once, then paste it into the source dashboard's local Clusters form as the peer's Dashboard access token. This is separate from the read-only Health token.</p>
+  <div class="row" style="align-items:flex-end;gap:8px;flex-wrap:wrap"><div><label for="delegatePrincipal">Existing security username</label><input id="delegatePrincipal" autocomplete="off" placeholder="configured username"></div><button class="btn" onclick="issueDelegatedToken()">Issue token</button><button class="btn ghost" onclick="loadDelegatedTokens()">Refresh tokens</button></div>
+  <div id="delegatedTokenOnce" aria-live="polite"></div>
+  <div id="delegatedTokenList" class="muted" style="margin-top:12px">Loading delegated tokens...</div>
+  </div>`;}
 function viewSecurity(){
-  return `<div>${pageHeader('Security & ACL','Manage broker access rules and review the audit trail.')}
-    <div class="card"><div class="row"><h3 style="margin-right:10px">Visual ACL Manager</h3>
-      <button class="btn" onclick="addACLRow()">+ Add ACL</button>
-      <button class="btn ghost" onclick="loadACLs()">Refresh</button></div>
-      <div class="muted" style="font-size:11px;margin:6px 0 10px">Grant Read / Write / Admin per topic or group. Changes are stored in-memory on the broker.</div>
-      <div class="tableScroll"><div id="aclOut" class="muted">Loading...</div></div></div>
-    <div class="card"><h3>Audit Trail</h3>
-      <button class="btn ghost" style="margin-bottom:10px" onclick="loadAudit()">Refresh audit log</button>
-      ${tableScroll(`<table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Detail</th></tr></thead><tbody id="auditBody"><tr><td colspan="5" class="muted">No activity yet.</td></tr></tbody></table>`)}</div>
-  </div>`; }
+  const aclAvailable=!isTargetUnavailable()&&!isKafkaTarget();
+  const aclPanel=aclAvailable?`<div class="card"><div class="row"><h3 style="margin-right:10px">Visual ACL Manager</h3><button class="btn" onclick="addACLRow()">+ Add ACL</button><button class="btn ghost" onclick="loadACLs()">Refresh</button></div>
+      <div class="muted" style="font-size:11px;margin:6px 0 10px">Grant Read / Write / Admin per topic or group. Changes are stored in-memory on the selected broker.</div><div class="tableScroll"><div id="aclOut" class="muted">Loading...</div></div></div>
+    <div class="card"><h3>Audit Trail</h3><button class="btn ghost" style="margin:10px 0" onclick="loadAudit()">Refresh audit log</button>${tableScroll(`<table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th><th>Detail</th></tr></thead><tbody id="auditBody"><tr><td colspan="5" class="muted">No activity yet.</td></tr></tbody></table>`)}</div>`
+    :`<div class="card" role="status"><h3>Broker ACL unavailable</h3><p class="muted" style="margin-top:8px">${isTargetUnavailable()?esc(targetUnavailableMessage()):'ACL administration is not supported for read-only Kafka targets.'} Delegated token administration below remains local to this dashboard.</p></div>`;
+  return `<div>${pageHeader('Security & ACL','Manage local delegated credentials and the selected broker access rules.')}${delegatedTokenCard()}${aclPanel}</div>`;
+}
 async function loadACLs(){ const out=document.getElementById('aclOut'); if(!out)return; try{ const acls=await api('/api/v1/acls'); const principals=[...new Set((acls||[]).map(a=>a.principal))]; const resources=[...new Set((acls||[]).map(a=>a.resourceName))]; out.innerHTML=`<div class="tableScroll"><table><thead><tr><th>Principal</th><th>Resource</th><th>Read</th><th>Write</th><th>Admin</th><th></th></tr></thead><tbody>${(acls||[]).map(a=>`<tr><td class="mono">${esc(a.principal)}</td><td class="mono">${esc(a.resourceType)}:${esc(a.resourceName)}</td>${['Read','Write','Admin'].map(o=>`<td><button class="toggle ${a.operations.includes(o)?'on':''}" onclick="toggleOp('${esc(a.principal)}','${esc(a.resourceType)}','${esc(a.resourceName)}','${o}')" title="${o}"></button></td>`).join('')}<td><button class="btn danger" style="padding:2px 8px;font-size:11px" onclick="delACL('${esc(a.principal)}','${esc(a.resourceType)}','${esc(a.resourceName)}')">Delete</button></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No ACLs defined.</td></tr>'}</tbody></table></div>`; }catch(e){out.textContent='error: '+e.message;} }
 window.addACLRow=function(){ const el=document.createElement('div'); el.innerHTML=`<div class="overlay"><div class="modal"><h3>Add ACL</h3><label>Principal (user)</label><input id="aUser" placeholder="app-writer"><label>Resource type</label><select id="aType"><option value="topic">topic</option><option value="group">group</option></select><label>Resource name</label><input id="aName" placeholder="orders"><div style="margin-top:14px;display:flex;gap:8px"><button class="btn" onclick="aclsave()">Add</button><button class="btn ghost" onclick="closeOverlay()">Cancel</button></div></div></div>`; document.body.appendChild(el); };
 window.aclsave=async function(){ const u=document.getElementById('aUser').value,t=document.getElementById('aType').value,n=document.getElementById('aName').value; if(!u||!n){toast('principal and resource required');return;} try{ await api('/api/v1/acls',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({principal:u,resourceType:t,resourceName:n,operations:['Read']})}); closeOverlay(); loadACLs(); loadAudit(); }catch(e){toast(e.message);} };
 window.toggleOp=async function(p,rt,rn,op){ try{ const acls=await api('/api/v1/acls'); const rule=acls.find(a=>a.principal===p&&a.resourceType===rt&&a.resourceName===rn); const ops=(rule&&rule.operations)||[]; const has=ops.includes(op); const next=has?ops.filter(x=>x!==op):[...ops,op]; await api('/api/v1/acls',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({principal:p,resourceType:rt,resourceName:rn,operations:next})}); loadACLs(); }catch(e){toast(e.message);} };
 window.delACL=async function(p,rt,rn){ try{ await api('/api/v1/acls',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({principal:p,resourceType:rt,resourceName:rn})}); loadACLs(); loadAudit(); }catch(e){toast(e.message);} };
 async function loadAudit(){ const b=document.getElementById('auditBody'); if(!b)return; try{ const log=await api('/api/v1/audit'); b.innerHTML=log.map(e=>`<tr><td class="mono">${new Date(e.time).toISOString()}</td><td>${esc(e.actor)}</td><td class="chip">${esc(e.action)}</td><td class="mono">${esc(e.resource)}</td><td>${esc(e.detail)}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">No activity yet.</td></tr>'; }catch(e){b.innerHTML='<tr><td colspan="5" class="muted">error</td></tr>';} }
-window.refreshSecurity=function(){loadACLs();loadAudit();};
+window.refreshSecurity=function(){loadDelegatedTokens();if(!isKafkaTarget()&&!isTargetUnavailable()){loadACLs();loadAudit();}};
+async function loadDelegatedTokens(){
+  const out=document.getElementById('delegatedTokenList');if(!out)return;
+  try{const tokens=await apiLocal('/api/v1/auth/delegated-tokens');out.innerHTML=`<div class="tableScroll"><table><thead><tr><th>Token ID</th><th>Principal</th><th></th></tr></thead><tbody>${(tokens||[]).map(t=>`<tr><td class="mono">${esc(t.id)}</td><td>${esc(t.principal)}</td><td><button class="btn ghost" onclick="revokeDelegatedToken(${jsArg(t.id)})">Revoke</button></td></tr>`).join('')||'<tr><td colspan="3" class="muted">No delegated tokens issued.</td></tr>'}</tbody></table></div>`;}
+  catch(e){out.textContent='Cannot load delegated tokens: '+e.message;}
+}
+window.issueDelegatedToken=async function(){
+  const principal=(document.getElementById('delegatePrincipal')?.value||'').trim();if(!principal){toast('Enter an existing security username');return;}
+  try{const issued=await apiLocal('/api/v1/auth/delegated-tokens',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({principal})});
+    const host=document.getElementById('delegatedTokenOnce');if(host){const box=document.createElement('div');box.className='card';box.style.marginTop='12px';const title=document.createElement('strong');title.textContent='Copy this token now; it cannot be shown again.';const raw=document.createElement('code');raw.id='issuedDelegatedToken';raw.textContent=issued.token;raw.style.cssText='display:block;overflow-wrap:anywhere;margin:8px 0;font-family:var(--font-mono)';const actions=document.createElement('div');actions.className='row';actions.innerHTML='<button class="btn" onclick="copyIssuedDelegatedToken()">Copy token</button><button class="btn ghost" onclick="document.getElementById(\'delegatedTokenOnce\').replaceChildren()">Hide token</button>';box.append(title,raw,actions);host.replaceChildren(box);}
+    const input=document.getElementById('delegatePrincipal');if(input)input.value='';loadDelegatedTokens();
+  }catch(e){toast(e.message);}
+};
+window.copyIssuedDelegatedToken=async function(){
+  const raw=document.getElementById('issuedDelegatedToken');if(!raw)return;
+  let copied=false;
+  try{if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(raw.textContent);copied=true;}}catch(e){}
+  if(!copied)copied=fallbackCopy(raw.textContent);
+  if(!copied){toast('Clipboard access failed; select and copy the displayed token manually.');return;}
+  document.getElementById('delegatedTokenOnce')?.replaceChildren();
+  toast('Delegated token copied. Paste it into the source Clusters form.');
+};
+window.revokeDelegatedToken=async function(id){if(!id||!confirm('Revoke delegated token '+id+'?'))return;try{await apiLocal('/api/v1/auth/delegated-tokens/'+encodeURIComponent(id),{method:'DELETE'});toast('Delegated token revoked');loadDelegatedTokens();}catch(e){toast(e.message);}};
 
 /* Fitur 4.6: In-App Health Alarms */
 function activeAlerts(){
@@ -1670,7 +1808,7 @@ function sortedHealthTopics(){const s=state.sort.health;const arr=((healthData&&
     else {va=a.lastAppendAgeMs??Infinity;vb=b.lastAppendAgeMs??Infinity;}
     return (va>vb?1:va<vb?-1:0)*mul; }); }
 /* Overview consumes only the existing /api/v1/health/overview response. */
-let overviewTimer=null,overviewData=null,overviewErr=null,overviewLoading=true,overviewRequest=false;
+let overviewTimer=null,overviewData=null,overviewErr=null,overviewLoading=true,overviewRequest=false,overviewRequestGeneration=null;
 function overviewSpark(values,title){
   const vals=(values||[]).map(v=>Number(v)).filter(Number.isFinite);
   if(vals.length<2)return '<div class="muted" style="padding:10px 0" role="status">Not enough broker history yet to show a trend.</div>';
@@ -1697,7 +1835,7 @@ function viewOverview(){
     const warmup=s.warmup===true?`<div class="statSub" style="margin-top:6px">Broker sampling is warming up (${count(s.samples)} samples, ${Number.isFinite(s.ageSeconds)?Math.max(0,Math.floor(s.ageSeconds)):0}s elapsed).</div>`:'';
     const lag=Number.isFinite(c.lag)?count(c.lag):'n/a';
     content=`
-      <div id="overviewHead" class="pageHeading"><div><h2>Overview</h2><p>Broker health, active issues, traffic, and consumer lag.</p></div><div class="statSub" style="margin-left:auto">${esc(healthClusterLabel())} · updated ${rel(d.generatedAtMs)}</div></div>
+      <div id="overviewHead" class="pageHeading"><div><h2>Overview</h2><p>Broker health, active issues, traffic, and consumer lag.</p></div><div class="statSub" style="margin-left:auto">${esc(activeClusterLabel())} · updated ${rel(d.generatedAtMs)}</div></div>
       <div id="overviewTop" class="overviewTop"><section class="card" aria-labelledby="overviewHealthTitle"><div class="kicker">Operations</div><h3 id="overviewHealthTitle">Broker health</h3><div class="row" style="margin-top:10px;justify-content:space-between"><span class="mono">${esc(c.clusterId||'Broker identity unavailable')}</span>${hStatusBadge(c.status||'unknown')}</div>${Array.isArray(c.reasons)&&c.reasons.length?`<div class="overviewAttention">${c.reasons.map(r=>`<div class="overviewIssue"><span class="mono">${esc(r.severity||'status')}</span><span class="muted">${esc(r.message||'')}</span></div>`).join('')}</div>`:''}<div class="overviewLinks"><a class="btn ghost" href="#/health">Open Health</a><a class="btn ghost" href="#/clusters">View Clusters</a></div></section>
       <section class="card"><div class="row" style="justify-content:space-between"><h3>Needs attention</h3><span class="mono">${att.length} ${att.length===1?'topic':'topics'}</span></div><div class="overviewAttention">${issues}</div></section></div>
       <dl id="overviewFacts" class="overviewFacts" aria-label="Broker summary"><div class="overviewFact"><dt>Broker status</dt><dd>${esc(c.status||'n/a')}</dd></div><div class="overviewFact"><dt>Active topic issues</dt><dd>${att.length}</dd></div><div class="overviewFact"><dt>Throughput</dt><dd>${rate}<small style="font-size:10px;color:var(--muted)"> msg/s</small></dd></div><div class="overviewFact"><dt>Consumer lag</dt><dd>${lag}</dd></div></dl>
@@ -1720,12 +1858,13 @@ function patchOverview(){
   return true;
 }
 async function loadOverview(){
-  if(overviewRequest||state.view!=='overview')return;
-  overviewRequest=true;
-  try{overviewData=await api('/api/v1/health/overview?window='+healthWindow+'&cluster='+encodeURIComponent(state.healthCluster||'local'));overviewErr=null;}
-  catch(e){overviewErr=e&&e.message?e.message:String(e);}
-  finally{overviewLoading=false;overviewRequest=false;}
-  if(state.view!=='overview')return;
+  const generation=state.targetGeneration;
+  if((overviewRequest&&overviewRequestGeneration===generation)||state.view!=='overview')return;
+  overviewRequest=true;overviewRequestGeneration=generation;
+  try{const data=await api(healthOverviewPath());if(generation!==state.targetGeneration)return;overviewData=data;overviewErr=null;}
+  catch(e){if(generation!==state.targetGeneration||e.staleTargetResponse)return;overviewErr=e&&e.message?e.message:String(e);}
+  finally{if(overviewRequestGeneration===generation){overviewLoading=false;overviewRequest=false;overviewRequestGeneration=null;}}
+  if(generation!==state.targetGeneration||state.view!=='overview')return;
   if(!patchOverview())render();
 }
 window.loadOverview=loadOverview;
@@ -1767,8 +1906,8 @@ function viewHealth(){
   const unknownNote=c.status==='unknown'?`<div class="muted" style="font-size:11px;margin-top:6px">First read of this cluster is still running. Figures appear once the first pass finishes.</div>`:'';
   return `<div>${pageHeader('Health','Broker status, traffic, lag, and topic-level signals.')}<div class="card">
     <div class="row" style="justify-content:space-between">
-      <div><div class="kicker">Cluster &middot; ${esc(healthClusterLabel())}</div><h3 style="display:flex;align-items:center;gap:8px">${esc(c.clusterId||'broker')} <span id="hClusterStatus">${hStatusBadge(c.status)}</span></h3></div>
-      <div class="row"><label class="muted" for="healthClusterSel" style="font-size:11px">Broker</label><select id="healthClusterSel" onchange="setHealthCluster(this.value)">${clusterOptions()}</select><label class="muted" for="healthWinSel" style="font-size:11px">Window</label><select id="healthWinSel" onchange="setHealthWindow(this.value)"><option value="60" ${healthWindow==60?'selected':''}>60s</option><option value="300" ${healthWindow==300?'selected':''}>5m</option><option value="900" ${healthWindow==900?'selected':''}>15m</option></select><button class="btn ghost" onclick="loadHealth()">Refresh</button></div>
+      <div><div class="kicker">Cluster &middot; ${esc(activeClusterLabel())}</div><h3 style="display:flex;align-items:center;gap:8px">${esc(c.clusterId||'broker')} <span id="hClusterStatus">${hStatusBadge(c.status)}</span></h3></div>
+      <div class="row"><label class="muted" for="healthWinSel" style="font-size:11px">Window</label><select id="healthWinSel" onchange="setHealthWindow(this.value)"><option value="60" ${healthWindow==60?'selected':''}>60s</option><option value="300" ${healthWindow==300?'selected':''}>5m</option><option value="900" ${healthWindow==900?'selected':''}>15m</option></select><button class="btn ghost" onclick="loadHealth()">Refresh</button></div>
     </div>
     <span id="hNotes">${warmupNote}${rateNote}${extNote}${unknownNote}</span>
     <div class="row" style="gap:32px;margin-top:14px">
@@ -1820,54 +1959,67 @@ function patchHealth(){
   return true;
 }
 async function loadHealth(){
-  const cl=state.healthCluster||'local';
-  try{ healthData=await api('/api/v1/health/overview?window='+healthWindow+'&cluster='+encodeURIComponent(cl)); healthErr=null; }
-  catch(e){ healthErr=e.message; }
-  if(state.view!=='health')return;
-  if(!patchHealth())render();   // paint pertama, atau kartu error/loading yang tak punya target patch
+  const generation=state.targetGeneration;
+  try{const data=await api(healthOverviewPath());if(generation!==state.targetGeneration)return;healthData=data;healthErr=null;}
+  catch(e){if(generation!==state.targetGeneration||e.staleTargetResponse)return;healthErr=e.message;}
+  if(generation!==state.targetGeneration||state.view!=='health')return;
+  if(!patchHealth())render();
 }
 window.loadHealth=loadHealth;
-window.setHealthWindow=function(v){ healthWindow=parseInt(v,10)||60; loadHealth(); };
-window.toggleHealthTopic=function(n){ if(healthOpenTopics.has(n))healthOpenTopics.delete(n); else healthOpenTopics.add(n); render(); };
-/* polling hanya berjalan saat view health aktif; startHealthPoll idempoten (guard healthTimer)
-   supaya render() berulang (dipanggil bindView() setiap render) tidak membuat interval ganda */
-function startHealthPoll(){if(healthTimer)return;loadClusterList();loadHealth();if(state.refreshMs>0)healthTimer=setInterval(loadHealth,state.refreshMs);}
-function stopHealthPoll(){ if(healthTimer){clearInterval(healthTimer);healthTimer=null;} }
+window.setHealthWindow=function(v){healthWindow=parseInt(v,10)||60;loadHealth();};
+window.toggleHealthTopic=function(n){if(healthOpenTopics.has(n))healthOpenTopics.delete(n);else healthOpenTopics.add(n);render();};
+/* Health polling is scoped to the currently selected global broker. */
+function startHealthPoll(){if(healthTimer)return;loadHealth();if(state.refreshMs>0)healthTimer=setInterval(loadHealth,state.refreshMs);}
+function stopHealthPoll(){if(healthTimer){clearInterval(healthTimer);healthTimer=null;}}
 
-/* Multi-cluster: registry + pemilihan broker di view Health ----
-   Daftar cluster adalah SATU-SATUNYA sumber URL yang boleh diambil broker,
-   jadi yang ditampilkan di sini hanyalah apa yang dilaporkan /api/v1/clusters
-   dan /api/v1/health/clusters. Token tidak pernah dikirim balik oleh broker:
-   yang tersedia hanya penanda hasToken. */
-let clusterRegistry=null;   /* [{name,kind,url,brokers,saslUser,saslMechanism,hasToken,hasSaslPassword}] dari /api/v1/clusters */
+/* Multi-cluster registry and the shared Broker selector. Registry calls stay
+   local; browser metadata strips stored endpoints and credential values. */
+let clusterRegistry=null;   /* registry metadata; never contains credential values */
+function activeClusterLabel(){return state.activeCluster==='local'?'local (this broker)':(isTargetUnavailable()?state.activeCluster+' (unavailable)':state.activeCluster);}
+function updateBrokerPicker(){
+  const sel=document.getElementById('activeClusterSelect');if(!sel)return;
+  const targets=clusterRegistry||[];
+  let options='<option value="local">local (this broker)</option>';
+  targets.forEach(c=>{options+=`<option value="${esc(c.name)}">${esc(c.name)}${c.kind==='kafka'?' (Kafka)':''}</option>`;});
+  if(state.activeCluster!=='local'&&!targets.some(c=>c.name===state.activeCluster))options+=`<option value="${esc(state.activeCluster)}">${esc(state.activeCluster)} (unavailable)</option>`;
+  sel.innerHTML=options;sel.value=state.activeCluster;
+}
+function clearTargetViewData(){
+  state.cluster=null;state.topics=[];state.groups=[];state.schemas=[];state.topic=null;state.topicDetail=null;state.topicParts=[];state.topicCfg=null;
+  state.group=null;state.groupDetail=null;state.lagHist={};state.msgs=[];state.fieldHint=[];state.off=null;state.leo=null;state.earliest=null;
+  state.filters=[];state.diffSel=[];state.tpSamples=[];state.tpTotal=0;healthData=null;healthErr=null;overviewData=null;overviewErr=null;overviewLoading=true;healthOpenTopics.clear();
+}
+function cancelTargetWork(){
+  state.targetGeneration++;
+  state.targetRequests.forEach(controller=>controller.abort());state.targetRequests.clear();
+  stopOverviewPoll();stopHealthPoll();stopMsgVirtWatch();
+  if(state.ws){state.ws.onclose=null;state.ws.close();state.ws=null;}
+  if(state.wsRetry){clearTimeout(state.wsRetry);state.wsRetry=null;}
+  state.tail=false;state.tailPaused=false;state.pendingTail=0;state.tailSkipped=0;overviewRequest=false;overviewRequestGeneration=null;
+}
+async function switchActiveCluster(name){
+  const next=String(name||'local');
+  if(next===state.activeCluster){updateBrokerPicker();return;}
+  state.activeCluster=next;localStorage.setItem('pk_active_cluster',next);state.targetSwitching=true;
+  cancelTargetWork();clearTargetViewData();updateBrokerPicker();
+  const generation=state.targetGeneration;render();
+  await refresh();
+  if(generation!==state.targetGeneration)return;
+  state.targetSwitching=false;render();
+}
+window.switchActiveCluster=switchActiveCluster;
 async function loadClusterList(){
-  try{ const d=await api('/api/v1/clusters'); clusterRegistry=d.clusters||[]; }
-  catch(e){ clusterRegistry=clusterRegistry||[]; return; }
-  /* cluster yang sedang dilihat sudah dihapus -> kembali ke broker ini */
-  if(state.healthCluster!=='local'&&!(clusterRegistry||[]).some(c=>c.name===state.healthCluster))state.healthCluster='local';
+  const wasAvailable=!!activeTargetEntry();
+  try{const d=await apiLocal('/api/v1/clusters');clusterRegistry=(d.clusters||[]).map(clusterMetadataForUI);}
+  catch(e){clusterRegistry=clusterRegistry||[];updateBrokerPicker();return;}
+  const available=!!activeTargetEntry();updateBrokerPicker();
+  if(wasAvailable!==available){cancelTargetWork();clearTargetViewData();if(state.initialized){state.targetSwitching=true;const generation=state.targetGeneration;render();refresh().then(()=>{if(generation===state.targetGeneration){state.targetSwitching=false;render();}});}}
 }
-function clusterOptions(){
-  const sel=state.healthCluster||'local';
-  let opts=`<option value="local"${sel==='local'?' selected':''}>local (this broker)</option>`;
-  (clusterRegistry||[]).forEach(c=>{ opts+=`<option value="${esc(c.name)}"${sel===c.name?' selected':''}>${esc(c.name)}</option>`; });
-  /* nama terpilih tetap terlihat walau daftarnya belum sempat termuat */
-  if(sel!=='local'&&!(clusterRegistry||[]).some(c=>c.name===sel))opts+=`<option value="${esc(sel)}" selected>${esc(sel)}</option>`;
-  return opts;
-}
-function healthClusterLabel(){ return (state.healthCluster||'local')==='local'?'local (this broker)':state.healthCluster; }
-window.setHealthCluster=function(v){
-  state.healthCluster=v||'local';
-  /* buang laporan lama supaya angka broker sebelumnya tidak tampil di bawah nama broker baru */
-  healthData=null; healthErr=null;
-  render(); loadHealth();
-};
+function healthOverviewPath(){return '/api/v1/health/overview?window='+healthWindow+(state.activeCluster==='local'?'&cluster=local':'');}
 
-/* Clusters view: memantau banyak broker (GET /api/v1/health/clusters) ----
-   Satu tabel untuk semua broker yang dipantau, termasuk broker ini sendiri
-   sebagai baris "local". Polling memakai pola yang sama dengan Health: markup
-   dibangun di node terlepas lalu hanya bagian yang berubah disalin ke DOM
-   hidup, jadi tabel tidak berkedip dan isian form yang sedang diketik tidak
-   hilang. Hanya URL dari daftar ini yang pernah diambil broker. */
+/* Clusters view: monitor every registered broker (GET /api/v1/health/clusters).
+   Poll locally and patch only changed markup so the form keeps its typed values.
+   Stored peer URLs are fetched just-in-time for an edit/test/save, not rendered. */
 let clusterTimer=null,clusterData=null,clusterErr=null,editingCluster=null;
 
 /* Argumen untuk atribut onclick: esc(JSON.stringify(x)) menjaga tanda kutip
@@ -1875,6 +2027,12 @@ let clusterTimer=null,clusterData=null,clusterErr=null,editingCluster=null;
    tetap sah sebagai string JavaScript. */
 function jsArg(s){ return esc(JSON.stringify(String(s))); }
 function clLabel(r){ return r.self?r.name+' (this broker)':r.name; }
+function redactTargetEndpoint(value){return String(value||'').replace(/https?:\/\/[^\s"'<>]+/gi,'[endpoint redacted]');}
+function clusterMetadataForUI(row){
+  const metadata=Object.assign({},row);delete metadata.url;
+  if(metadata.error)metadata.error=redactTargetEndpoint(metadata.error);
+  return metadata;
+}
 
 function clusterSummaryHtml(){
   if(!clusterData)return skel(180);
@@ -1899,23 +2057,25 @@ function clusterFormCard(){
       <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
         <div><label class="muted" for="clKind" style="font-size:11px;display:block;margin-bottom:4px">Kind</label><select id="clKind" style="width:150px" onchange="clusterKindChanged(this.value)"><option value="peer" ${kafka?'':'selected'}>PocketKafka peer</option><option value="kafka" ${kafka?'selected':''}>Kafka cluster</option></select></div>
         <div><label class="muted" for="clName" style="font-size:11px;display:block;margin-bottom:4px">Name</label><input id="clName" style="width:150px" placeholder="scada25" autocomplete="off" value="${ed?esc(ed.name):''}" ${ed?'readonly':''}></div>
-        <div id="clUrlWrap" ${vis(!kafka,'flex:1;min-width:230px')}><label class="muted" for="clUrl" style="font-size:11px;display:block;margin-bottom:4px">Dashboard URL</label><input id="clUrl" placeholder="http://10.0.0.26:8080" autocomplete="off" value="${ed?esc(ed.url||''):''}"></div>
+        <div id="clUrlWrap" ${vis(!kafka,'flex:1;min-width:230px')}><label class="muted" for="clUrl" style="font-size:11px;display:block;margin-bottom:4px">Dashboard URL</label><input id="clUrl" placeholder="${ed?'leave blank to keep the saved URL':'http://10.0.0.26:8080'}" autocomplete="off" value=""></div>
         <div id="clBrokersWrap" ${vis(kafka,'flex:1;min-width:230px')}><label class="muted" for="clBrokers" style="font-size:11px;display:block;margin-bottom:4px">Brokers</label><input id="clBrokers" placeholder="192.168.212.25:9092" autocomplete="off" value="${ed?esc((ed.brokers||[]).join(', ')):''}"></div>
         <div id="clSaslUserWrap" ${vis(kafka)}><label class="muted" for="clSaslUser" style="font-size:11px;display:block;margin-bottom:4px">SASL user</label><input id="clSaslUser" style="width:130px" autocomplete="off" value="${ed?esc(ed.saslUser||''):''}"></div>
         <div id="clSaslPassWrap" ${vis(kafka)}><label class="muted" for="clSaslPassword" style="font-size:11px;display:block;margin-bottom:4px">SASL password</label><input id="clSaslPassword" type="password" autocomplete="new-password" style="width:170px" placeholder="${reg&&reg.hasSaslPassword?'unchanged':'required'}"></div>
         <div id="clSaslMechWrap" ${vis(kafka)}><label class="muted" for="clSaslMechanism" style="font-size:11px;display:block;margin-bottom:4px">Mechanism</label><input id="clSaslMechanism" style="width:110px" placeholder="PLAIN" value="${ed?esc(ed.saslMechanism||''):''}"></div>
-        <div id="clTokenWrap" ${vis(!kafka)}><label class="muted" for="clToken" style="font-size:11px;display:block;margin-bottom:4px">Cluster token</label><input id="clToken" type="password" autocomplete="new-password" style="width:180px" placeholder="${ed&&ed.hasToken?'unchanged':'optional'}"></div>
+        <div id="clTokenWrap" ${vis(!kafka)}><label class="muted" for="clToken" style="font-size:11px;display:block;margin-bottom:4px">Health token (read-only monitoring)</label><input id="clToken" type="password" autocomplete="new-password" style="width:180px" placeholder="${ed&&ed.hasToken?'unchanged':'optional'}"></div>
+        <div id="clDashboardTokenWrap" ${vis(!kafka,'min-width:210px')}><label class="muted" for="clDashboardToken" style="font-size:11px;display:block;margin-bottom:4px">Dashboard access token (peer mutations)</label><input id="clDashboardToken" type="password" autocomplete="new-password" style="width:210px" placeholder="${ed&&ed.hasDashboardToken?'unchanged':'paste delegated token'}"></div>
         <button class="btn" type="submit">${ed?'Save changes':'Add cluster'}</button>
         <button class="btn ghost" type="button" onclick="testCluster()">Test connection</button>
         ${ed?'<button class="btn ghost" type="button" onclick="cancelEditCluster()">Cancel</button>':''}
       </div>
       <div id="clClearWrap" ${vis(kafka,'margin-top:10px')}>${ed&&reg&&reg.hasSaslPassword?'<label class="row" style="gap:6px;font-size:11px"><input type="checkbox" id="clClearSaslPassword" style="width:auto"> remove the stored SASL password</label>':''}</div>
-      ${ed?`<label class="row" id="clClearTokenWrap" ${vis(!kafka,'margin-top:10px')}><input type="checkbox" id="clClearToken" style="width:auto"> remove the stored token</label>`:''}
+      ${ed?`<label class="row" id="clClearTokenWrap" ${vis(!kafka,'margin-top:10px')}><input type="checkbox" id="clClearToken" style="width:auto"> remove the stored Health token</label>`:''}
+      ${ed&&reg&&reg.hasDashboardToken?`<label class="row" id="clClearDashboardTokenWrap" ${vis(!kafka,'margin-top:10px')}><input type="checkbox" id="clClearDashboardToken" style="width:auto"> remove the stored Dashboard access token</label>`:''}
     </form>
     <div class="statSub" id="clTest" style="margin-top:10px"></div>
     <div class="muted" style="font-size:11px;margin-top:8px">${kafka
-      ? (ed?'Leave the SASL password empty to keep the stored one.':'SASL credentials are stored sealed and write-only, and never shown again. A Kafka cluster is always read: this broker opens every connection read-only.')
-      : (ed?'Leave the token empty to keep the stored one.':'A token is needed only when the other broker has web login enabled; it is stored write-only and never shown again.')} Only endpoints listed here are ever connected to. Name: letters, digits, dot, underscore or dash.</div>
+      ? (ed?'Leave the SASL password empty to keep the stored one.':'SASL credentials are stored sealed and write-only, and never shown again. A Kafka cluster is always read-only.')
+      : (ed?"Leave each password field empty to keep its stored credential. Health token is read-only; Dashboard access token authorizes the destination's configured principal for peer mutations.":"Health token is optional for read-only monitoring. For mutations, issue a delegated token on the destination broker and paste it here; credentials are sealed and never shown again.")} Only registered endpoints are ever connected to. Name: letters, digits, dot, underscore or dash.</div>
   </div>`;
 }
 /* Kind mengubah isian mana yang berlaku; isian yang tersembunyi tidak dikirim
@@ -1923,8 +2083,8 @@ function clusterFormCard(){
 window.clusterKindChanged=function(v){
   const kafka=v==='kafka';
   const show=(id,on)=>{const el=document.getElementById(id); if(el)el.style.display=on?'':'none';};
-  show('clUrlWrap',!kafka); show('clTokenWrap',!kafka); show('clClearTokenWrap',!kafka);
-  show('clBrokersWrap',kafka); show('clSaslUserWrap',kafka); show('clSaslPassWrap',kafka); show('clSaslMechWrap',kafka); show('clClearWrap',kafka);
+  show('clUrlWrap',!kafka);show('clTokenWrap',!kafka);show('clDashboardTokenWrap',!kafka);show('clClearTokenWrap',!kafka);show('clClearDashboardTokenWrap',!kafka);
+  show('clBrokersWrap',kafka);show('clSaslUserWrap',kafka);show('clSaslPassWrap',kafka);show('clSaslMechWrap',kafka);show('clClearWrap',kafka);
   const t=document.getElementById('clTest'); if(t){t.textContent='';t.style.color='';}
 };
 
@@ -1936,12 +2096,12 @@ function clusterRow(r){
   const reg=kafka?((clusterRegistry||[]).find(c=>c.name===r.name)||null):null;
   const status=r.ok?hStatusBadge(r.status):'<span class="badge b-amber">unreachable</span>';
   const err=r.error?`<div class="muted" style="font-size:11px;margin-top:3px">${esc(r.error)}</div>`:'';
-  const badge=r.self?'':(kafka?(reg&&reg.hasSaslPassword?' <span class="badge muted">sasl</span>':''):(r.hasToken?' <span class="badge muted">token</span>':''));
+  const badge=r.self?'':(kafka?(reg&&reg.hasSaslPassword?' <span class="badge muted">sasl</span>':''):(r.hasToken?' <span class="badge muted">Health token</span>':''));
   const acts=r.self
-    ?'<button class="btn ghost" onclick="openClusterHealth(\'local\')">Open</button>'
-    :`<button class="btn ghost" onclick="openClusterHealth(${jsArg(r.name)})">Open</button><button class="btn ghost" onclick="editCluster(${jsArg(r.name)})">Edit</button><button class="btn ghost" onclick="deleteCluster(${jsArg(r.name)})">Remove</button>`;
+    ?'<div class="clusterRowActions"><button class="btn ghost" onclick="openClusterHealth(\'local\')">Open</button></div>'
+    :`<div class="clusterRowActions"><button class="btn ghost" onclick="openClusterHealth(${jsArg(r.name)})">Open</button><button class="btn ghost" onclick="editCluster(${jsArg(r.name)})">Edit</button><button class="btn ghost" onclick="deleteCluster(${jsArg(r.name)})">Remove</button></div>`;
   const n=v=>r.ok?(v??0):'-';
-  const endpoint=r.self?'served by this broker':(kafka?esc((r.brokers||[]).join(', ')):esc(r.url));
+  const endpoint=r.self?'served by this dashboard':(kafka?'Kafka cluster':'PocketKafka peer');
   return `<tr><td class="mono">${esc(clLabel(r))}${badge}${err}<div class="muted" style="font-size:11px">${endpoint}</div></td>`
     +`<td>${status}</td><td>${n(r.topics)}</td>`
     +`<td>${r.ok?hRate(r.rateReliable,r.messagesPerSec):'-'}</td>`
@@ -1949,7 +2109,7 @@ function clusterRow(r){
     +`<td>${r.ok?(kafka?'n/a':fmtPctOpt(r.diskUsagePct)):'-'}</td>`
     +`<td>${n(r.attention)}</td>`
     +`<td class="mono" style="font-size:11px">${r.ok&&r.latencyMs>0?r.latencyMs+' ms':'-'}</td>`
-    +`<td>${acts}</td></tr>`;
+    +`<td style="min-width:210px">${acts}</td></tr>`;
 }
 
 function viewClusters(){
@@ -1978,8 +2138,8 @@ function patchClusters(){
 }
 
 async function loadClusters(){
-  try{ clusterData=await api('/api/v1/health/clusters?window='+healthWindow); clusterErr=null; }
-  catch(e){ clusterErr=e.message; }
+  try{const result=await apiLocal('/api/v1/health/clusters?window='+healthWindow);clusterData=Object.assign({},result,{clusters:(result.clusters||[]).map(clusterMetadataForUI)});clusterErr=null;}
+  catch(e){ clusterErr=redactTargetEndpoint(e.message); }
   if(state.view!=='clusters')return;
   if(!patchClusters())render();
 }
@@ -1987,13 +2147,13 @@ window.loadClusters=loadClusters;
 function startClusterPoll(){if(clusterTimer)return;loadClusterList();loadClusters();if(state.refreshMs>0)clusterTimer=setInterval(loadClusters,state.refreshMs);}
 function stopClusterPoll(){ if(clusterTimer){clearInterval(clusterTimer);clusterTimer=null;} }
 
-window.openClusterHealth=function(name){ state.healthCluster=name||'local'; healthData=null; healthErr=null; goView('health'); };
+window.openClusterHealth=async function(name){const target=name||'local';state.view='health';if(location.hash!=='#/health')history.replaceState(null,'','#/health');if(target!==state.activeCluster)await switchActiveCluster(target);else{await refresh();render();}};
 window.editCluster=function(name){
   const r=((clusterData&&clusterData.clusters)||[]).find(c=>c.name===name);
   if(!r)return;
   const reg=(clusterRegistry||[]).find(c=>c.name===name)||{};
-  editingCluster={name:r.name,kind:r.kind||'peer',url:r.url||'',brokers:r.brokers||[],
-    saslUser:reg.saslUser||'',saslMechanism:reg.saslMechanism||'',hasToken:!!r.hasToken};
+  editingCluster={name:r.name,kind:r.kind||'peer',url:'',brokers:r.brokers||[],
+    saslUser:reg.saslUser||'',saslMechanism:reg.saslMechanism||'',hasToken:!!r.hasToken,hasDashboardToken:!!reg.hasDashboardToken};
   render();
   const el=document.getElementById(r.kind==='kafka'?'clBrokers':'clUrl'); if(el)el.focus();
 };
@@ -2001,7 +2161,7 @@ window.cancelEditCluster=function(){ editingCluster=null; render(); };
 /* Body dari isian yang sedang berlaku. Himpunan isian kind yang tidak aktif
    tidak ikut dikirim sama sekali, supaya sandi atau token tersimpan tidak
    tertimpa nilai kosong dari field yang disembunyikan. */
-function clusterFormBody(){
+async function clusterFormBody(){
   const kind=$('#clKind')?.value==='kafka'?'kafka':'peer';
   const body={kind,name:($('#clName')?.value||'').trim()};
   if(kind==='kafka'){
@@ -2009,26 +2169,33 @@ function clusterFormBody(){
     body.saslUser=($('#clSaslUser')?.value||'').trim();
     body.saslMechanism=($('#clSaslMechanism')?.value||'').trim();
     const pw=$('#clSaslPassword')?.value||'';
-    if(pw)body.saslPassword=pw;                       /* kosong = sandi lama dipertahankan */
+    if(pw)body.saslPassword=pw;
     if($('#clClearSaslPassword')?.checked)body.clearSaslPassword=true;
   }else{
     body.url=($('#clUrl')?.value||'').trim();
+    if(!body.url&&editingCluster?.kind==='peer'){
+      const registry=await apiLocal('/api/v1/clusters');
+      body.url=(registry.clusters||[]).find(c=>c.name===body.name)?.url||'';
+    }
     const tok=$('#clToken')?.value||'';
-    if(tok)body.token=tok;                            /* kosong = token lama dipertahankan */
+    if(tok)body.token=tok;
     if($('#clClearToken')?.checked)body.clearToken=true;
+    const dashboardToken=$('#clDashboardToken')?.value||'';
+    if(dashboardToken)body.dashboardToken=dashboardToken;
+    if($('#clClearDashboardToken')?.checked)body.clearDashboardToken=true;
   }
   return body;
 }
 /* Test memakai isian form tanpa mendaftarkan cluster; nama ikut dikirim supaya
    broker bisa memakai sandi/token tersimpan saat form mengosongkannya. */
 window.testCluster=async function(){
-  const body=clusterFormBody(),out=document.getElementById('clTest');
-  if(body.kind==='kafka'&&!body.brokers.length){ toast('Enter at least one broker address'); return; }
-  if(body.kind!=='kafka'&&!body.url){ toast('Enter the dashboard URL first'); return; }
-  const target=body.kind==='kafka'?body.brokers.join(', '):body.url;
-  if(out){ out.style.color='var(--muted)'; out.textContent='Testing '+target+' ...'; }
+  const out=document.getElementById('clTest');
+  if(out){out.style.color='var(--muted)';out.textContent='Testing connection...';}
   try{
-    const r=await api('/api/v1/clusters/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const body=await clusterFormBody();
+    if(body.kind==='kafka'&&!body.brokers.length){ toast('Enter at least one broker address'); return; }
+    if(body.kind!=='kafka'&&!body.url){ toast('Enter the dashboard URL first'); return; }
+    const r=await apiLocal('/api/v1/clusters/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const ok=!!r.ok;
     if(out){
       out.style.color=ok?'var(--success)':'var(--danger)';
@@ -2036,35 +2203,33 @@ window.testCluster=async function(){
       if(r.topics>0)bits.push(r.topics+' topics');
       if(r.groups>0)bits.push(r.groups+' groups');
       if(r.latencyMs>0)bits.push(r.latencyMs+' ms');
-      out.textContent=ok?`Reachable: ${r.clusterId||'cluster'}${bits.length?' - '+bits.join(', '):''}`:`Not reachable: ${r.error||'unknown error'}`;
+      out.textContent=ok?`Reachable: ${r.clusterId||'cluster'}${bits.length?' - '+bits.join(', '):''}`:`Not reachable: ${redactTargetEndpoint(r.error||'unknown error')}`;
     }
     toast(ok?'Connection OK':'Connection failed');
   }catch(e){
-    if(out){ out.style.color='var(--danger)'; out.textContent='Test failed: '+e.message; }
-    toast('Error: '+e.message);
+    const message=redactTargetEndpoint(e.message);
+    if(out){ out.style.color='var(--danger)'; out.textContent='Test failed: '+message; }
+    toast('Error: '+message);
   }
 };
 window.saveCluster=async function(){
-  const body=clusterFormBody();
-  if(!body.name){ toast('Name is required'); return; }
-  if(body.kind==='kafka'&&!body.brokers.length){ toast('Enter at least one broker address'); return; }
-  if(body.kind!=='kafka'&&!body.url){ toast('Name and URL are required'); return; }
   try{
-    await api('/api/v1/clusters',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    toast(editingCluster?'Cluster updated':'Cluster added');
-    editingCluster=null; clusterRegistry=null;
-    await loadClusterList(); await loadClusters(); render();
-  }catch(e){ toast('Error: '+e.message); }
+    const body=await clusterFormBody();
+    if(!body.name){ toast('Name is required'); return; }
+    if(body.kind==='kafka'&&!body.brokers.length){ toast('Enter at least one broker address'); return; }
+    if(body.kind!=='kafka'&&!body.url){ toast('Name and URL are required'); return; }
+    await apiLocal('/api/v1/clusters',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    editingCluster=null;
+    await loadClusterList();await loadClusters();render();
+  }catch(e){ toast('Error: '+redactTargetEndpoint(e.message)); }
 };
 window.deleteCluster=async function(name){
   if(!name)return;
-  if(!confirm('Stop monitoring "'+name+'"? Its stored token is removed too.'))return;
+  if(!confirm('Stop monitoring "'+name+'"? Its stored credentials are removed too.'))return;
   try{
-    await api('/api/v1/clusters/'+encodeURIComponent(name),{method:'DELETE'});
+    await apiLocal('/api/v1/clusters/'+encodeURIComponent(name),{method:'DELETE'});
     toast('Cluster removed');
-    if(state.healthCluster===name)state.healthCluster='local';
     if(editingCluster&&editingCluster.name===name)editingCluster=null;
-    clusterRegistry=null;
     await loadClusterList(); await loadClusters(); render();
   }catch(e){ toast('Error: '+e.message); }
 };
@@ -2175,25 +2340,28 @@ function bindTailPause(){ const mainEl=$('main'); if(!mainEl||mainEl._tailBind)r
   mainEl.addEventListener('scroll',()=>{ if(state.view==='databrowser'&&state.tail&&!state.tailPaused&&mainEl.scrollTop>40){ state.tailPaused=true; updateTailBar(); } }); }
 
 function bindView(){
-  const active=!document.hidden;
-  if(active&&state.view==='overview')startOverviewPoll();else stopOverviewPoll();
-  if(active&&state.view==='health')startHealthPoll();else stopHealthPoll();
-  if(active&&state.view==='clusters')startClusterPoll();else stopClusterPoll();
-  if(active&&state.view==='databrowser')startMsgVirtWatch();else stopMsgVirtWatch();
-  if(active&&state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();}
-  if(state.view==='groups'&&state.group)loadGroupDetail();
-  if(state.view==='security'){loadACLs();loadAudit();}
-  if(state.view==='metrics')loadThroughput();
-  if(state.view==='logs')loadLogs();
-  if(state.view==='topology')renderTopoSvg();
-  if(state.view==='databrowser')bindTailPause();
+  const active=!document.hidden,authRequired=!!(state.auth&&state.auth.enabled&&!state.auth.authenticated),viewReady=active&&!authRequired&&!state.targetSwitching&&!navUnavailableReason(state.view),localViewReady=active&&!authRequired;
+  if(viewReady&&state.view==='overview')startOverviewPoll();else stopOverviewPoll();
+  if(viewReady&&state.view==='health')startHealthPoll();else stopHealthPoll();
+  if(localViewReady&&state.view==='clusters')startClusterPoll();else stopClusterPoll();
+  if(viewReady&&state.view==='databrowser')startMsgVirtWatch();else stopMsgVirtWatch();
+  if(viewReady&&state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();}
+  if(viewReady&&state.view==='groups'&&state.group)loadGroupDetail();
+  if(localViewReady&&state.view==='security'){
+    loadDelegatedTokens();
+    if(!state.targetSwitching&&!isTargetUnavailable()&&!isKafkaTarget()){loadACLs();loadAudit();}
+  }
+  if(viewReady&&state.view==='metrics')loadThroughput();
+  if(viewReady&&state.view==='logs')loadLogs();
+  if(viewReady&&state.view==='topology')renderTopoSvg();
+  if(viewReady&&state.view==='databrowser')bindTailPause();
 }
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden){stopOverviewPoll();stopHealthPoll();stopClusterPoll();stopMsgVirtWatch();}
   else bindView();
 });
 initTheme();
-(async function(){await refresh();if(!location.hash)history.replaceState(null,'','#/overview');applyHash();})();
+(async function(){await loadClusterList();await refresh();if(!location.hash)history.replaceState(null,'','#/overview');applyHash();state.initialized=true;})();
 </script>
 </body>
 </html>

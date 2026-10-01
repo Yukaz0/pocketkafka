@@ -203,7 +203,8 @@ PocketKafka ships a single-file SPA at `http://localhost:8080`, served directly 
 - **Grouped sidebar navigation** with collapsible rail (56 px collapsed / 224 px expanded), organized into *Overview*, *Operations*, *Developer Tools*, and *Connections* groups.
 - **Overview dashboard**: broker health status, attention items, throughput and consumer lag summary cards with links to detailed views.
 - **Health view**: per-broker health report with configurable time window, consumed rate, and attention alerts from `GET /api/v1/health/overview`.
-- **Multi-cluster monitoring**: add remote clusters, view reachability and latency, and switch the Health view to any monitored cluster.
+- **Global broker selector**: switch the dashboard between this broker and registered PocketKafka peers or Kafka clusters. Kafka targets expose read-only Overview, Health, Connections, Topics, and Consumer Groups; unsupported features explain why. The Clusters registry remains local.
+- **Peer dashboard credentials**: with security/ACLs enabled, a cluster Admin can issue a bearer token bound to an existing user via `POST /api/v1/auth/delegated-tokens`, list ID/principal metadata with `GET /api/v1/auth/delegated-tokens`, and revoke by ID with `DELETE /api/v1/auth/delegated-tokens/{id}`. The raw token is returned once; only its SHA-256 verifier is stored in `<data_dir>/__dashboard_tokens.json` (mode `0600`). Unlike `web.cluster_token`, a delegated token acts only within its principal's ACL grants; the health token remains read-only.
 - **Data Browser**: WebSocket live-tail with message inspector (collapsible JSON tree, syntax-highlighted), topic explorer panel, and message diff.
 - **Topics & Consumer Groups**: partition detail, log-end/high-watermark offsets, per-partition lag visualization.
 - **Producer Studio & Dev Studio**: compose and inject test records; experiment with schema payloads.

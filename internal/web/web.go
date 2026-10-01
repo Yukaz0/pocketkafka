@@ -1,10 +1,12 @@
 package web
 
 import (
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,10 +41,11 @@ type Server struct {
 	// Multi-cluster monitoring: the registry of peers this dashboard reports
 	// on, the bearer token this broker accepts from an aggregating peer, and a
 	// short-lived cache so a polling UI does not fan out on every tick.
-	clusters       *clusterStore
-	clusterToken   string
-	clusterCacheMu sync.Mutex
-	clusterCache   map[time.Duration]clusterCacheEntry
+	clusters        *clusterStore
+	clusterToken    string
+	delegatedTokens *delegatedTokenStore
+	clusterCacheMu  sync.Mutex
+	clusterCache    map[time.Duration]clusterCacheEntry
 
 	// External Kafka clusters, sampled read-only as a client. Sampling runs on
 	// its own interval and handlers serve the last snapshot.
@@ -82,9 +85,14 @@ type Server struct {
 	rrCounter map[string]uint64
 }
 
-// WithDataDir records the broker data dir for persisted UI state.
+// WithDataDir records the broker data dir for persisted UI state, including delegated tokens.
 func (s *Server) WithDataDir(dir string) *Server {
 	s.dataDir = dir
+	path := ""
+	if dir != "" {
+		path = filepath.Join(dir, delegatedTokensFile)
+	}
+	s.delegatedTokens = newDelegatedTokenStore(path)
 	return s
 }
 
@@ -116,18 +124,19 @@ func (s *Server) WithBrokerInfo(listeners []string, advertised, securityMode str
 // New builds a web server bound to the given storage and coordinator.
 func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.Registry, brokerID int32, clusterID string, version string) *Server {
 	return &Server{
-		store:     store,
-		gm:        gm,
-		sr:        sr,
-		brokerID:  brokerID,
-		clusterID: clusterID,
-		version:   version,
-		startTime: time.Now(),
-		metrics:   metrics.NewRegistry(),
-		monitor:   NewMonitor(),
-		clusters:  newClusterStore("", nil, nil),
-		aclStore:  authz.NewInMemory(),
-		rrCounter: make(map[string]uint64),
+		store:           store,
+		gm:              gm,
+		sr:              sr,
+		brokerID:        brokerID,
+		clusterID:       clusterID,
+		version:         version,
+		startTime:       time.Now(),
+		metrics:         metrics.NewRegistry(),
+		monitor:         NewMonitor(),
+		clusters:        newClusterStore("", nil, nil),
+		delegatedTokens: newDelegatedTokenStore(""),
+		aclStore:        authz.NewInMemory(),
+		rrCounter:       make(map[string]uint64),
 	}
 }
 
@@ -142,19 +151,36 @@ func (s *Server) WithAuth(cfg config.Config) *Server {
 	return s
 }
 
-// sessionUser returns the verified username from the signed auth cookie, or ""
-// when there is no valid session. Unlike authenticatedUser it checks the HMAC,
-// so it is safe to use for authorization decisions.
-func (s *Server) sessionUser(r *http.Request) string {
-	c, err := r.Cookie(authCookieName)
+// requestPrincipal returns the verified cookie user or the principal mapped to
+// a delegated bearer token. The cluster health token never grants a principal.
+func (s *Server) requestPrincipal(r *http.Request) string {
+	if authorization := r.Header.Get("Authorization"); strings.HasPrefix(authorization, "Bearer ") {
+		token := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+		if s.clusterToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.clusterToken)) == 1 {
+			return ""
+		}
+		if s.delegatedTokens == nil || !s.authEnabled || !s.authorize {
+			return ""
+		}
+		principal, ok := s.delegatedTokens.Principal(token)
+		if ok && userExists(s.users, principal) {
+			return principal
+		}
+		return ""
+	}
+	cookie, err := r.Cookie(authCookieName)
 	if err != nil {
 		return ""
 	}
-	payload, ok := verifyToken(c.Value, s.authSecret)
+	payload, ok := verifyToken(cookie.Value, s.authSecret)
 	if !ok {
 		return ""
 	}
-	return authPayloadToUser(payload)
+	principal := authPayloadToUser(payload)
+	if !userExists(s.users, principal) {
+		return ""
+	}
+	return principal
 }
 
 // authorizeMutations requires cluster Admin (or the more specific ACL) for
@@ -179,7 +205,7 @@ func (s *Server) authorizeMutations(next http.Handler) http.Handler {
 			op = authz.OpAdmin
 		}
 		res := authz.Resource{Type: authz.ResourceCluster, Name: "cluster"}
-		if err := s.aclStore.Authorize(s.sessionUser(r), op, res); err != nil {
+		if err := s.aclStore.Authorize(s.requestPrincipal(r), op, res); err != nil {
 			writeErr(w, http.StatusForbidden, "forbidden: "+err.Error())
 			return
 		}
@@ -225,6 +251,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth/status", s.handleAuthStatus)
+	mux.HandleFunc("GET /api/v1/auth/delegated-tokens", s.handleListDelegatedTokens)
+	mux.HandleFunc("POST /api/v1/auth/delegated-tokens", s.handleCreateDelegatedToken)
+	mux.HandleFunc("DELETE /api/v1/auth/delegated-tokens/{id}", s.handleRevokeDelegatedToken)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /livez", s.handleLivez)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
@@ -238,11 +267,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/clusters", s.handleUpsertCluster)
 	mux.HandleFunc("POST /api/v1/clusters/test", s.handleTestCluster)
 	mux.HandleFunc("DELETE /api/v1/clusters/{name}", s.handleDeleteCluster)
-	authed := newAuthMiddleware(s.users, s.authSecret, s.authEnabled, s.clusterToken)(mux)
+	mux.HandleFunc("/api/v1/target/{name}/{path...}", s.handleClusterTarget)
+	authed := newAuthMiddleware(s.users, s.authSecret, s.authEnabled, s.clusterToken, func(token string) (string, bool) {
+		if s.delegatedTokens == nil || !s.authorize {
+			return "", false
+		}
+		principal, ok := s.delegatedTokens.Principal(token)
+		return principal, ok && userExists(s.users, principal)
+	})(s.authorizeMutations(mux))
 	// securityHeaders is outermost so every response (pages included) carries
 	// them; csrfMiddleware then rejects state-changing calls that a cross-site
 	// page could have made with the operator's cookie.
-	return securityHeaders(csrfMiddleware(s.authorizeMutations(authed)))
+	return securityHeaders(csrfMiddleware(authed))
 }
 
 // handleMetrics exposes pocketkafka metrics in Prometheus text format.
