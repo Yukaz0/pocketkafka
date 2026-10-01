@@ -344,6 +344,176 @@ func (cc *ClusterClient) listOffsetsFrom(brokerID int32, topic string, partition
 	return out, nil
 }
 
+// ListOffsetsBulk reads one timestamp position (-1 latest, -2 earliest) for
+// every partition of every topic in a single request per broker. One request per
+// topic per leader is what makes a 75-topic cluster take minutes instead of a
+// second: leadership is spread over the brokers, so batching by broker is the
+// difference between a pass that finishes and one that never does.
+func (cc *ClusterClient) ListOffsetsBulk(ts int64) (map[string]map[int32]int64, error) {
+	topics := cc.Topics()
+	byLeader := make(map[int32]map[string][]listOffsetPart)
+	for _, t := range topics {
+		if t.Internal {
+			continue
+		}
+		for _, p := range t.Partitions {
+			if byLeader[p.Leader] == nil {
+				byLeader[p.Leader] = make(map[string][]listOffsetPart)
+			}
+			byLeader[p.Leader][t.Name] = append(byLeader[p.Leader][t.Name],
+				listOffsetPart{id: p.ID, epoch: p.LeaderEpoch})
+		}
+	}
+	out := make(map[string]map[int32]int64, len(topics))
+	for leader, perTopic := range byLeader {
+		res, err := cc.listOffsetsBulkFrom(leader, perTopic, ts)
+		if err != nil {
+			// One refresh lets a moved leadership take effect; a second failure
+			// is the broker's answer and ends the pass.
+			if rerr := cc.Refresh(); rerr != nil {
+				return nil, err
+			}
+			perTopic = cc.reEpoch(perTopic)
+			res, err = cc.listOffsetsBulkFrom(leader, perTopic, ts)
+			if err != nil {
+				return nil, err
+			}
+		}
+		for topic, parts := range res {
+			if out[topic] == nil {
+				out[topic] = make(map[int32]int64, len(parts))
+			}
+			for pid, off := range parts {
+				out[topic][pid] = off
+			}
+		}
+	}
+	return out, nil
+}
+
+// reEpoch rebuilds a per-topic request plan with the epochs from a fresh
+// metadata read, which is what a FENCED_LEADER_EPOCH answer asks for.
+func (cc *ClusterClient) reEpoch(perTopic map[string][]listOffsetPart) map[string][]listOffsetPart {
+	out := make(map[string][]listOffsetPart, len(perTopic))
+	for topic, parts := range perTopic {
+		info, ok := cc.topicInfo(topic)
+		if !ok {
+			out[topic] = parts
+			continue
+		}
+		epochs := make(map[int32]int32, len(info.Partitions))
+		for _, p := range info.Partitions {
+			epochs[p.ID] = p.LeaderEpoch
+		}
+		updated := make([]listOffsetPart, 0, len(parts))
+		for _, p := range parts {
+			if e, ok := epochs[p.id]; ok {
+				p.epoch = e
+			}
+			updated = append(updated, p)
+		}
+		out[topic] = updated
+	}
+	return out
+}
+
+// listOffsetsBulkFrom sends one request carrying every topic this broker leads.
+func (cc *ClusterClient) listOffsetsBulkFrom(brokerID int32, perTopic map[string][]listOffsetPart, ts int64) (map[string]map[int32]int64, error) {
+	cl, err := cc.brokerFor(brokerID)
+	if err != nil {
+		return nil, err
+	}
+	req := &protocol.ListOffsetsRequest{
+		Version:   cl.version(protocol.APKListOffsets),
+		ReplicaID: -1,
+	}
+	names := make([]string, 0, len(perTopic))
+	for name := range perTopic {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		entry := protocol.ListOffsetsRequestTopic{Topic: name}
+		for _, p := range perTopic[name] {
+			epoch := p.epoch
+			if epoch < 0 {
+				epoch = -1
+			}
+			entry.Partitions = append(entry.Partitions,
+				protocol.ListOffsetsRequestPartition{Partition: p.id, CurrentLeaderEpoch: epoch, Timestamp: ts})
+		}
+		req.Topics = append(req.Topics, entry)
+	}
+	body, err := protocol.EncodeListOffsetsRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	respBody, err := cl.RoundTrip(protocol.APKListOffsets, req.Version, body)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := protocol.DecodeListOffsetsResponse(req.Version, respBody)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]map[int32]int64, len(resp.Topics))
+	for _, t := range resp.Topics {
+		for _, p := range t.Partitions {
+			if p.ErrorCode != protocol.ErrNone {
+				return nil, fmt.Errorf("list offsets %s/%d on broker %d: kafka error code %d",
+					t.Topic, p.Partition, brokerID, p.ErrorCode)
+			}
+			if out[t.Topic] == nil {
+				out[t.Topic] = make(map[int32]int64)
+			}
+			out[t.Topic][p.Partition] = p.Offset
+		}
+	}
+	return out, nil
+}
+
+// DescribeGroupsAll asks every broker for the given groups in one request each
+// and merges what came back. A broker answers NOT_COORDINATOR for groups it does
+// not coordinate, which is the filter, so this needs no FindCoordinator per
+// group.
+func (cc *ClusterClient) DescribeGroupsAll(groups []string) (map[string]GroupState, error) {
+	out := make(map[string]GroupState, len(groups))
+	for _, b := range cc.Brokers() {
+		cl, err := cc.brokerFor(b.ID)
+		if err != nil {
+			return nil, err
+		}
+		req := &protocol.DescribeGroupsRequest{
+			Version:  cl.version(protocol.APKDescribeGroups),
+			GroupIDs: groups,
+		}
+		body, err := protocol.EncodeDescribeGroupsRequest(req)
+		if err != nil {
+			return nil, err
+		}
+		respBody, err := cl.RoundTrip(protocol.APKDescribeGroups, req.Version, body)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := protocol.DecodeDescribeGroupsResponse(req.Version, respBody)
+		if err != nil {
+			return nil, err
+		}
+		for _, g := range resp.Groups {
+			if g.ErrorCode != protocol.ErrNone {
+				continue
+			}
+			out[g.GroupID] = GroupState{
+				Group:        g.GroupID,
+				State:        g.State,
+				ProtocolType: g.ProtocolType,
+				Members:      len(g.Members),
+			}
+		}
+	}
+	return out, nil
+}
+
 // ListGroups returns every group the cluster knows, merged over all brokers:
 // each broker answers only for the groups it coordinates.
 func (cc *ClusterClient) ListGroups() ([]string, error) {

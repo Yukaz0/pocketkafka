@@ -44,6 +44,11 @@ type Server struct {
 	clusterCacheMu sync.Mutex
 	clusterCache   map[time.Duration]clusterCacheEntry
 
+	// External Kafka clusters, sampled read-only as a client. Sampling runs on
+	// its own interval and handlers serve the last snapshot.
+	externalMu sync.Mutex
+	external   map[string]*externalCluster
+
 	// Auth (Fitur 12).
 	users       []config.SecurityUser
 	authSecret  string

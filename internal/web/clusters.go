@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -37,10 +38,82 @@ const (
 	clusterMaxBody = 8 << 20
 )
 
-// ClusterEntry is one monitored broker. Tokens are never carried here.
+// ClusterEntry is one monitored cluster. Tokens and passwords are never carried
+// here: they live sealed in the secrets file.
 type ClusterEntry struct {
 	Name string `json:"name"`
-	URL  string `json:"url"`
+	// Kind is "peer" (another PocketKafka, monitored over its web API) or
+	// "kafka" (any Kafka broker, monitored as a client). Empty means "peer" so
+	// registries written before kinds existed keep working.
+	Kind string `json:"kind,omitempty"`
+	URL  string `json:"url,omitempty"`
+	// Brokers is the bootstrap list for a "kafka" entry.
+	Brokers []string `json:"brokers,omitempty"`
+	// SASLUser is the username for a "kafka" entry; the password is sealed
+	// separately and never returned.
+	SASLUser string `json:"saslUser,omitempty"`
+	// SASLMechanism defaults to PLAIN when empty.
+	SASLMechanism string `json:"saslMechanism,omitempty"`
+}
+
+// Cluster kinds.
+const (
+	clusterKindPeer  = "peer"
+	clusterKindKafka = "kafka"
+)
+
+// saslSecretPrefix namespaces SASL passwords inside the sealed secret map, so
+// they cannot be mistaken for a peer's bearer token.
+const saslSecretPrefix = "sasl:"
+
+// normalizeKind maps the empty kind to its default.
+func normalizeKind(kind string) string {
+	if kind == "" {
+		return clusterKindPeer
+	}
+	return kind
+}
+
+// validateKafkaEntry checks a "kafka" entry: bootstrap addresses must be
+// host:port with a real port, and a username is required because a cluster that
+// needs SASL has no anonymous monitoring path.
+func validateKafkaEntry(e ClusterEntry) error {
+	if len(e.Brokers) == 0 {
+		return errors.New("kafka cluster needs at least one broker")
+	}
+	for _, b := range e.Brokers {
+		host, port, err := net.SplitHostPort(strings.TrimSpace(b))
+		if err != nil || host == "" || port == "" {
+			return fmt.Errorf("broker %q must be host:port", b)
+		}
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("broker %q has an invalid port", b)
+		}
+	}
+	if strings.TrimSpace(e.SASLUser) == "" {
+		return errors.New("kafka cluster needs a SASL username")
+	}
+	switch strings.ToUpper(strings.TrimSpace(e.SASLMechanism)) {
+	case "", "PLAIN":
+	default:
+		return fmt.Errorf("unsupported SASL mechanism %q", e.SASLMechanism)
+	}
+	return nil
+}
+
+// validateEntry applies the rule for the entry's kind.
+func validateEntry(e ClusterEntry) error {
+	if err := validateClusterName(e.Name); err != nil {
+		return err
+	}
+	if normalizeKind(e.Kind) == clusterKindKafka {
+		return validateKafkaEntry(e)
+	}
+	if e.URL == "" {
+		return errors.New("peer cluster needs a url")
+	}
+	return validateClusterURL(e.URL)
 }
 
 // validateClusterURL and validateClusterName live in the config package so the
@@ -120,7 +193,7 @@ func newClusterStore(dataDir string, seed []config.WebCluster, box *secretBox) *
 		var list []ClusterEntry
 		if json.Unmarshal(b, &list) == nil {
 			for _, e := range list {
-				if validateClusterName(e.Name) == nil && validateClusterURL(e.URL) == nil {
+				if validateEntry(e) == nil {
 					s.entries = append(s.entries, e)
 				}
 			}
@@ -172,17 +245,32 @@ func (s *clusterStore) HasToken(name string) bool {
 	return s.Token(name) != ""
 }
 
-// Upsert adds or replaces one cluster. A nil token leaves the stored token
-// alone; a non-nil empty token clears it.
-func (s *clusterStore) Upsert(e ClusterEntry, token *string) error {
-	if err := validateClusterName(e.Name); err != nil {
-		return err
-	}
-	if err := validateClusterURL(e.URL); err != nil {
-		return err
-	}
+// SASLPassword returns the stored SASL password for a cluster, or "".
+func (s *clusterStore) SASLPassword(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tokens[saslSecretPrefix+name]
+}
+
+// HasSASLPassword reports whether a password is stored, without revealing it.
+func (s *clusterStore) HasSASLPassword(name string) bool {
+	return s.SASLPassword(name) != ""
+}
+
+// Upsert adds or replaces one cluster. A nil secret leaves the stored one alone;
+// a non-nil empty secret clears it.
+func (s *clusterStore) Upsert(e ClusterEntry, token, saslPassword *string) error {
 	e.Name = strings.TrimSpace(e.Name)
+	e.Kind = normalizeKind(e.Kind)
 	e.URL = strings.TrimSpace(e.URL)
+	e.SASLUser = strings.TrimSpace(e.SASLUser)
+	e.SASLMechanism = strings.ToUpper(strings.TrimSpace(e.SASLMechanism))
+	for i := range e.Brokers {
+		e.Brokers[i] = strings.TrimSpace(e.Brokers[i])
+	}
+	if err := validateEntry(e); err != nil {
+		return err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -207,10 +295,21 @@ func (s *clusterStore) Upsert(e ClusterEntry, token *string) error {
 			return err
 		}
 	}
+	if saslPassword != nil {
+		key := saslSecretPrefix + e.Name
+		if *saslPassword == "" {
+			delete(s.tokens, key)
+		} else {
+			s.tokens[key] = *saslPassword
+		}
+		if err := s.persistTokensLocked(); err != nil {
+			return err
+		}
+	}
 	return s.persistEntriesLocked()
 }
 
-// Remove drops a cluster and its token.
+// Remove drops a cluster and its stored secrets.
 func (s *clusterStore) Remove(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -228,6 +327,7 @@ func (s *clusterStore) Remove(name string) error {
 	}
 	s.entries = kept
 	delete(s.tokens, name)
+	delete(s.tokens, saslSecretPrefix+name)
 	if err := s.persistTokensLocked(); err != nil {
 		return err
 	}
@@ -282,29 +382,32 @@ func (s *clusterStore) BoxError() error {
 // clusterSummary is one row of the cluster overview. It carries the few fields
 // an operator scans, not the whole report.
 type clusterSummary struct {
-	Name            string  `json:"name"`
-	URL             string  `json:"url"`
-	Self            bool    `json:"self"`
-	OK              bool    `json:"ok"`
-	Error           string  `json:"error,omitempty"`
-	LatencyMs       int64   `json:"latencyMs"`
-	ClusterID       string  `json:"clusterId,omitempty"`
-	BrokerID        int32   `json:"brokerId,omitempty"`
-	Version         string  `json:"version,omitempty"`
-	Status          string  `json:"status,omitempty"`
-	Topics          int     `json:"topics"`
-	Partitions      int     `json:"partitions"`
-	Groups          int     `json:"groups"`
-	TotalMessages   int64   `json:"totalMessages"`
-	Lag             int64   `json:"lag"`
-	MaxPartitionLag int64   `json:"maxPartitionLag"`
-	MessagesPerSec  float64 `json:"messagesPerSec"`
-	BytesPerSec     float64 `json:"bytesPerSec"`
-	DiskUsagePct    float64 `json:"diskUsagePct"`
-	RateReliable    bool    `json:"rateReliable"`
-	Warmup          bool    `json:"warmup"`
-	Attention       int     `json:"attention"`
-	HasToken        bool    `json:"hasToken"`
+	Name string `json:"name"`
+	// Kind is "self", "peer", or "kafka".
+	Kind            string   `json:"kind"`
+	URL             string   `json:"url"`
+	Brokers         []string `json:"brokers,omitempty"`
+	Self            bool     `json:"self"`
+	OK              bool     `json:"ok"`
+	Error           string   `json:"error,omitempty"`
+	LatencyMs       int64    `json:"latencyMs"`
+	ClusterID       string   `json:"clusterId,omitempty"`
+	BrokerID        int32    `json:"brokerId,omitempty"`
+	Version         string   `json:"version,omitempty"`
+	Status          string   `json:"status,omitempty"`
+	Topics          int      `json:"topics"`
+	Partitions      int      `json:"partitions"`
+	Groups          int      `json:"groups"`
+	TotalMessages   int64    `json:"totalMessages"`
+	Lag             int64    `json:"lag"`
+	MaxPartitionLag int64    `json:"maxPartitionLag"`
+	MessagesPerSec  float64  `json:"messagesPerSec"`
+	BytesPerSec     float64  `json:"bytesPerSec"`
+	DiskUsagePct    float64  `json:"diskUsagePct"`
+	RateReliable    bool     `json:"rateReliable"`
+	Warmup          bool     `json:"warmup"`
+	Attention       int      `json:"attention"`
+	HasToken        bool     `json:"hasToken"`
 }
 
 // remoteReport is the subset of a health report the fan-out reads. Unknown
@@ -367,6 +470,7 @@ func (s *Server) fetchClusterReport(ctx context.Context, e ClusterEntry, window 
 func summarize(e ClusterEntry, hasToken bool, body []byte, latency time.Duration) clusterSummary {
 	row := clusterSummary{
 		Name:      e.Name,
+		Kind:      clusterKindPeer,
 		URL:       e.URL,
 		OK:        true,
 		LatencyMs: latency.Milliseconds(),
@@ -404,7 +508,7 @@ func summarize(e ClusterEntry, hasToken bool, body []byte, latency time.Duration
 // selfSummary reports this broker, so one screen shows every cluster including
 // the one serving the dashboard.
 func (s *Server) selfSummary(window time.Duration, now time.Time) clusterSummary {
-	row := clusterSummary{Name: "local", Self: true, OK: true}
+	row := clusterSummary{Name: "local", Kind: "self", Self: true, OK: true}
 	if s.store == nil {
 		row.OK = false
 		row.Error = "storage unavailable"
@@ -422,11 +526,41 @@ func (s *Server) selfSummary(window time.Duration, now time.Time) clusterSummary
 	row.Lag = rep.Cluster.Lag
 	row.MaxPartitionLag = rep.Cluster.MaxPartitionLag
 	row.MessagesPerSec = rep.Cluster.MessagesPerSec
-	row.BytesPerSec = rep.Cluster.BytesPerSec
-	row.DiskUsagePct = rep.Cluster.DiskUsagePct
+	if rep.Cluster.BytesPerSec != nil {
+		row.BytesPerSec = *rep.Cluster.BytesPerSec
+	}
+	if rep.Cluster.DiskUsagePct != nil {
+		row.DiskUsagePct = *rep.Cluster.DiskUsagePct
+	}
 	row.RateReliable = rep.Sampling.RateReliable
 	row.Warmup = rep.Sampling.Warmup
 	row.Attention = len(rep.Attention)
+	return row
+}
+
+// summarizeExternal builds the cluster row for a Kafka cluster we observe as a
+// client. The fields a client cannot see stay zero here and are named in the
+// report's unavailable list; this row is a summary, not the contract.
+func summarizeExternal(e ClusterEntry, rep overviewResponse) clusterSummary {
+	row := clusterSummary{
+		Name:            e.Name,
+		Kind:            clusterKindKafka,
+		Brokers:         e.Brokers,
+		OK:              true,
+		ClusterID:       rep.Cluster.ClusterID,
+		BrokerID:        rep.Cluster.BrokerID,
+		Status:          rep.Cluster.Status,
+		Topics:          rep.Cluster.Topics,
+		Partitions:      rep.Cluster.Partitions,
+		Groups:          rep.Cluster.Groups,
+		TotalMessages:   rep.Cluster.TotalMessages,
+		Lag:             rep.Cluster.Lag,
+		MaxPartitionLag: rep.Cluster.MaxPartitionLag,
+		MessagesPerSec:  rep.Cluster.MessagesPerSec,
+		RateReliable:    rep.Sampling.RateReliable,
+		Warmup:          rep.Sampling.Warmup,
+		Attention:       len(rep.Attention),
+	}
 	return row
 }
 
@@ -446,10 +580,33 @@ func (s *Server) clustersOverview(ctx context.Context, window time.Duration, now
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			if normalizeKind(e.Kind) == clusterKindKafka {
+				// A Kafka cluster is sampled, not fetched: the row comes from the
+				// last read-only pass, and the first poll starts one.
+				s.externalFor(e)
+				report, err := s.externalOverview(e.Name, window, now)
+				if err != nil {
+					rows[i+1] = clusterSummary{
+						Name: e.Name, Kind: clusterKindKafka, Brokers: e.Brokers,
+						OK: false, Error: err.Error(),
+					}
+					return
+				}
+				if report.Cluster.Status == "unknown" {
+					// Read not finished: a row, not an unreachable cluster.
+					rows[i+1] = clusterSummary{
+						Name: e.Name, Kind: clusterKindKafka, Brokers: e.Brokers,
+						OK: true, Status: "unknown",
+					}
+					return
+				}
+				rows[i+1] = summarizeExternal(e, report)
+				return
+			}
 			token := s.clusters.Token(e.Name)
 			body, latency, err := s.fetchClusterReport(ctx, e, window, token)
 			if err != nil {
-				rows[i+1] = clusterSummary{Name: e.Name, URL: e.URL, OK: false, Error: err.Error(), LatencyMs: latency.Milliseconds(), HasToken: token != ""}
+				rows[i+1] = clusterSummary{Name: e.Name, Kind: clusterKindPeer, URL: e.URL, OK: false, Error: err.Error(), LatencyMs: latency.Milliseconds(), HasToken: token != ""}
 				return
 			}
 			rows[i+1] = summarize(e, token != "", body, latency)
@@ -519,13 +676,27 @@ func (s *Server) handleClustersOverview(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleClusters(w http.ResponseWriter, r *http.Request) {
 	entries := s.clusters.List()
 	type row struct {
-		Name     string `json:"name"`
-		URL      string `json:"url"`
-		HasToken bool   `json:"hasToken"`
+		Name            string   `json:"name"`
+		Kind            string   `json:"kind"`
+		URL             string   `json:"url,omitempty"`
+		Brokers         []string `json:"brokers,omitempty"`
+		SASLUser        string   `json:"saslUser,omitempty"`
+		SASLMechanism   string   `json:"saslMechanism,omitempty"`
+		HasToken        bool     `json:"hasToken"`
+		HasSASLPassword bool     `json:"hasSaslPassword"`
 	}
 	out := make([]row, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, row{Name: e.Name, URL: e.URL, HasToken: s.clusters.HasToken(e.Name)})
+		out = append(out, row{
+			Name:            e.Name,
+			Kind:            normalizeKind(e.Kind),
+			URL:             e.URL,
+			Brokers:         e.Brokers,
+			SASLUser:        e.SASLUser,
+			SASLMechanism:   e.SASLMechanism,
+			HasToken:        s.clusters.HasToken(e.Name),
+			HasSASLPassword: s.clusters.HasSASLPassword(e.Name),
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"clusters": out})
 }
@@ -533,17 +704,30 @@ func (s *Server) handleClusters(w http.ResponseWriter, r *http.Request) {
 // handleUpsertCluster adds or updates one monitored cluster.
 func (s *Server) handleUpsertCluster(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name       string `json:"name"`
-		URL        string `json:"url"`
-		Token      string `json:"token"`
-		ClearToken bool   `json:"clearToken"`
+		Name              string   `json:"name"`
+		Kind              string   `json:"kind"`
+		URL               string   `json:"url"`
+		Brokers           []string `json:"brokers"`
+		SASLUser          string   `json:"saslUser"`
+		SASLMechanism     string   `json:"saslMechanism"`
+		SASLPassword      string   `json:"saslPassword"`
+		ClearSASLPassword bool     `json:"clearSaslPassword"`
+		Token             string   `json:"token"`
+		ClearToken        bool     `json:"clearToken"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	entry := ClusterEntry{Name: req.Name, URL: req.URL}
-	var token *string
+	entry := ClusterEntry{
+		Name:          req.Name,
+		Kind:          req.Kind,
+		URL:           req.URL,
+		Brokers:       req.Brokers,
+		SASLUser:      req.SASLUser,
+		SASLMechanism: req.SASLMechanism,
+	}
+	var token, saslPassword *string
 	switch {
 	case req.ClearToken:
 		empty := ""
@@ -551,20 +735,35 @@ func (s *Server) handleUpsertCluster(w http.ResponseWriter, r *http.Request) {
 	case req.Token != "":
 		token = &req.Token
 	}
-	if token != nil {
-		// A stored token can only be written sealed. When the key is missing or
+	switch {
+	case req.ClearSASLPassword:
+		empty := ""
+		saslPassword = &empty
+	case req.SASLPassword != "":
+		saslPassword = &req.SASLPassword
+	}
+	if token != nil || saslPassword != nil {
+		// A stored secret can only be written sealed. When the key is missing or
 		// wrong this refuses the write instead of dropping the credential.
 		if err := s.clusters.BoxError(); err != nil {
 			writeErr(w, http.StatusServiceUnavailable, err.Error())
 			return
 		}
 	}
-	if err := s.clusters.Upsert(entry, token); err != nil {
+	if err := s.clusters.Upsert(entry, token, saslPassword); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.recordAudit(s.actorFrom(r), "cluster.upsert", entry.Name, "monitored cluster "+entry.URL)
-	writeJSON(w, http.StatusOK, map[string]any{"name": entry.Name, "url": entry.URL, "hasToken": s.clusters.HasToken(entry.Name)})
+	s.recordAudit(s.actorFrom(r), "cluster.upsert", entry.Name,
+		fmt.Sprintf("monitored %s cluster", normalizeKind(entry.Kind)))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name":            entry.Name,
+		"kind":            normalizeKind(entry.Kind),
+		"url":             entry.URL,
+		"brokers":         entry.Brokers,
+		"hasToken":        s.clusters.HasToken(entry.Name),
+		"hasSaslPassword": s.clusters.HasSASLPassword(entry.Name),
+	})
 }
 
 // handleTestCluster checks a candidate cluster WITHOUT registering it, so a
@@ -572,12 +771,49 @@ func (s *Server) handleUpsertCluster(w http.ResponseWriter, r *http.Request) {
 // test RESULT, not a failed request: it answers 200 with ok=false.
 func (s *Server) handleTestCluster(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name  string `json:"name"`
-		URL   string `json:"url"`
-		Token string `json:"token"`
+		Name          string   `json:"name"`
+		Kind          string   `json:"kind"`
+		URL           string   `json:"url"`
+		Brokers       []string `json:"brokers"`
+		SASLUser      string   `json:"saslUser"`
+		SASLMechanism string   `json:"saslMechanism"`
+		SASLPassword  string   `json:"saslPassword"`
+		Token         string   `json:"token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	entry := ClusterEntry{
+		Name:          req.Name,
+		Kind:          req.Kind,
+		URL:           req.URL,
+		Brokers:       req.Brokers,
+		SASLUser:      req.SASLUser,
+		SASLMechanism: req.SASLMechanism,
+	}
+	if normalizeKind(entry.Kind) == clusterKindKafka {
+		// A Kafka cluster is tested by reading it once: connect with SASL, take
+		// one read-only pass, throw the client away. The stored password is used
+		// when the form left it empty, so "test" does not force an operator to
+		// retype a secret.
+		if err := validateKafkaEntry(entry); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		password := req.SASLPassword
+		if password == "" && entry.Name != "" {
+			password = s.clusters.SASLPassword(entry.Name)
+		}
+		report, err := s.sampleOnce(r.Context(), entry, password)
+		if err != nil {
+			writeJSON(w, http.StatusOK, clusterSummary{
+				Name: entry.Name, Kind: clusterKindKafka, Brokers: entry.Brokers,
+				OK: false, Error: err.Error(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, summarizeExternal(entry, report))
 		return
 	}
 	if err := validateClusterURL(req.URL); err != nil {
@@ -590,7 +826,6 @@ func (s *Server) handleTestCluster(w http.ResponseWriter, r *http.Request) {
 		// test must use that stored token instead of probing unauthenticated.
 		token = s.clusters.Token(req.Name)
 	}
-	entry := ClusterEntry{Name: req.Name, URL: req.URL}
 	body, latency, err := s.fetchClusterReport(r.Context(), entry, defaultWindow, token)
 	if err != nil {
 		writeJSON(w, http.StatusOK, clusterSummary{
@@ -609,6 +844,9 @@ func (s *Server) handleDeleteCluster(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}
+	// Stop sampling a Kafka cluster that is no longer registered: its
+	// connections and goroutine go with the entry.
+	s.dropExternal(name)
 	s.recordAudit(s.actorFrom(r), "cluster.delete", name, "removed monitored cluster")
 	writeJSON(w, http.StatusOK, map[string]string{"deleted": name})
 }

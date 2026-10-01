@@ -108,6 +108,19 @@ func retentionUrgency(r retentionRisk) int64 {
 	return *r.SecondsUntilLoss
 }
 
+// Source values: where a health report's numbers came from.
+const (
+	sourceLocal    = "local"
+	sourcePeer     = "peer"
+	sourceExternal = "external"
+)
+
+// int64Ptr and f64Ptr mark a number that only some sources can produce. A nil
+// pointer serializes as null, which a renderer can show as "unknown" instead of
+// reading a zero as a real value.
+func int64Ptr(v int64) *int64   { return &v }
+func f64Ptr(v float64) *float64 { return &v }
+
 // shortDuration renders a span as the largest useful unit pair.
 func shortDuration(secs int64) string {
 	d := time.Duration(secs) * time.Second
@@ -324,23 +337,45 @@ type groupLagRow struct {
 }
 
 type partitionHealth struct {
-	Partition      int32   `json:"partition"`
-	Leader         int32   `json:"leader"`
-	LogEnd         int64   `json:"logEndOffset"`
-	Earliest       int64   `json:"earliestOffset"`
-	Messages       int64   `json:"messages"`
-	Bytes          int64   `json:"bytes"`
-	Lag            int64   `json:"lag"`
-	MessagesPerSec float64 `json:"messagesPerSec"`
-	BytesPerSec    float64 `json:"bytesPerSec"`
-	SkewRatio      float64 `json:"skewRatio"`
-	// DurableOffset is how far an fsync has covered. Everything between it and
-	// logEndOffset lives in the page cache only, which is the durability this
-	// broker can honestly promise.
+	Partition int32 `json:"partition"`
+	Leader    int32 `json:"leader"`
+	LogEnd    int64 `json:"logEndOffset"`
+	Earliest  int64 `json:"earliestOffset"`
+	Messages  int64 `json:"messages"`
+	Lag       int64 `json:"lag"`
+	// Bytes and byte rates are null for a cluster we only observe as a client:
+	// the Kafka protocol has no API for on-disk size, and a zero here would be
+	// read as "empty" rather than "unknown".
+	Bytes          *int64   `json:"bytes"`
+	MessagesPerSec float64  `json:"messagesPerSec"`
+	BytesPerSec    *float64 `json:"bytesPerSec"`
+	SkewRatio      float64  `json:"skewRatio"`
+	// Broker holds facts only the process that owns the log can know. It is
+	// null for an external cluster.
+	Broker *partitionBrokerFacts `json:"broker"`
+	// ISR carries the replica topology a real multi-broker cluster has and a
+	// single-node broker cannot: null when the source is not a cluster report.
+	ISR      []int32 `json:"isr,omitempty"`
+	Replicas []int32 `json:"replicas,omitempty"`
+}
+
+// partitionBrokerFacts is what the broker owning the log knows about durability
+// and policy debt.
+type partitionBrokerFacts struct {
 	DurableOffset      int64 `json:"durableOffset"`
 	OffsetsAtRisk      int64 `json:"offsetsAtRisk"`
 	BytesAtRisk        int64 `json:"bytesAtRisk"`
 	RetentionDebtBytes int64 `json:"retentionDebtBytes"`
+}
+
+// brokerFacts is the topic- and cluster-level half of the same thing.
+type brokerFacts struct {
+	BytesAtRisk         int64  `json:"bytesAtRisk"`
+	OffsetsAtRisk       int64  `json:"offsetsAtRisk"`
+	LastSyncAgeMs       *int64 `json:"lastSyncAgeMs"`
+	RetentionDebtBytes  int64  `json:"retentionDebtBytes"`
+	CompactionDebtBytes int64  `json:"compactionDebtBytes"`
+	LastCompactMs       int64  `json:"lastCompactMs,omitempty"`
 }
 
 // retentionRisk projects when a lagging group loses the offsets it still needs.
@@ -361,9 +396,7 @@ type topicHealth struct {
 	Partitions        int               `json:"partitions"`
 	ReplicationFactor int               `json:"replicationFactor"`
 	Messages          int64             `json:"messages"`
-	Bytes             int64             `json:"bytes"`
 	MessagesPerSec    float64           `json:"messagesPerSec"`
-	BytesPerSec       float64           `json:"bytesPerSec"`
 	RateSpanSeconds   float64           `json:"rateSpanSeconds"`
 	RateReliable      bool              `json:"rateReliable"`
 	Lag               int64             `json:"lag"`
@@ -376,47 +409,55 @@ type topicHealth struct {
 	Reasons           []healthReason    `json:"reasons"`
 	PartitionsDetail  []partitionHealth `json:"partitionsDetail"`
 	Sparkline         []float64         `json:"sparkline"` // msg/s, oldest first
-	// Broker-only facts, all of them cheap to read and impossible to observe
-	// from a client: what a power cut would cost, what retention has already
-	// given up on, and what compaction still owes.
-	BytesAtRisk         int64           `json:"bytesAtRisk"`
-	OffsetsAtRisk       int64           `json:"offsetsAtRisk"`
-	LastSyncAgeMs       *int64          `json:"lastSyncAgeMs"`
-	RetentionDebtBytes  int64           `json:"retentionDebtBytes"`
-	CompactionDebtBytes int64           `json:"compactionDebtBytes"`
-	LastCompactMs       int64           `json:"lastCompactMs"`
-	RetentionRisk       []retentionRisk `json:"retentionRisk"`
+	// Source says where the numbers came from: "local" (this broker), "peer"
+	// (another PocketKafka over its API), or "external" (any Kafka cluster we
+	// observe as a client). Fields a client cannot know are null or listed in
+	// unavailable, never zero.
+	Source      string   `json:"source"`
+	Unavailable []string `json:"unavailable,omitempty"`
+	// Bytes and byte rates are null for an external cluster: the protocol has no
+	// size API, and a zero would read as "empty" rather than "unknown".
+	Bytes       *int64   `json:"bytes"`
+	BytesPerSec *float64 `json:"bytesPerSec"`
+	// Broker carries durability and policy debt, null when this process does not
+	// own the log.
+	Broker        *brokerFacts    `json:"broker"`
+	RetentionRisk []retentionRisk `json:"retentionRisk"`
 }
 
 type clusterHealth struct {
-	ClusterID       string  `json:"clusterId"`
-	BrokerID        int32   `json:"brokerId"`
-	Version         string  `json:"version"`
-	Status          string  `json:"status"`
-	UptimeSeconds   float64 `json:"uptimeSeconds"`
-	Topics          int     `json:"topics"`
-	Partitions      int     `json:"partitions"`
-	Groups          int     `json:"groups"`
-	TotalBytes      int64   `json:"totalBytes"`
-	TotalMessages   int64   `json:"totalMessages"`
-	Lag             int64   `json:"lag"`
-	MaxPartitionLag int64   `json:"maxPartitionLag"`
-	// Broker-only durability and policy facts, summed over topics.
-	BytesAtRisk         int64          `json:"bytesAtRisk"`
-	OffsetsAtRisk       int64          `json:"offsetsAtRisk"`
-	LastSyncAgeMs       *int64         `json:"lastSyncAgeMs"`
-	RetentionDebtBytes  int64          `json:"retentionDebtBytes"`
-	CompactionDebtBytes int64          `json:"compactionDebtBytes"`
-	RetentionRisks      int            `json:"retentionRisks"`
-	MessagesPerSec      float64        `json:"messagesPerSec"`
-	BytesPerSec         float64        `json:"bytesPerSec"`
-	ConsumedPerSec      float64        `json:"consumedPerSec"`
-	RateSpanSeconds     float64        `json:"rateSpanSeconds"`
-	DiskUsagePct        float64        `json:"diskUsagePct"`
-	Listeners           []string       `json:"listeners"`
-	Advertised          string         `json:"advertised"`
-	Security            string         `json:"security"`
-	Reasons             []healthReason `json:"reasons"`
+	ClusterID     string  `json:"clusterId"`
+	BrokerID      int32   `json:"brokerId"`
+	Version       string  `json:"version"`
+	Status        string  `json:"status"`
+	UptimeSeconds float64 `json:"uptimeSeconds"`
+	Topics        int     `json:"topics"`
+	Partitions    int     `json:"partitions"`
+	Groups        int     `json:"groups"`
+	// TotalBytes and DiskUsagePct are null for an external cluster: no Kafka API
+	// reports on-disk size, and zero would read as an empty cluster.
+	TotalBytes      *int64 `json:"totalBytes"`
+	TotalMessages   int64  `json:"totalMessages"`
+	Lag             int64  `json:"lag"`
+	MaxPartitionLag int64  `json:"maxPartitionLag"`
+	// Source is "local", "peer", or "external".
+	Source string `json:"source"`
+	// Unavailable names the fields a client cannot observe for this source, so a
+	// renderer can hide them instead of showing a zero.
+	Unavailable     []string `json:"unavailable,omitempty"`
+	RetentionRisks  int      `json:"retentionRisks"`
+	MessagesPerSec  float64  `json:"messagesPerSec"`
+	BytesPerSec     *float64 `json:"bytesPerSec"`
+	ConsumedPerSec  float64  `json:"consumedPerSec"`
+	RateSpanSeconds float64  `json:"rateSpanSeconds"`
+	DiskUsagePct    *float64 `json:"diskUsagePct"`
+	Listeners       []string `json:"listeners"`
+	Advertised      string   `json:"advertised"`
+	Security        string   `json:"security"`
+	// Broker holds facts only the process owning the logs can know: null for an
+	// external cluster, summed over topics for a local one.
+	Broker  *brokerFacts   `json:"broker"`
+	Reasons []healthReason `json:"reasons"`
 }
 
 type historyPoint struct {
@@ -858,56 +899,56 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 
 	// Durability and policy debt roll up from the topic reports, and an
 	// un-synced backlog big enough to matter becomes a cluster-level warning.
-	var bytesAtRisk, offsetsAtRisk, retentionDebt, compactionDebt int64
-	var syncAgeMs *int64
+	var broker brokerFacts
 	retentionRisks := 0
 	for _, tr := range topicReports {
-		bytesAtRisk += tr.BytesAtRisk
-		offsetsAtRisk += tr.OffsetsAtRisk
-		retentionDebt += tr.RetentionDebtBytes
-		compactionDebt += tr.CompactionDebtBytes
+		if tr.Broker == nil {
+			continue // external cluster: this process owns none of the logs
+		}
+		broker.BytesAtRisk += tr.Broker.BytesAtRisk
+		broker.OffsetsAtRisk += tr.Broker.OffsetsAtRisk
+		broker.RetentionDebtBytes += tr.Broker.RetentionDebtBytes
+		broker.CompactionDebtBytes += tr.Broker.CompactionDebtBytes
 		retentionRisks += len(tr.RetentionRisk)
-		if tr.LastSyncAgeMs != nil && (syncAgeMs == nil || *tr.LastSyncAgeMs > *syncAgeMs) {
-			syncAgeMs = tr.LastSyncAgeMs
+		if tr.Broker.LastSyncAgeMs != nil &&
+			(broker.LastSyncAgeMs == nil || *tr.Broker.LastSyncAgeMs > *broker.LastSyncAgeMs) {
+			broker.LastSyncAgeMs = tr.Broker.LastSyncAgeMs
 		}
 	}
-	if bytesAtRisk >= ctx.th.UnflushedWarnBytes {
+	if broker.BytesAtRisk >= ctx.th.UnflushedWarnBytes {
 		status = worseStatus(status, StatusDegraded)
 		reasons = append(reasons, healthReason{
 			Code:     "unflushed_backlog",
 			Severity: "warn",
-			Message:  fmt.Sprintf("%.1f MiB written but not fsynced yet", float64(bytesAtRisk)/(1<<20)),
+			Message:  fmt.Sprintf("%.1f MiB written but not fsynced yet", float64(broker.BytesAtRisk)/(1<<20)),
 		})
 	}
 
 	report.Cluster = clusterHealth{
-		ClusterID:           s.clusterID,
-		BrokerID:            s.brokerID,
-		Version:             s.version,
-		Status:              status,
-		UptimeSeconds:       now.Sub(s.startTime).Seconds(),
-		Topics:              len(names),
-		Partitions:          clusterPartitions,
-		Groups:              len(report.Groups),
-		TotalBytes:          totalBytes,
-		TotalMessages:       totalMessages,
-		Lag:                 totalLagWithTopics(topicReports),
-		MaxPartitionLag:     maxLag,
-		BytesAtRisk:         bytesAtRisk,
-		OffsetsAtRisk:       offsetsAtRisk,
-		LastSyncAgeMs:       syncAgeMs,
-		RetentionDebtBytes:  retentionDebt,
-		CompactionDebtBytes: compactionDebt,
-		RetentionRisks:      retentionRisks,
-		MessagesPerSec:      msgRate,
-		BytesPerSec:         byteRate,
-		ConsumedPerSec:      consumeRate,
-		RateSpanSeconds:     dt.Seconds(),
-		DiskUsagePct:        diskPct,
-		Listeners:           s.listeners,
-		Advertised:          s.advertised,
-		Security:            s.securityMode,
-		Reasons:             reasons,
+		ClusterID:       s.clusterID,
+		BrokerID:        s.brokerID,
+		Version:         s.version,
+		Status:          status,
+		UptimeSeconds:   now.Sub(s.startTime).Seconds(),
+		Topics:          len(names),
+		Partitions:      clusterPartitions,
+		Groups:          len(report.Groups),
+		Source:          sourceLocal,
+		TotalBytes:      int64Ptr(totalBytes),
+		TotalMessages:   totalMessages,
+		Lag:             totalLagWithTopics(topicReports),
+		MaxPartitionLag: maxLag,
+		RetentionRisks:  retentionRisks,
+		MessagesPerSec:  msgRate,
+		BytesPerSec:     f64Ptr(byteRate),
+		ConsumedPerSec:  consumeRate,
+		RateSpanSeconds: dt.Seconds(),
+		DiskUsagePct:    f64Ptr(diskPct),
+		Listeners:       s.listeners,
+		Advertised:      s.advertised,
+		Security:        s.securityMode,
+		Broker:          &broker,
+		Reasons:         reasons,
 	}
 	report.Topics = topicReports
 
@@ -1004,14 +1045,17 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		bytes += l.bytes
 	}
 	row.Messages = messages
-	row.Bytes = bytes
+	row.Bytes = int64Ptr(bytes)
+	row.Source = sourceLocal
 
-	// Durability and policy debt, aggregated over the topic's partitions.
+	// Durability and policy debt, aggregated over the topic's partitions. A
+	// topic this process does not own reports null instead.
 	var oldestSync int64
+	var broker brokerFacts
 	for _, l := range lives {
-		row.BytesAtRisk += l.atRisk
-		row.OffsetsAtRisk += l.atRiskOffsets
-		row.RetentionDebtBytes += l.debt
+		broker.BytesAtRisk += l.atRisk
+		broker.OffsetsAtRisk += l.atRiskOffsets
+		broker.RetentionDebtBytes += l.debt
 		if l.syncMs > 0 && (oldestSync == 0 || l.syncMs < oldestSync) {
 			oldestSync = l.syncMs
 		}
@@ -1021,7 +1065,7 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		if ageMs < 0 {
 			ageMs = 0
 		}
-		row.LastSyncAgeMs = &ageMs
+		broker.LastSyncAgeMs = &ageMs
 	}
 	if s.store.IsCompacted(name) {
 		var lastCompact int64
@@ -1031,13 +1075,14 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 				continue
 			}
 			debt, ms := p.CompactionDebt()
-			row.CompactionDebtBytes += debt
+			broker.CompactionDebtBytes += debt
 			if ms > lastCompact {
 				lastCompact = ms
 			}
 		}
-		row.LastCompactMs = lastCompact
+		broker.LastCompactMs = lastCompact
 	}
+	row.Broker = &broker
 
 	cur, hasCur := lastTopic(series)
 	base, dt := topicBaseline(series, window, now)
@@ -1045,7 +1090,7 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 	row.RateReliable = ctx.topicRateReliable(series)
 	if hasCur && dt > 0 {
 		row.MessagesPerSec = rate(float64(cur.Messages-base.Messages), dt)
-		row.BytesPerSec = rate(float64(cur.Bytes-base.Bytes), dt)
+		row.BytesPerSec = f64Ptr(rate(float64(cur.Bytes-base.Bytes), dt))
 		row.LagPerSec = rate(float64(cur.Lag-base.Lag), dt)
 	}
 	if hasCur {
@@ -1079,16 +1124,18 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 
 	for _, l := range lives {
 		ph := partitionHealth{
-			Partition:          l.pid,
-			Leader:             s.brokerID,
-			LogEnd:             l.leo,
-			Earliest:           l.earliest,
-			Messages:           nonNegative(l.leo - l.earliest),
-			Bytes:              l.bytes,
-			DurableOffset:      l.durable,
-			OffsetsAtRisk:      l.atRiskOffsets,
-			BytesAtRisk:        l.atRisk,
-			RetentionDebtBytes: l.debt,
+			Partition: l.pid,
+			Leader:    s.brokerID,
+			LogEnd:    l.leo,
+			Earliest:  l.earliest,
+			Messages:  nonNegative(l.leo - l.earliest),
+			Bytes:     int64Ptr(l.bytes),
+			Broker: &partitionBrokerFacts{
+				DurableOffset:      l.durable,
+				OffsetsAtRisk:      l.atRiskOffsets,
+				BytesAtRisk:        l.atRisk,
+				RetentionDebtBytes: l.debt,
+			},
 		}
 		if m, ok := lagByPart[l.pid]; ok {
 			ph.Lag = m
@@ -1100,7 +1147,7 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		if pcur, pok := lastPartition(series, l.pid); pok && dt > 0 {
 			if pbase, bok := partitionBaseline(series, l.pid, window, now); bok {
 				ph.MessagesPerSec = rate(float64(pcur.Messages-pbase.Messages), dt)
-				ph.BytesPerSec = rate(float64(pcur.Bytes-pbase.Bytes), dt)
+				ph.BytesPerSec = f64Ptr(rate(float64(pcur.Bytes-pbase.Bytes), dt))
 			}
 		}
 		row.PartitionsDetail = append(row.PartitionsDetail, ph)
@@ -1291,12 +1338,31 @@ func (s *Server) handleHealthOverview(w http.ResponseWriter, r *http.Request) {
 			th.UnflushedWarnBytes = n
 		}
 	}
-	// A named cluster is proxied from the peer, so the dashboard renders a
-	// remote broker through exactly the same code path as the local one.
+	// A named cluster is served through the same response path as the local
+	// broker: proxied from a peer over its API, or built here from a read-only
+	// client session for a Kafka cluster we do not host.
 	if name := q.Get("cluster"); name != "" && name != "local" {
 		entry, ok := s.clusters.Get(name)
 		if !ok {
 			writeErr(w, http.StatusNotFound, "unknown cluster: "+name)
+			return
+		}
+		if normalizeKind(entry.Kind) == clusterKindKafka {
+			// The first request starts the sampler. A short grace lets a small
+			// cluster answer with real data straight away; a large one answers
+			// with "no sample yet" and fills in on the next poll.
+			ec := s.externalFor(entry)
+			ec.awaitFirstSample(r.Context(), 1500*time.Millisecond)
+			report, err := s.externalOverview(name, window, time.Now())
+			if err != nil {
+				writeErr(w, http.StatusBadGateway, "cluster "+name+": "+err.Error())
+				return
+			}
+			report.Sampling.WindowSeconds = int(window.Seconds())
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-PocketKafka-Cluster", name)
+			w.Header().Set("X-PocketKafka-Source", sourceExternal)
+			writeJSON(w, http.StatusOK, report)
 			return
 		}
 		body, _, err := s.fetchClusterReport(r.Context(), entry, window, s.clusters.Token(name))
