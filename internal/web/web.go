@@ -125,6 +125,14 @@ func (s *Server) WithMQTT(b *gateway.MQTTBridge, listen string, running bool) *S
 	s.mqtt = b
 	s.mqttListen = listen
 	s.mqttRunning = running
+	// The bridge is only reachable from here, so it registers its own scrape-time
+	// gauge. Registered even when Start failed: zero connections is the truthful
+	// value, and a missing series would read as "not scraped".
+	if b != nil && s.metrics != nil {
+		s.metrics.RegisterGauge("pocketkafka_mqtt_connections", "Live MQTT client connections", func() float64 {
+			return float64(b.ActiveClients())
+		})
+	}
 	return s
 }
 

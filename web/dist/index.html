@@ -1965,7 +1965,9 @@ function renderIntegrations(d){
     <pre id="scrapeCfg">${esc(scrapeYaml)}</pre>
     ${copyRow('scrapeCfg','Snippet')}
     <div class="statSub" style="margin-top:8px">Import ${esc(metrics.grafanaDashboard||'-')} into Grafana.</div>
-    <div class="muted" style="font-size:11px;margin-top:6px">Only pocketkafka_messages_in_total and pocketkafka_bytes_in_total per topic are exported today.</div>
+    <div class="muted" style="font-size:11px;margin-top:6px">Exported metrics</div>
+    <div class="mono" style="font-size:11px">pocketkafka_messages_in_total{topic} &middot; pocketkafka_bytes_in_total{topic} &middot; pocketkafka_consumer_lag{group,topic,partition} &middot; pocketkafka_request_latency_seconds{api} &middot; pocketkafka_topic_log_end_offset{topic,partition} &middot; pocketkafka_topic_bytes{topic,partition} &middot; pocketkafka_disk_usage_ratio &middot; pocketkafka_mqtt_connections</div>
+    <div class="muted" style="font-size:11px;margin-top:4px">Broker totals (pocketkafka_topics, pocketkafka_partitions, pocketkafka_total_bytes, pocketkafka_total_messages, pocketkafka_broker_uptime_seconds) are exported too; the two *_in_total counters appear once records flow.</div>
   </div>`;
   return mqttCard+restCard+srCard+metricsCard;
 }

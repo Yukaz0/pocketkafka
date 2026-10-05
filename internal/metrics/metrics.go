@@ -13,6 +13,14 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 )
 
+// gauge is a metric evaluated at scrape time (as opposed to a counter this
+// registry accumulates itself).
+type gauge struct {
+	name  string
+	help  string
+	value func() float64
+}
+
 // Registry accumulates counters and renders Prometheus text format.
 type Registry struct {
 	mu        sync.Mutex
@@ -27,6 +35,9 @@ type Registry struct {
 	latencyCounts  map[string][]uint64 // api -> bucket counts
 	latencySum     map[string]float64
 	latencyTotal   map[string]uint64
+
+	// Gauges registered by components outside this package.
+	gauges []gauge
 }
 
 // NewRegistry builds an empty metrics registry.
@@ -42,7 +53,19 @@ func NewRegistry() *Registry {
 	}
 }
 
-// ObserveProduce records one produced batch for the metrics registry.
+// RegisterGauge registers a gauge evaluated on every Render. It exists for
+// components this package cannot see — the MQTT bridge lives in the web server,
+// not in the storage engine — so the owner of the value registers it instead of
+// this package learning about every subsystem. Call it during wiring, before
+// the server starts serving.
+func (r *Registry) RegisterGauge(name, help string, value func() float64) {
+	if name == "" || value == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.gauges = append(r.gauges, gauge{name: name, help: help, value: value})
+}
 
 // Render produces the Prometheus text exposition.
 func (r *Registry) Render(store *storage.Store, gm *coordinator.GroupManager, clusterID string) string {
@@ -67,6 +90,7 @@ func (r *Registry) Render(store *storage.Store, gm *coordinator.GroupManager, cl
 	for k, v := range r.latencyTotal {
 		latTotal[k] = v
 	}
+	registered := append([]gauge(nil), r.gauges...)
 	r.mu.Unlock()
 
 	var b strings.Builder
@@ -145,6 +169,27 @@ func (r *Registry) Render(store *storage.Store, gm *coordinator.GroupManager, cl
 	fmt.Fprintf(&b, "pocketkafka_partitions %d\n", partitions)
 	fmt.Fprintf(&b, "pocketkafka_total_bytes %d\n", totalBytes)
 	fmt.Fprintf(&b, "pocketkafka_total_messages %d\n", totalMsgs)
+
+	// Filesystem pressure: a fact only the process holding the data dir can
+	// report, and statfs is metadata-only, so it is cheap at the scrape interval.
+	fmt.Fprintf(&b, "# HELP pocketkafka_disk_usage_ratio Fraction of the data directory filesystem in use\n")
+	fmt.Fprintf(&b, "# TYPE pocketkafka_disk_usage_ratio gauge\n")
+	fmt.Fprintf(&b, "pocketkafka_disk_usage_ratio %g\n", store.DiskUsagePct()/100)
+
+	// Gauges owned by other components (see RegisterGauge). One name registered
+	// twice would repeat its HELP/TYPE lines, which Prometheus rejects as a
+	// duplicate, so the header is emitted once per family.
+	seen := make(map[string]bool, len(registered))
+	for _, g := range registered {
+		if !seen[g.name] {
+			seen[g.name] = true
+			if g.help != "" {
+				fmt.Fprintf(&b, "# HELP %s %s\n", g.name, g.help)
+			}
+			fmt.Fprintf(&b, "# TYPE %s gauge\n", g.name)
+		}
+		fmt.Fprintf(&b, "%s %g\n", g.name, g.value())
+	}
 
 	return b.String()
 }
