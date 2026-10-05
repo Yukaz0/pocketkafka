@@ -45,6 +45,11 @@ type OffsetStore struct {
 	wal     *offsetWAL
 	walMu   sync.Mutex
 	walN    int
+	// compacting guards against overlapping background compactions; closed
+	// stops new ones from starting so Close can drain them.
+	compacting bool
+	closed     bool
+	compactWG  sync.WaitGroup
 
 	offsets map[string]map[string]map[int32]*CommittedOffset // group -> topic -> partition
 }
@@ -92,53 +97,108 @@ func NewOffsetStore(backend, dir string) (*OffsetStore, error) {
 	return s, nil
 }
 
+// OffsetCommitRecord is one offset to persist in a batched commit.
+type OffsetCommitRecord struct {
+	Group     string
+	Topic     string
+	Partition int32
+	Offset    *CommittedOffset
+}
+
 // Commit stores an offset for a group/topic/partition and logs it to the WAL.
 func (s *OffsetStore) Commit(group, topic string, partition int32, off *CommittedOffset) error {
-	if off.UpdatedAt == 0 {
-		off.UpdatedAt = time.Now().UnixNano()
+	return s.CommitBatch([]OffsetCommitRecord{{Group: group, Topic: topic, Partition: partition, Offset: off}})
+}
+
+// CommitBatch applies several committed offsets to memory and appends them to
+// the WAL with a single fsync, so an OffsetCommit request touching N partitions
+// pays one fsync instead of N.
+func (s *OffsetStore) CommitBatch(records []OffsetCommitRecord) error {
+	if len(records) == 0 {
+		return nil
 	}
+	now := time.Now().UnixNano()
+	recs := make([]walRecord, 0, len(records))
 	s.mu.Lock()
-	gt, ok := s.offsets[group]
-	if !ok {
-		gt = make(map[string]map[int32]*CommittedOffset)
-		s.offsets[group] = gt
+	for _, r := range records {
+		off := r.Offset
+		if off.UpdatedAt == 0 {
+			off.UpdatedAt = now
+		}
+		gt, ok := s.offsets[r.Group]
+		if !ok {
+			gt = make(map[string]map[int32]*CommittedOffset)
+			s.offsets[r.Group] = gt
+		}
+		tp, ok := gt[r.Topic]
+		if !ok {
+			tp = make(map[int32]*CommittedOffset)
+			gt[r.Topic] = tp
+		}
+		tp[r.Partition] = off
+		recs = append(recs, walRecord{
+			Type:        walRecordCommit,
+			Group:       r.Group,
+			Topic:       r.Topic,
+			Partition:   r.Partition,
+			Offset:      off.Offset,
+			LeaderEpoch: off.LeaderEpoch,
+			Metadata:    off.Metadata,
+			Timestamp:   off.UpdatedAt,
+		})
 	}
-	tp, ok := gt[topic]
-	if !ok {
-		tp = make(map[int32]*CommittedOffset)
-		gt[topic] = tp
-	}
-	tp[partition] = off
 	s.mu.Unlock()
 
 	if s.wal == nil {
 		return nil
 	}
-	return s.appendAndMaybeCompact(walRecord{
-		Type:        walRecordCommit,
-		Group:       group,
-		Topic:       topic,
-		Partition:   partition,
-		Offset:      off.Offset,
-		LeaderEpoch: off.LeaderEpoch,
-		Metadata:    off.Metadata,
-		Timestamp:   off.UpdatedAt,
-	})
+	return s.appendAndMaybeCompact(recs)
 }
 
-func (s *OffsetStore) appendAndMaybeCompact(rec walRecord) error {
+// appendAndMaybeCompact appends the records and, when the WAL has grown past the
+// compaction threshold, starts a background compaction. Compaction holds walMu
+// across the snapshot encode and the WAL reset, which is what keeps an
+// acknowledged commit from being truncated away; running it in the background
+// means the caller's group lock is not held for the duration of the I/O.
+func (s *OffsetStore) appendAndMaybeCompact(recs []walRecord) error {
 	s.walMu.Lock()
-	if err := s.wal.append(rec); err != nil {
+	if err := s.wal.appendBatch(recs); err != nil {
 		s.walMu.Unlock()
 		return err
 	}
-	s.walN++
-	compact := s.walN >= walCompactThreshold
+	s.walN += len(recs)
+	trigger := s.walN >= walCompactThreshold && !s.compacting && !s.closed
+	if trigger {
+		s.compacting = true
+		s.compactWG.Add(1)
+	}
 	s.walMu.Unlock()
-	if compact {
-		return s.compact()
+
+	if trigger {
+		go s.compactAsync()
 	}
 	return nil
+}
+
+func (s *OffsetStore) compactAsync() {
+	defer s.compactWG.Done()
+	_ = s.compact()
+	s.walMu.Lock()
+	s.compacting = false
+	s.walMu.Unlock()
+}
+
+// DeleteGroup removes every committed offset for a group and persists the
+// result, matching Kafka's DeleteGroups semantics.
+func (s *OffsetStore) DeleteGroup(group string) error {
+	s.mu.Lock()
+	_, ok := s.offsets[group]
+	delete(s.offsets, group)
+	s.mu.Unlock()
+	if !ok || s.wal == nil {
+		return nil
+	}
+	return s.compact()
 }
 
 // Fetch returns the committed offset for a group/topic/partition, or nil.
@@ -264,6 +324,13 @@ func (s *OffsetStore) Close() error {
 	if s.wal == nil {
 		return nil
 	}
+	// Stop new background compactions and wait for any in-flight one before
+	// touching the WAL, so compact() and close() cannot race it.
+	s.walMu.Lock()
+	s.closed = true
+	s.walMu.Unlock()
+	s.compactWG.Wait()
+
 	err := s.compact()
 	if cerr := s.wal.close(); err == nil {
 		err = cerr
@@ -322,9 +389,20 @@ func (s *OffsetStore) replayWAL() error {
 }
 
 // compact writes a fresh snapshot and truncates the WAL. Callers must not hold
-// s.mu.
+// s.mu or walMu.
 func (s *OffsetStore) compact() error {
+	s.walMu.Lock()
+	defer s.walMu.Unlock()
+	return s.compactLocked()
+}
+
+// compactLocked writes a fresh snapshot and truncates the WAL. The caller must
+// hold walMu, which keeps the snapshot encode and the reset atomic with respect
+// to concurrent commits. It takes s.mu.RLock to encode; commits are designed to
+// release s.mu before acquiring walMu, so the lock order is safe.
+func (s *OffsetStore) compactLocked() error {
 	if s.path == "" {
+		s.walN = 0
 		return nil
 	}
 	s.mu.RLock()
@@ -337,8 +415,6 @@ func (s *OffsetStore) compact() error {
 	if err := atomicfile.Write(s.path, buf.Bytes(), 0o600); err != nil {
 		return err
 	}
-	s.walMu.Lock()
-	defer s.walMu.Unlock()
 	if err := s.wal.reset(); err != nil {
 		return err
 	}

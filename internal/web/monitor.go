@@ -209,6 +209,17 @@ func (m *Monitor) Record(store *storage.Store, gm *coordinator.GroupManager, now
 	if store == nil {
 		return false
 	}
+	// Cheap early exit: a non-forced sample inside the interval is never
+	// recorded, so skip the group merge and store scan entirely. The locked
+	// re-check below stays authoritative against racing callers.
+	if !force {
+		m.mu.Lock()
+		due := m.lastAt.IsZero() || now.Sub(m.lastAt) >= m.interval
+		m.mu.Unlock()
+		if !due {
+			return false
+		}
+	}
 	views := mergedGroupViews(gm)
 	lagByTopic, groupLag := lagMaps(views, store)
 
@@ -1437,10 +1448,10 @@ func trimSamples[T interface{ sampleTime() time.Time }](s []T, now time.Time, re
 		first++
 	}
 	if first > 0 {
-		s = append([]T(nil), s[first:]...)
+		s = s[first:]
 	}
 	if len(s) > max {
-		s = append([]T(nil), s[len(s)-max:]...)
+		s = s[len(s)-max:]
 	}
 	return s
 }

@@ -60,12 +60,26 @@ type externalClusterClient interface {
 	DescribeGroupsAll([]string) (map[string]client.GroupState, error)
 	DescribeGroup(string) (client.GroupState, error)
 	GroupOffsets(string) (map[string]map[int32]int64, error)
+	FetchRecords(string, int32, int64, int) ([]client.FetchedRecord, int64, error)
 	ClusterID() string
 	Controller() int32
 	Brokers() []client.Broker
 }
 
 var errExternalClientClosed = errors.New("external Kafka client is closed")
+
+// listCacheTTL bounds how stale a cached topic or group list may be. The
+// sampler's own snapshot runs on the same cadence, so a cached list is never
+// older than the health data shown beside it.
+const listCacheTTL = 15 * time.Second
+
+// listCacheEntry is one cached list answer for an external target. refreshing
+// marks a background re-read in flight so a poll storm starts only one.
+type listCacheEntry struct {
+	at         time.Time
+	body       []byte
+	refreshing bool
+}
 
 // externalCluster samples one registered "kafka" entry.
 type externalCluster struct {
@@ -81,8 +95,18 @@ type externalCluster struct {
 	mu sync.Mutex
 	// clientMu protects cc/closed and serializes creation, reads, failure, and close.
 	// When both locks are needed, acquire clientMu before mu.
-	clientMu  sync.Mutex
-	cc        externalClusterClient
+	clientMu sync.Mutex
+	cc       externalClusterClient
+	// readMu guards ic, the Data Browser's own connection. It is deliberately
+	// separate from the sampler's: a pass over a large remote cluster holds
+	// clientMu for seconds, and an interactive read queued behind it is a page
+	// that looks hung. Never held together with clientMu.
+	readMu sync.Mutex
+	ic     *client.ClusterClient
+	// listMu guards listCache, the short-lived copy of the topic and group list
+	// answers. Never held with clientMu or readMu.
+	listMu    sync.Mutex
+	listCache map[string]listCacheEntry
 	closed    bool
 	series    []clusterSample
 	topicRing map[string][]topicSample
@@ -152,6 +176,13 @@ func (e *externalCluster) Close() {
 	e.clientMu.Unlock()
 	if cc != nil {
 		cc.Close()
+	}
+	e.readMu.Lock()
+	ic := e.ic
+	e.ic = nil
+	e.readMu.Unlock()
+	if ic != nil {
+		ic.Close()
 	}
 }
 
@@ -352,6 +383,92 @@ func (e *externalCluster) withClient(read func(externalClusterClient) error) err
 		e.cc = cc
 	}
 	return read(e.cc)
+}
+
+// cachedList returns the last stored answer for a target list endpoint. A copy
+// older than listCacheTTL is still served — the caller gets an answer now — and
+// a single background refresh is started through the refresher so the next
+// caller gets a fresh one. Only a cold cache (nothing stored yet) reports false.
+func (e *externalCluster) cachedList(path string, refresh func()) ([]byte, bool) {
+	e.listMu.Lock()
+	entry, ok := e.listCache[path]
+	if !ok {
+		e.listMu.Unlock()
+		return nil, false
+	}
+	if time.Since(entry.at) > listCacheTTL && !entry.refreshing {
+		entry.refreshing = true
+		e.listCache[path] = entry
+		e.listMu.Unlock()
+		go func() {
+			refresh()
+			e.listMu.Lock()
+			// Clear the flag even when the refresh failed, so the next caller
+			// tries again instead of waiting for a refresh that never comes.
+			if current, ok := e.listCache[path]; ok && current.refreshing {
+				current.refreshing = false
+				e.listCache[path] = current
+			}
+			e.listMu.Unlock()
+		}()
+		return entry.body, true
+	}
+	e.listMu.Unlock()
+	return entry.body, true
+}
+
+// storeList keeps one list answer for the next poll or page reload.
+func (e *externalCluster) storeList(path string, body []byte) {
+	e.listMu.Lock()
+	defer e.listMu.Unlock()
+	if e.listCache == nil {
+		e.listCache = make(map[string]listCacheEntry)
+	}
+	e.listCache[path] = listCacheEntry{at: time.Now(), body: append([]byte(nil), body...)}
+}
+
+// withReadClient runs one interactive read (Data Browser page, topic list,
+// group list) on a connection of its own. The sampler holds clientMu for its
+// whole pass, which on a large remote cluster is seconds; an interactive read
+// waiting for it is a page that never loads. A failed read drops the connection
+// so the next request dials fresh instead of reusing a broken one.
+func (e *externalCluster) withReadClient(read func(externalClusterClient) error) error {
+	e.readMu.Lock()
+	defer e.readMu.Unlock()
+	e.clientMu.Lock()
+	closed := e.closed
+	e.clientMu.Unlock()
+	if closed {
+		return errExternalClientClosed
+	}
+	if e.ic == nil {
+		cc, err := client.NewClusterClient(e.seeds, e.clientID, client.Options{SASL: e.sasl, ReadOnly: true})
+		if err != nil {
+			return err
+		}
+		e.ic = cc
+	}
+	if err := read(e.ic); err != nil {
+		e.ic.Close()
+		e.ic = nil
+		return err
+	}
+	return nil
+}
+
+// newReadClient dials an independent read-only client for a streaming session
+// (live tail). It is deliberately separate from the sampler's shared client so a
+// long-lived stream never holds clientMu and never starves sampling. The dial
+// runs outside the lock for the same reason: an unreachable seed would block
+// every sampler pass for the whole connect timeout.
+func (e *externalCluster) newReadClient() (*client.ClusterClient, error) {
+	e.clientMu.Lock()
+	closed := e.closed
+	e.clientMu.Unlock()
+	if closed {
+		return nil, errExternalClientClosed
+	}
+	return client.NewClusterClient(e.seeds, e.clientID, client.Options{SASL: e.sasl, ReadOnly: true})
 }
 
 // build turns one pass into a report. The caller holds e.mu.

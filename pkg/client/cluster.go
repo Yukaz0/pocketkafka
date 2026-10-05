@@ -245,6 +245,131 @@ func (cc *ClusterClient) ListStartOffsets(topic string) (map[int32]int64, error)
 	return cc.listOffsets(topic, -2)
 }
 
+// FetchedRecord is one record read from a partition, with the timestamp and
+// headers the record batch carries.
+type FetchedRecord struct {
+	Offset    int64
+	Timestamp int64
+	Key       []byte
+	Value     []byte
+	Headers   []protocol.RecordHeader
+}
+
+// FetchRecords reads from topic/partition starting at offset, bounded by
+// maxBytes, and returns the records plus the offset to fetch next. A short read
+// means the log end was reached when the broker answered. The request goes to
+// the partition leader: a broker that does not lead the partition answers
+// NOT_LEADER, it does not proxy.
+func (cc *ClusterClient) FetchRecords(topic string, partition int32, offset int64, maxBytes int) ([]FetchedRecord, int64, error) {
+	leader, ok := cc.leaderFor(topic, partition)
+	if !ok {
+		return nil, offset, fmt.Errorf("unknown partition %s/%d", topic, partition)
+	}
+	if maxBytes <= 0 {
+		maxBytes = 1 << 20
+	}
+	records, next, err := cc.fetchFrom(leader, topic, partition, offset, maxBytes)
+	if err == nil {
+		return records, next, nil
+	}
+	// One refresh lets a moved leadership take effect; a second failure is the
+	// broker's answer and ends the read.
+	if rerr := cc.Refresh(); rerr != nil {
+		return nil, offset, err
+	}
+	moved, ok := cc.leaderFor(topic, partition)
+	if !ok || moved == leader {
+		return nil, offset, err
+	}
+	records, next, err = cc.fetchFrom(moved, topic, partition, offset, maxBytes)
+	if err != nil {
+		return nil, offset, err
+	}
+	return records, next, nil
+}
+
+// leaderFor resolves the current leader of one partition from cached metadata.
+func (cc *ClusterClient) leaderFor(topic string, partition int32) (int32, bool) {
+	info, ok := cc.topicInfo(topic)
+	if !ok {
+		return 0, false
+	}
+	for _, p := range info.Partitions {
+		if p.ID == partition {
+			return p.Leader, true
+		}
+	}
+	return 0, false
+}
+
+func (cc *ClusterClient) fetchFrom(brokerID int32, topic string, partition int32, offset int64, maxBytes int) ([]FetchedRecord, int64, error) {
+	cl, err := cc.brokerFor(brokerID)
+	if err != nil {
+		return nil, offset, err
+	}
+	req := &protocol.FetchRequest{
+		Version:        cl.version(protocol.APKFetch),
+		ReplicaID:      -1,
+		MaxWaitMillis:  0,
+		MinBytes:       0,
+		MaxBytes:       int32(maxBytes),
+		IsolationLevel: 0,
+		Topics: []protocol.FetchRequestTopic{{
+			Topic: topic,
+			Partitions: []protocol.FetchRequestPartition{{
+				Partition:         partition,
+				FetchOffset:       offset,
+				PartitionMaxBytes: int32(maxBytes),
+			}},
+		}},
+	}
+	body, err := protocol.EncodeFetchRequest(req)
+	if err != nil {
+		return nil, offset, err
+	}
+	respBody, err := cl.RoundTrip(protocol.APKFetch, req.Version, body)
+	if err != nil {
+		return nil, offset, err
+	}
+	resp, err := protocol.DecodeFetchResponse(req.Version, respBody)
+	if err != nil {
+		return nil, offset, err
+	}
+	if len(resp.Topics) == 0 || len(resp.Topics[0].Partitions) == 0 {
+		return nil, offset, nil
+	}
+	p := resp.Topics[0].Partitions[0]
+	if p.ErrorCode != protocol.ErrNone {
+		return nil, offset, fmt.Errorf("fetch %s/%d on broker %d: kafka error code %d", topic, partition, brokerID, p.ErrorCode)
+	}
+	if len(p.Records) == 0 {
+		return nil, p.HighWatermark, nil
+	}
+	batch, err := protocol.DecodeRecordBatch(p.Records)
+	if err != nil {
+		return nil, offset, err
+	}
+	out := make([]FetchedRecord, 0, len(batch.Records))
+	for _, rec := range batch.Records {
+		abs := batch.BaseOffset + int64(rec.OffsetDelta)
+		if abs < offset {
+			continue
+		}
+		out = append(out, FetchedRecord{
+			Offset:    abs,
+			Timestamp: batch.BaseTimestamp + rec.TimestampDelta,
+			Key:       rec.Key,
+			Value:     rec.Value,
+			Headers:   rec.Headers,
+		})
+	}
+	next := offset
+	if len(out) > 0 {
+		next = out[len(out)-1].Offset + 1
+	}
+	return out, next, nil
+}
+
 // listOffsets reads one timestamp position (-1 latest, -2 earliest) for every
 // partition of a topic, sending each request to the partition's leader: a broker
 // that does not lead the partition answers NOT_LEADER, it does not proxy. The

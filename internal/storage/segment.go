@@ -160,9 +160,10 @@ func (s *Segment) append(raw []byte) (int64, error) {
 	s.size += int64(n)
 	s.nextOffset += int64(h.LastOffsetDelta) + 1
 
-	if err := s.index.maybeAppend(assigned, pos); err != nil {
-		return 0, err
-	}
+	// The sparse index is an accelerator that is rebuilt on reopen and after a
+	// truncation, so failing to extend it must not fail an append whose data is
+	// already on disk: the client would retry and duplicate the batch.
+	_ = s.index.maybeAppend(assigned, pos)
 	return assigned, nil
 }
 
@@ -175,9 +176,16 @@ func (s *Segment) full() bool {
 // read returns raw RecordBatch bytes starting at or containing offset, up to
 // maxBytes. Batches whose last offset is strictly before the requested offset
 // are skipped.
+//
+// It preallocates the output to maxBytes and reads each batch straight into it
+// (one pread for the 12-byte header, one for the whole batch), so a fetch
+// neither allocates nor copies per batch.
 func (s *Segment) read(offset int64, maxBytes int32) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, nil
+	}
 	pos := s.index.positionForOffset(offset)
-	var out []byte
+	out := make([]byte, 0, maxBytes)
 	var prefix [12]byte
 
 	for pos < s.size && int32(len(out)) < maxBytes {
@@ -187,27 +195,39 @@ func (s *Segment) read(offset int64, maxBytes int32) ([]byte, error) {
 			}
 			return out, err
 		}
-		baseOffset := int64(binary.BigEndian.Uint64(prefix[0:8]))
 		length := int32(binary.BigEndian.Uint32(prefix[8:12]))
 		if length <= 0 || pos+12+int64(length) > s.size {
 			break
 		}
-		lastOffsetDelta := int32(0)
-		var delta [4]byte
-		if _, err := s.logFile.ReadAt(delta[:], pos+23); err == nil {
-			lastOffsetDelta = int32(binary.BigEndian.Uint32(delta[:]))
+		total := 12 + int64(length)
+		if total < batchHeaderSize {
+			break // truncated/corrupt batch header
 		}
-		// Determine whether this batch overlaps the requested offset range.
+		// Read the whole batch directly into the output buffer, then parse the
+		// offset range from the bytes we just read. A batch larger than the
+		// remaining capacity (a single batch can exceed maxBytes) grows the
+		// buffer; otherwise this is a plain reslice with no allocation.
+		start := len(out)
+		if end := start + int(total); end <= cap(out) {
+			out = out[:end]
+		} else {
+			grown := make([]byte, end)
+			copy(grown, out)
+			out = grown
+		}
+		if _, err := s.logFile.ReadAt(out[start:], pos); err != nil {
+			return out[:start], err
+		}
+		baseOffset := int64(binary.BigEndian.Uint64(out[start : start+8]))
+		// LastOffsetDelta lives at offset 23 within the batch (11 into the
+		// 12-byte prefix + length region).
+		lastOffsetDelta := int32(binary.BigEndian.Uint32(out[start+23 : start+27]))
+		pos += total
 		if baseOffset+int64(lastOffsetDelta) < offset {
-			pos += 12 + int64(length)
+			// Entirely before the requested offset: drop it without copying.
+			out = out[:start]
 			continue
 		}
-		buf := make([]byte, 12+int64(length))
-		if _, err := s.logFile.ReadAt(buf, pos); err != nil {
-			return out, err
-		}
-		out = append(out, buf...)
-		pos += 12 + int64(length)
 	}
 	return out, nil
 }
@@ -322,8 +342,8 @@ func (s *Segment) markRemote(logKey, indexKey string) error {
 	s.index = nil
 	s.size = 0
 	s.remote = true
-	os.Remove(trimSuffix(s.logPath(), ".log"))
-	os.Remove(trimSuffix(s.indexPath(), ".index"))
+	os.Remove(s.logPath())
+	os.Remove(s.indexPath())
 	return nil
 }
 
@@ -378,6 +398,16 @@ func (s *Segment) logPath() string {
 
 func (s *Segment) indexPath() string {
 	return filepath.Join(s.dir, fmt.Sprintf("%020d.index", s.baseOffset))
+}
+
+// modTime reports the last-modified time of the segment. An offloaded segment
+// has no local .log, so its .remote stub stands in for it; this never depends
+// on logFile, which is nil for remote segments.
+func (s *Segment) modTime() (time.Time, error) {
+	if s.isRemote() {
+		return fileMtime(s.remoteStub)
+	}
+	return fileMtime(s.logPath())
 }
 
 // sync flushes the segment's log and index to stable storage so an

@@ -194,6 +194,17 @@ curl -X POST http://localhost:8082/topics/orders/messages \
   -d '{"key": "user-1", "value": {"event": "login"}}'
 ```
 
+### 5. MQTT 3.1.1 Bridge
+
+An MQTT publish to `sensors/<device>/<metric>` is stored in the Kafka topic
+`mqtt-<device-group>`, keyed by `<device>`. The original MQTT topic is preserved
+on the record as the `mqtt-topic` header, so subscribers receive the topic they
+published to and subscription filters (`+`, `#`) are matched against it instead
+of the derived Kafka topic name. QoS 0 and QoS 1 are acknowledged (`PUBACK`);
+QoS 2 performs the `PUBREC`/`PUBREL`/`PUBCOMP` handshake. Password checks avoid
+timing side channels, and `SUBSCRIBE` never creates a topic for a principal that
+only holds Read permission.
+
 ---
 
 ## 🎨 Embedded Web UI

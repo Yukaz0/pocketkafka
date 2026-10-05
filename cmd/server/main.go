@@ -68,11 +68,13 @@ func main() {
 		log.Fatalf("init offset store: %v", err)
 	}
 	advHost, advPort := advertised(cfg)
-	gm := coordinator.NewGroupManager(offsetStore, int32(cfg.Broker.ID), advHost, advPort, int32(cfg.Coordinator.SessionTimeoutMs))
+	gm := coordinator.NewGroupManager(offsetStore, int32(cfg.Broker.ID), advHost, advPort, int32(cfg.Coordinator.SessionTimeoutMs)).
+		WithDefaultRebalanceTimeout(time.Duration(cfg.Coordinator.RebalanceTimeoutMs) * time.Millisecond)
 	// Flush the offset snapshot/WAL before the process exits, and drop idle
 	// commits per offsets_retention_minutes while it runs.
 	defer offsetStore.Close()
 	defer startOffsetRetention(gm, cfg.Coordinator.OffsetsRetentionMinutes)()
+	defer gm.StartSessionReaper(time.Second)()
 
 	// Shared ACL store. When security is disabled the broker keeps its
 	// historical allow-all behaviour (allow-all authorizer); when it is enabled
@@ -156,11 +158,15 @@ func main() {
 	// the mapped Kafka topic so MQTT is not an authorization bypass.
 	mqttBridge := gateway.NewMQTTBridge(store).
 		WithSecurity(cfg.Security.Enabled, cfg.Security.Users, aclStore)
-	if err := mqttBridge.Start(cfg.MQTT.Listen); err != nil {
-		log.Printf("mqtt bridge error: %v", err)
+	mqttStartErr := mqttBridge.Start(cfg.MQTT.Listen)
+	if mqttStartErr != nil {
+		log.Printf("mqtt bridge error: %v", mqttStartErr)
 	}
 	if ws != nil {
-		ws.WithMQTT(mqttBridge, cfg.MQTT.Listen)
+		// The listener counts as running only when it bound: wiring the bridge
+		// unconditionally made the Integrations card report LISTENING while the
+		// port was in fact held by another process.
+		ws.WithMQTT(mqttBridge, cfg.MQTT.Listen, mqttStartErr == nil)
 	}
 
 	// Health sampler: keeps a rolling sample ring for /api/v1/health/overview,
@@ -171,7 +177,6 @@ func main() {
 		defer stopSampler()
 		ws.StartSampler(samplerCtx, store, gm, 5*time.Second)
 	}
-	defer mqttBridge.Close()
 
 	// Background retention cleanup.
 	retention := storage.Retention{
@@ -205,6 +210,11 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	log.Printf("shutting down")
+	// Close the MQTT bridge first and explicitly: it must finish before the
+	// deferred store.Close/offsetStore.Close run, otherwise a bridge that hangs
+	// on a live client would stall the final fsync/snapshot and the broker
+	// would not exit cleanly.
+	mqttBridge.Close()
 	stopRetention()
 	stopCompaction()
 	shutdownHTTP(webSrv)
@@ -254,7 +264,10 @@ func buildWebServer(cfg config.Config, store *storage.Store, gm *coordinator.Gro
 	ws := web.New(store, gm, sr, int32(cfg.Broker.ID), cfg.Broker.ClusterID, version).WithAuth(cfg).
 		WithDataDir(cfg.Storage.DataDir).
 		WithACLStore(aclStore).
-		WithBrokerInfo(listenerAddrs(cfg), advertisedString(cfg), securityModeOf(cfg))
+		WithBrokerInfo(listenerAddrs(cfg), advertisedString(cfg), securityModeOf(cfg)).
+		WithConfig(cfg).
+		WithGateway(cfg.Gateway.Listen).
+		WithSchemaRegistryListen(cfg.SchemaRegistry.Listen)
 	ws.WithClusterMonitoring(cfg)
 	ws.InstallLogSink()
 	srv := newHTTPServer(cfg, cfg.Web.Listen, limitBody(ws.Handler(), cfg.Network.MaxRequestSizeBytes), true)

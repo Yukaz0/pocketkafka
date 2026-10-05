@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/gateway"
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
@@ -299,15 +300,67 @@ func (c *captureResponse) WriteHeader(code int)        { c.code = code }
 // MQTT bridge status
 
 func (s *Server) handleMQTTStatus(w http.ResponseWriter, r *http.Request) {
-	if s.mqtt == nil {
-		writeJSON(w, 200, map[string]any{"enabled": false})
-		return
+	status := map[string]any{
+		"enabled":     false,
+		"listen":      s.mqttListen,
+		"connections": int32(0),
+		"bridged":     int64(0),
+	}
+	if s.mqtt != nil && s.mqttRunning {
+		status["enabled"] = true
+		status["connections"] = s.mqtt.ActiveClients()
+		status["bridged"] = s.mqtt.BridgedCount()
+	}
+	writeJSON(w, 200, status)
+}
+
+// Integrations
+
+// handleIntegrations aggregates the ingress surfaces this broker exposes —
+// MQTT, the REST proxy, the schema registry, and the Prometheus endpoint — so
+// the Integrations page renders from one fetch. Addresses come from config; no
+// credential is included.
+func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
+	mqtt := map[string]any{
+		"enabled":           false,
+		"listen":            s.mqttListen,
+		"connections":       int32(0),
+		"maxConnections":    gateway.MQTTMaxConnections,
+		"bridged":           int64(0),
+		"topicPattern":      gateway.MQTTTopicPattern,
+		"kafkaTopicPattern": gateway.MQTTKafkaTopicPattern,
+		"topicHeader":       gateway.MQTTTopicHeader,
+	}
+	if s.mqtt != nil && s.mqttRunning {
+		mqtt["enabled"] = true
+		mqtt["connections"] = s.mqtt.ActiveClients()
+		mqtt["bridged"] = s.mqtt.BridgedCount()
+	}
+	subjects := 0
+	if s.sr != nil {
+		subjects = len(s.sr.ListSubjects())
 	}
 	writeJSON(w, 200, map[string]any{
-		"enabled":     true,
-		"listen":      s.mqttListen,
-		"connections": s.mqtt.ActiveClients(),
-		"bridged":     s.mqtt.BridgedCount(),
+		"mqtt": mqtt,
+		"restProxy": map[string]any{
+			"enabled": s.gatewayListen != "",
+			"listen":  s.gatewayListen,
+			"auth":    s.authorize,
+			"endpoints": []string{
+				"POST /topics/{topic}/messages",
+				"GET /topics/{topic}/messages",
+			},
+		},
+		"schemaRegistry": map[string]any{
+			"enabled":  s.sr != nil,
+			"listen":   s.schemaRegListen,
+			"subjects": subjects,
+		},
+		"metrics": map[string]any{
+			"path":             "/metrics",
+			"authRequired":     s.authEnabled,
+			"grafanaDashboard": "deploy/grafana/dashboard.json",
+		},
 	})
 }
 

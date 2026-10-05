@@ -69,9 +69,22 @@ type Server struct {
 	advertised   string
 	securityMode string
 
-	// MQTT bridge status (nil when the bridge is disabled).
-	mqtt       *gateway.MQTTBridge
-	mqttListen string
+	// MQTT bridge status (nil when the bridge is disabled). running is false
+	// when Start failed (for example the port is already bound), so status
+	// reports the bridge as down instead of LISTENING.
+	mqtt        *gateway.MQTTBridge
+	mqttListen  string
+	mqttRunning bool
+
+	// Configured addresses of the other ingress surfaces. They come from config
+	// so the Integrations page reports what the operator configured even when a
+	// listener failed to bind.
+	gatewayListen   string
+	schemaRegListen string
+
+	// cfg is the effective configuration (defaults applied) behind the
+	// read-only broker-configuration card.
+	cfg config.Config
 
 	// Enterprise (Fitur 4.5): shared ACL store + audit trail. The ACL store is
 	// the same one the Kafka/MQTT/REST surfaces authorize against, so an ACL
@@ -105,10 +118,33 @@ func (s *Server) WithACLStore(store *authz.Store) *Server {
 	return s
 }
 
-// WithMQTT records the MQTT bridge for the status endpoint.
-func (s *Server) WithMQTT(b *gateway.MQTTBridge, listen string) *Server {
+// WithMQTT records the MQTT bridge for the status endpoints. running is false
+// when Start failed: listen is still the configured address, because that is
+// what the operator sees in config, but the bridge is not serving clients.
+func (s *Server) WithMQTT(b *gateway.MQTTBridge, listen string, running bool) *Server {
 	s.mqtt = b
 	s.mqttListen = listen
+	s.mqttRunning = running
+	return s
+}
+
+// WithGateway records the configured REST proxy address for the Integrations page.
+func (s *Server) WithGateway(listen string) *Server {
+	s.gatewayListen = listen
+	return s
+}
+
+// WithSchemaRegistryListen records the configured schema registry address for
+// the Integrations page.
+func (s *Server) WithSchemaRegistryListen(listen string) *Server {
+	s.schemaRegListen = listen
+	return s
+}
+
+// WithConfig records the effective configuration (defaults applied) for the
+// read-only broker-configuration card.
+func (s *Server) WithConfig(cfg config.Config) *Server {
+	s.cfg = cfg
 	return s
 }
 
@@ -241,6 +277,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/throughput", s.handleThroughput)
 	mux.HandleFunc("POST /api/v1/schemas/register", s.handleRegisterSchema)
 	mux.HandleFunc("GET /api/v1/mqtt", s.handleMQTTStatus)
+	mux.HandleFunc("GET /api/v1/integrations", s.handleIntegrations)
+	mux.HandleFunc("GET /api/v1/config", s.handleConfig)
 	mux.HandleFunc("GET /api/v1/schemas", s.handleSchemas)
 	mux.HandleFunc("GET /api/v1/schemas/{subject}", s.handleSchemaDetail)
 	mux.HandleFunc("GET /api/v1/acls", s.handleListACLs)
@@ -652,8 +690,10 @@ func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		// Read a client frame (ping/close) without blocking indefinitely.
-		conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		// Drain client frames without waiting for one: a blocking read here paces
+		// the whole tail at the read deadline, so records arrive in one-second
+		// bursts instead of as they land.
+		conn.SetReadDeadline(time.Now())
 		readWSPing(conn)
 
 		var pending []messageRecord

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Yukaz0/pocketkafka/internal/authz"
@@ -310,6 +311,29 @@ func (h *Handler) handleFetch(version int16, body []byte, ctx RequestContext) ([
 	}
 	resp := &protocol.FetchResponse{Version: version, ThrottleTimeMs: 0}
 
+	// Long-poll: wait for data on every partition that has none yet, all
+	// against one shared deadline, so a fetch spanning N idle partitions still
+	// returns within MaxWaitMillis instead of N x MaxWaitMillis. Partitions that
+	// already have data (HWM > FetchOffset) are skipped and read immediately.
+	if req.MaxWaitMillis > 0 {
+		var pending []fetchWait
+		for _, t := range req.Topics {
+			if h.authorize(ctx, authz.OpRead, authz.Resource{Type: authz.ResourceTopic, Name: t.Topic}) != nil {
+				continue
+			}
+			for _, p := range t.Partitions {
+				part := h.store.GetPartition(t.Topic, p.Partition)
+				if part == nil {
+					continue
+				}
+				if part.HighWatermark() <= p.FetchOffset {
+					pending = append(pending, fetchWait{part: part, fetchOffset: p.FetchOffset})
+				}
+			}
+		}
+		waitFetchData(pending, req.MinBytes, req.MaxWaitMillis)
+	}
+
 	for _, t := range req.Topics {
 		rt := protocol.FetchResponseTopic{Topic: t.Topic}
 		allowed := h.authorize(ctx, authz.OpRead, authz.Resource{Type: authz.ResourceTopic, Name: t.Topic}) == nil
@@ -331,7 +355,6 @@ func (h *Handler) handleFetch(version int16, body []byte, ctx RequestContext) ([
 				rt.Partitions = append(rt.Partitions, rp)
 				continue
 			}
-			h.longPoll(part, p.FetchOffset, req.MaxWaitMillis)
 			data, hwm, err := part.Read(p.FetchOffset, p.PartitionMaxBytes)
 			rp.HighWatermark = hwm
 			rp.LastStableOffset = hwm
@@ -658,25 +681,81 @@ func (h *Handler) handleInitProducerID(version int16, body []byte) ([]byte, erro
 	return protocol.EncodeInitProducerIdResponse(resp)
 }
 
-// longPoll blocks until data beyond fetchOffset is available or maxWait elapses.
-func (h *Handler) longPoll(part *storage.Partition, fetchOffset int64, maxWait int32) {
-	if maxWait <= 0 {
+// fetchWait identifies one partition a fetch request must wait on before it can
+// build its response.
+type fetchWait struct {
+	part        *storage.Partition
+	fetchOffset int64
+}
+
+// waitFetchData blocks until the pending partitions satisfy minBytes or the
+// shared maxWait deadline elapses. With MinBytes <= 1 it returns as soon as any
+// single pending partition has data; with a larger MinBytes it waits for every
+// pending partition (byte accounting is deliberately not fabricated). All
+// partitions are awaited concurrently against one deadline, so the request
+// waits at most maxWait regardless of how many partitions are idle.
+func waitFetchData(pending []fetchWait, minBytes, maxWait int32) {
+	if len(pending) == 0 || maxWait <= 0 {
 		return
 	}
-	if part.HighWatermark() > fetchOffset {
+	deadline := time.Now().Add(time.Duration(maxWait) * time.Millisecond)
+	if minBytes <= 1 {
+		woke := make(chan struct{}, 1)
+		for _, pw := range pending {
+			go func(pw fetchWait) {
+				if longPoll(pw.part, pw.fetchOffset, deadline) {
+					select {
+					case woke <- struct{}{}:
+					default:
+					}
+				}
+			}(pw)
+		}
+		timer := time.NewTimer(time.Until(deadline))
+		defer timer.Stop()
+		select {
+		case <-woke:
+		case <-timer.C:
+		}
 		return
 	}
-	// Event-driven wait: tidur sampai Append menutup channel (data baru)
-	// atau deadline habis. Tidak ada polling HWM berkala.
-	ch, _ := part.DataWaiter()
-	if ch == nil {
-		return
+	var wg sync.WaitGroup
+	wg.Add(len(pending))
+	for _, pw := range pending {
+		go func(pw fetchWait) {
+			defer wg.Done()
+			longPoll(pw.part, pw.fetchOffset, deadline)
+		}(pw)
 	}
-	timer := time.NewTimer(time.Duration(maxWait) * time.Millisecond)
-	defer timer.Stop()
-	select {
-	case <-ch:
-	case <-timer.C:
+	wg.Wait()
+}
+
+// longPoll blocks until data beyond fetchOffset is available or the deadline
+// passes, reporting whether data arrived. The wake channel is snapshotted
+// before the high watermark is read, so an Append landing between the two reads
+// is never missed: either the returned channel is already closed or the
+// returned HWM already covers fetchOffset. A wake that turns out spurious (the
+// HWM did not advance) simply re-arms the wait, bounded by the deadline.
+func longPoll(part *storage.Partition, fetchOffset int64, deadline time.Time) bool {
+	for {
+		ch, hwm := part.DataWaiter()
+		if hwm > fetchOffset {
+			return true
+		}
+		if ch == nil {
+			return false
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		timer := time.NewTimer(remaining)
+		select {
+		case <-ch:
+			timer.Stop()
+		case <-timer.C:
+			return false
+		}
 	}
 }
 

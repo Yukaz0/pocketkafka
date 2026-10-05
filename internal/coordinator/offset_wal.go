@@ -66,10 +66,16 @@ func openWAL(path string) (*offsetWAL, error) {
 	return &offsetWAL{path: path, f: f}, nil
 }
 
-// append writes one record and fsyncs it so an acknowledged commit survives a
-// crash.
-func (w *offsetWAL) append(rec walRecord) error {
-	buf := encodeWALRecord(rec)
+// appendBatch writes every record and fsyncs once so a batch of acknowledged
+// commits survives a crash without paying one fsync per record.
+func (w *offsetWAL) appendBatch(recs []walRecord) error {
+	if len(recs) == 0 {
+		return nil
+	}
+	var buf []byte
+	for _, rec := range recs {
+		buf = append(buf, encodeWALRecord(rec)...)
+	}
 	if _, err := w.f.Write(buf); err != nil {
 		return fmt.Errorf("offset WAL append: %w", err)
 	}

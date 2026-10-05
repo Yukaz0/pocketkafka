@@ -64,7 +64,7 @@ func (p *Partition) retentionPlanLocked(ret Retention) []int {
 	if ret.RetentionTime > 0 {
 		cutoff := time.Now().Add(-ret.RetentionTime)
 		for i, seg := range p.closedSegments {
-			mtime, err := fileMtime(seg.logFile.Name())
+			mtime, err := seg.modTime()
 			if err != nil || !mtime.Before(cutoff) {
 				break
 			}
@@ -116,12 +116,22 @@ func (p *Partition) totalSizeLocked() int64 {
 }
 
 // removeClosedSegment deletes the closed segment at index i from memory and disk.
+// It never touches seg.logFile: an offloaded segment has none, and its local
+// files are rebuilt from the .remote stub if it is ever needed again.
 func (p *Partition) removeClosedSegment(i int) {
 	seg := p.closedSegments[i]
-	name := seg.logFile.Name()
-	seg.close()
-	os.Remove(name) // .log
-	os.Remove(trimSuffix(name, ".log") + ".index")
+	if seg.isRemote() {
+		if logKey, indexKey, err := seg.remoteKeys(); err == nil && p.remoteDelete != nil {
+			_ = p.remoteDelete(logKey, indexKey) // best-effort
+		}
+		if seg.remoteStub != "" {
+			os.Remove(seg.remoteStub)
+		}
+	} else {
+		seg.close()
+	}
+	os.Remove(seg.logPath())
+	os.Remove(seg.indexPath())
 	p.closedSegments = append(p.closedSegments[:i], p.closedSegments[i+1:]...)
 }
 
@@ -131,11 +141,4 @@ func fileMtime(path string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return st.ModTime(), nil
-}
-
-func trimSuffix(s, suffix string) string {
-	if len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix {
-		return s[:len(s)-len(suffix)]
-	}
-	return s
 }

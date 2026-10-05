@@ -58,8 +58,14 @@ func newAuthMiddleware(users []config.SecurityUser, secret string, enabled bool,
 				next.ServeHTTP(w, r)
 				return
 			}
-			// Login endpoint and static assets are always reachable.
-			if r.URL.Path == "/api/v1/auth/login" || r.URL.Path == "/" {
+			// Login, session status, and static assets are always reachable.
+			// Status reports only whether auth is enabled and whether this
+			// request carries a valid session, so answering it before the
+			// cookie check is what lets the SPA decide to render the login
+			// screen (a 401 leaves it on the loading skeleton).
+			if r.URL.Path == "/api/v1/auth/login" ||
+				r.URL.Path == "/api/v1/auth/status" ||
+				r.URL.Path == "/" {
 				next.ServeHTTP(w, r)
 				return
 			}

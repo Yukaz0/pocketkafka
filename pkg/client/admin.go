@@ -203,6 +203,9 @@ func (c *KafkaClient) ResetOffset(group, topic string, partition int32, offset i
 	req := &protocol.OffsetCommitRequest{
 		Version: c.version(protocol.APKOffsetCommit),
 		Group:   group,
+		// Generation -1 marks a simple, non-member commit (Kafka's contract for
+		// commits that do not carry a group membership).
+		Generation: -1,
 		Topics: []protocol.OffsetCommitRequestTopic{{
 			Topic: topic,
 			Partitions: []protocol.OffsetCommitRequestPartition{{

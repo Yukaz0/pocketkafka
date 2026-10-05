@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="pkk-title">
+  <title id="pkk-title">PocketKafka</title>
+  <!-- Full-bleed background with the letters inside the central 80% "safe zone",
+       for platforms that crop app icons to a circle or squircle (Android, PWA). -->
+  <defs>
+    <linearGradient id="pkk-bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6f97ff"/>
+      <stop offset="1" stop-color="#3659d0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#pkk-bg)"/>
+  <g transform="translate(256 256) scale(0.78) translate(-256 -256)" fill="none" stroke="#ffffff" stroke-width="46" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M120 192V392"/>
+    <circle cx="178" cy="250" r="58"/>
+    <path d="M320 120V308"/>
+    <path d="M388 190L320 258"/>
+    <path d="M346 232L392 308"/>
+  </g>
+</svg>

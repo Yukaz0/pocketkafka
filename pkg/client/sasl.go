@@ -40,6 +40,7 @@ var readOnlyAPIKeys = map[int16]bool{
 	protocol.APKSaslAuthenticate: true,
 	protocol.APKMetadata:         true,
 	protocol.APKListOffsets:      true,
+	protocol.APKFetch:            true,
 	protocol.APKListGroups:       true,
 	protocol.APKDescribeGroups:   true,
 	protocol.APKOffsetFetch:      true,

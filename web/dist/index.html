@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PocketKafka</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#3659d0">
 <link href="https://fonts.cdnfonts.com/css/sf-pro-display" rel="stylesheet">
 <link href="https://fonts.cdnfonts.com/css/sf-mono" rel="stylesheet">
 <style>
@@ -151,7 +155,7 @@
   .tb{height:44px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:stretch;flex-shrink:0;padding-right:10px}
   .wm{display:flex;align-items:center;padding:0 16px;font-weight:600;font-size:13px;gap:8px;cursor:pointer;user-select:none}
   .wm:hover{color:var(--primary-text)}
-  .wm i{width:8px;height:8px;background:var(--primary);display:inline-block}
+  .wm img{width:20px;height:20px;flex:none;display:block;border-radius:5px}
   .tabs{display:flex;align-items:stretch;overflow-x:auto}
   .tab{display:flex;align-items:center;padding:0 13px;color:var(--muted);cursor:pointer;font-size:12.5px;border:none;background:none;font-family:var(--font-ui);white-space:nowrap}
   .tab:hover{color:var(--text);background:var(--surface2)}
@@ -226,6 +230,11 @@
   .btn:focus-visible{outline:2px solid var(--primary);outline-offset:2px;box-shadow:none}
   .btn.danger{background:transparent;color:var(--danger);border:1px solid var(--danger)}
   .btn.danger:hover{background:var(--surface2)}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--border)}
+  .btn.ghost:hover{background:var(--surface2);border-color:var(--primary);color:var(--primary-text)}
+  .btn.ghost:disabled{opacity:.5;cursor:not-allowed}
+  .btn.ghost:disabled:hover{background:transparent;border-color:var(--border);color:var(--text)}
+  .btn[aria-disabled="true"]{opacity:.5;cursor:not-allowed}
 
   main{flex:1;overflow:auto;padding:20px 24px;width:100%}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:18px;width:100%;margin-bottom:16px}
@@ -438,7 +447,7 @@
 </head>
 <body>
 <div class="tb">
-  <div class="wm" onclick="goView('overview')" title="PocketKafka Overview"><i></i>pocketkafka</div>
+  <div class="wm" onclick="goView('overview')" title="PocketKafka Overview"><img src="/favicon.svg" alt="" width="20" height="20">pocketkafka</div>
   <div class="brokerPicker"><label for="activeClusterSelect">Broker</label><select id="activeClusterSelect" aria-label="Broker" onchange="switchActiveCluster(this.value)"><option value="local">local (this broker)</option></select></div>
   <div class="chips">
     <span class="chip2" id="chipBroker"><i></i>broker -</span>
@@ -504,7 +513,9 @@ const I={
   moon:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>'
 };
 
-const state={view:'overview',theme:'dark',sidebarCollapsed:false,cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,activeCluster:localStorage.getItem('pk_active_cluster')||'local',targetGeneration:0,targetRequests:new Set(),targetSwitching:false,alarmsDismissed:new Set((()=>{try{return JSON.parse(sessionStorage.getItem('pk_dismissed')||'[]');}catch(e){return [];}})()),
+const state={view:'overview',theme:'dark',sidebarCollapsed:false,cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,activeCluster:localStorage.getItem('pk_active_cluster')||'local',targetGeneration:0,targetRequests:new Set(),targetSwitching:false,groupLagWarn:Number(localStorage.getItem('pk_group_lag_warn'))||1000000000,alarmsDismissed:new Set((()=>{try{return JSON.parse(localStorage.getItem('pk_alarms_dismissed')||'[]');}catch(e){return [];}})()),
+  integrations:null, integrationsError:'',
+  brokerCfg:null, brokerCfgError:'',
   /* pengaturan persisten */
   refreshMs:+(localStorage.getItem('pk_refreshMs')||5000)||5000,
   density:localStorage.getItem('pk_density')||'comfortable',
@@ -519,7 +530,7 @@ const state={view:'overview',theme:'dark',sidebarCollapsed:false,cluster:null,to
   /* Fitur 3.4 message diff */
   diffSel:[], diffOpen:false,
 };
-const navItems=[['overview','Overview',I.overview,'overview'],['connections','Connections',I.server,'connections'],['health','Health',I.pulse,'operations'],['clusters','Clusters',I.cluster,'operations'],['metrics','Metrics',I.chart,'operations'],['logs','Broker Logs',I.document,'operations'],['security','Security & ACL',I.shield,'operations'],['databrowser','Data Browser',I.search,'developer'],['topics','Topics',I.tag,'developer'],['groups','Consumer Groups',I.users,'developer'],['schemas','Schemas',I.schema,'developer'],['producer','Producer Studio',I.send,'developer'],['devstudio','Dev Studio',I.flask,'developer'],['topology','Topology',I.topology,'developer'],['storage','Storage',I.archive,'developer'],['settings','Settings',I.gear,'connections']];
+const navItems=[['overview','Overview',I.overview,'overview'],['connections','Connections',I.server,'connections'],['health','Health',I.pulse,'operations'],['clusters','Clusters',I.cluster,'operations'],['metrics','Metrics',I.chart,'operations'],['integrations','Integrations',I.topology,'operations'],['logs','Broker Logs',I.document,'operations'],['security','Security & ACL',I.shield,'operations'],['databrowser','Data Browser',I.search,'developer'],['topics','Topics',I.tag,'developer'],['groups','Consumer Groups',I.users,'developer'],['schemas','Schemas',I.schema,'developer'],['producer','Producer Studio',I.send,'developer'],['devstudio','Dev Studio',I.flask,'developer'],['topology','Topology',I.topology,'developer'],['storage','Storage',I.archive,'developer'],['settings','Settings',I.gear,'connections']];
 
 function initTheme(){
   const saved=localStorage.getItem('pk_theme');
@@ -530,12 +541,12 @@ function initTheme(){
   try{state.navGroupsCollapsed=Object.assign({operations:false,developer:false},JSON.parse(localStorage.getItem('pk_nav_groups')||'{}'));}catch(e){state.navGroupsCollapsed={operations:false,developer:false};}
 }
 
-const KAFKA_UNSUPPORTED_VIEWS={databrowser:'Message browsing and live tail are not supported for Kafka targets.',producer:'Producing messages is disabled for read-only Kafka targets.',devstudio:'Developer Studio writes are not supported for Kafka targets.',schemas:'Schema Registry APIs are not supported for Kafka targets.',topology:'Topology is not available for Kafka targets.',storage:'Storage inspection is not available for Kafka targets.',logs:'Broker logs are not available for Kafka targets.',metrics:'Broker metrics are not available for Kafka targets.'};
+const KAFKA_UNSUPPORTED_VIEWS={producer:'Producing messages is disabled for read-only Kafka targets.',devstudio:'Developer Studio writes are not supported for Kafka targets.',schemas:'Schema Registry APIs are not supported for Kafka targets.',topology:'Topology is not available for Kafka targets.',storage:'Storage inspection is not available for Kafka targets.',logs:'Broker logs are not available for Kafka targets.',metrics:'Broker metrics are not available for Kafka targets.',integrations:'Integrations is not available for Kafka targets.'};
 function navUnavailableReason(view){
   if(isTargetUnavailable()&&!['clusters','settings','security'].includes(view))return targetUnavailableMessage();
   if(!isKafkaTarget())return '';
   if(KAFKA_UNSUPPORTED_VIEWS[view])return KAFKA_UNSUPPORTED_VIEWS[view];
-  const needed={overview:'health.read',health:'health.read',connections:'cluster',topics:'topics.read',groups:'groups.read'}[view];
+  const needed={overview:'health.read',health:'health.read',connections:'cluster',topics:'topics.read',groups:'groups.read',databrowser:'topic.messages.read',integrations:'integrations.read'}[view];
   if(needed&&!hasTargetCapability(needed))return `Selected Kafka target does not provide ${needed}.`;
   if(view==='topics'&&state.topicDetail&&!hasTargetCapability('topic.partitions.read'))return 'Topic partition details are not supported by this Kafka target.';
   if(view==='groups'&&state.group&&!hasTargetCapability('group.detail.read'))return 'Consumer group details are not supported by this Kafka target.';
@@ -555,6 +566,7 @@ function kafkaCapabilityFor(path,method){
   if(p==='/api/v1/cluster'&&m==='GET')return 'cluster';
   if(p==='/api/v1/topics'&&m==='GET')return 'topics.read';
   if(/^\/api\/v1\/topics\/[^/]+\/partitions$/.test(p)&&m==='GET')return 'topic.partitions.read';
+  if(/^\/api\/v1\/topics\/[^/]+\/messages$/.test(p)&&m==='GET')return 'topic.messages.read';
   if(p==='/api/v1/groups'&&m==='GET')return 'groups.read';
   if(/^\/api\/v1\/groups\/[^/]+$/.test(p)&&m==='GET')return 'group.detail.read';
   if(p==='/api/v1/health/overview'&&m==='GET')return 'health.read';
@@ -729,9 +741,14 @@ function updateChips(){
   const s=document.getElementById('chipSec'); if(s)s.textContent=c.security||'PLAINTEXT';
   const v=document.getElementById('chipVer'); if(v)v.textContent=c.version?('v'+c.version):'v-';
 }
+/* Navigasi topik lewat hash: router (applyHash) yang mengisi state.topic, sehingga
+   topik tetap terpilih baik dipanggil dari dalam Data Browser maupun dari view lain.
+   Hash yang sama tidak memicu hashchange, jadi applyHash dipanggil langsung. */
 window.pickTopicNav=function(name){
-  state.topic=name;state.partition='all';state.off=null;
-  goView('databrowser').then(()=>loadMsgs());
+  if(!name)return;
+  const h='#/databrowser/'+encodeURIComponent(name);
+  if(location.hash===h){applyHash();return;}
+  location.hash=h;
 };
 /* node detail drawer (topologi) */
 function openDrw(title,innerHtml){ $('#drwT').textContent=title; $('#drwBody').innerHTML=innerHtml; document.getElementById('drw').classList.add('open'); }
@@ -810,7 +827,7 @@ function renderTopoSvg(){
     s+=`<g><rect class="nrect" x="${g.x}" y="${g.y}" width="180" height="${L.h}" rx="2" onclick="topoPickGroup('${esc(g.id)}')"/>
       <text x="${g.x+12}" y="${g.y+(L.h/2)-2}">${esc(g.id)}</text>
       <text class="sub" x="${g.x+12}" y="${g.y+L.h-6}">lag ${g.lag.toLocaleString()} - ${esc(g.state||'')}</text>
-      ${g.lag>1000?`<circle class="errdot" cx="${g.x+168}" cy="${g.y+10}" r="4"/>`:''}</g>`;
+      ${g.lag>groupLagWarn()?`<circle class="errdot" cx="${g.x+168}" cy="${g.y+10}" r="4"/>`:''}</g>`;
   });
   T.forEach(t=>{
     s+=`<path class="edge" d="M ${B.x+B.w} ${B.y+B.h/2} C ${B.x+B.w+80} ${B.y+B.h/2}, ${t.x-90} ${t.y+L.h/2}, ${t.x} ${t.y+L.h/2}"/>`;
@@ -937,6 +954,7 @@ function render(){
     else if(state.view==='clusters')v.innerHTML=viewClusters();
     else if(state.view==='health')v.innerHTML=viewHealth();
     else if(state.view==='metrics')v.innerHTML=viewMetrics();
+    else if(state.view==='integrations')v.innerHTML=viewIntegrations();
     else if(state.view==='logs')v.innerHTML=viewLogs();
     else if(state.view==='security')v.innerHTML=viewSecurity();
     else if(state.view==='settings')v.innerHTML=viewSettings();
@@ -965,6 +983,7 @@ window.goView=async function(v){
 function viewLogin(){
   return `<div style="max-width:360px;margin:80px auto">
     <div class="card">
+      <img src="/favicon.svg" alt="PocketKafka" width="44" height="44" style="display:block;margin:0 auto 14px;border-radius:10px">
       <h3 style="margin-bottom:14px">Sign in</h3>
       <label>Username</label><input id="loginUser" autocomplete="username">
       <div style="height:10px"></div>
@@ -1025,7 +1044,11 @@ function viewSettings(){
         <span>Interval</span>
         <select id="refreshSel" style="width:auto" onchange="setRefresh(+this.value)">${refreshOpts}</select>
       </div>
-      <div class="muted" style="font-size:11px;margin-top:8px">Pause otomatis saat tab tidak aktif.</div>
+      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)">
+        <span>Consumer lag alert</span>
+        <input id="groupLagWarnBox" type="number" min="0" step="1000" value="${state.groupLagWarn}" style="width:130px" onchange="setGroupLagWarn(this.value)">
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:8px">Pause otomatis saat tab tidak aktif. Alert lag grup menyala di atas angka ini; kelompok sync pada topik besar wajar tertinggal ratusan juta pesan, jadi naikkan bila banner hanya berisik.</div>
     </div>
     <div class="card">
       <h3 style="margin-bottom:10px">Cluster</h3>
@@ -1043,6 +1066,11 @@ function viewSettings(){
       </div>
       ${auth.enabled?`<div style="margin-top:12px"><button class="btn danger" onclick="logout()">Sign out</button></div>`:''}
       <div class="muted" style="font-size:11px;margin-top:8px">Web UI auth uses the broker's <code>security.users</code>.</div>
+    </div>
+    <div class="card">
+      <div class="kicker">Read-only</div>
+      <h3>Broker configuration</h3>
+      <div id="brokerCfgBody" class="muted" style="font-size:12px">${skel(120)}</div>
     </div>
   </div>`;
 }
@@ -1097,37 +1125,39 @@ function tableScroll(content){return `<div class="tableScroll">${content}</div>`
 
 /* Data Browser */
 function viewDataBrowser(){
-  const opts=(state.topics||[]).map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
+  const readOnly=isKafkaTarget(),readOnlyNote='Kafka targets are read-only; import and replay are disabled.';
+  const opts=(state.topics||[]).map(t=>`<option value="${esc(t.name)}" ${state.topic===t.name?'selected':''}>${esc(t.name)}</option>`).join('');
   const parts=state.topic?state.topics.find(t=>t.name===state.topic)?.partitions||[]:[];
   const act=(on)=>on?'background:var(--primary-soft);color:var(--primary-text);border-color:var(--primary)':'';
   const pills='<button class="pill'+(state.partition==='all'?' active':'')+'" onclick="setPart(\'all\')">All</button>'
     +parts.map(p=>`<button class="pill part" style="${act(state.partition===p.partition)}" onclick="setPart('${p.partition}')">P-${p.partition}</button>`).join('');
-  return `${pageHeader('Data Browser','Inspect, filter, replay, and export topic messages.')}
+  return `${pageHeader('Data Browser','Inspect, filter, and tail topic messages.')}
+    ${readOnly?`<p class="muted" style="font-size:11px;margin:0 0 8px">${readOnlyNote}</p>`:''}
     <div class="toolbar">
-      <div class="group"><button class="pill ${state.tail?'active':''}" id="liveBtn" onclick="toggleTail()">${state.tail?'<span class="live-dot"></span> Pause':'Live Tail'}</button></div>
-      <div class="group"><button class="pill" onclick="seek('begin')">Beginning</button><button class="pill" onclick="seek('latest')">Latest</button><input id="offInput" class="mono" placeholder="offset" style="width:92px;padding:4px 8px" onkeydown="if(event.key==='Enter')seekOffsetGo()"><button class="pill" onclick="seekOffsetGo()">Go</button></div>
-      <span class="updatedAgo" id="posInfo"></span>
-      <select id="topicSel" onchange="state.topic=this.value;state.partition='all';state.filters=[];loadMsgs()" style="width:180px"><option value="">Select topic</option>${opts}</select>
+      <select id="topicSel" onchange="state.topic=this.value;state.partition='all';state.filters=[];loadMsgs()" style="width:180px"><option value="" ${state.topic?'':'selected'}>Select topic</option>${opts}</select>
       <div class="group">${pills}</div>
-      <select id="decoder" onchange="state.decoder=this.value;renderMsgRows()">
-        <option value="auto" ${state.decoder==='auto'?'selected':''}>Auto-Detect (JSON/Text)</option>
+      <select id="decoder" onchange="state.decoder=this.value;renderMsgRows()" style="width:140px">
+        <option value="auto" ${state.decoder==='auto'?'selected':''}>Auto-Detect</option>
         <option value="json" ${state.decoder==='json'?'selected':''}>JSON Pretty</option>
-        <option value="text" ${state.decoder==='text'?'selected':''}>Plaintext (UTF-8)</option>
+        <option value="text" ${state.decoder==='text'?'selected':''}>Plaintext</option>
         <option value="hex" ${state.decoder==='hex'?'selected':''}>Hex Dump</option>
       </select>
+      <span style="flex:1"></span>
+      <div class="group"><button class="pill ${state.tail?'active':''}" id="liveBtn" onclick="toggleTail()">${state.tail?'<span class="live-dot"></span> Pause':'Live Tail'}</button></div>
+      <div class="group"><button class="pill" onclick="seek('begin')">Beginning</button><button class="pill" onclick="seek('latest')">Latest</button><input id="offInput" class="mono" placeholder="offset" style="width:80px;padding:4px 8px" onkeydown="if(event.key==='Enter')seekOffsetGo()"><button class="pill" onclick="seekOffsetGo()">Go</button></div>
+      <span class="updatedAgo" id="posInfo"></span>
     </div>
     <div class="toolbar">
-      <input id="searchBox" placeholder="Filter key/value..." value="${esc(state.search)}" style="max-width:160px" onkeydown="if(event.key==='Enter')loadMsgs()">
-      <input id="fromTs" placeholder="From (ms)" value="${esc(state.fromTs)}" style="max-width:110px">
-      <input id="toTs" placeholder="To (ms)" value="${esc(state.toTs)}" style="max-width:110px">
-      <button class="btn ghost" onclick="loadMsgs()">Apply</button>
-      <div class="group"><button class="pill ${state.filterPanel?'active':''}" onclick="toggleFilterPanel()">Filter</button></div>
-      <div class="group"><button class="pill ${state.projCols.length?'active':''}" onclick="openProj()">Columns</button></div>
+      <input id="searchBox" placeholder="Search key/value..." value="${esc(state.search)}" style="max-width:160px" oninput="state.search=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
+      <input id="fromTs" placeholder="From (ms)" value="${esc(state.fromTs)}" style="max-width:100px" oninput="state.fromTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
+      <input id="toTs" placeholder="To (ms)" value="${esc(state.toTs)}" style="max-width:100px" oninput="state.toTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
+      <button class="btn" style="padding:5px 14px;font-size:12px" onclick="loadMsgs()">Apply</button>
+      <div class="group"><button class="pill ${state.filterPanel?'active':''}" onclick="toggleFilterPanel()">Filter${state.filters.length?' ('+state.filters.length+')':''}</button><button class="pill ${state.projCols.length?'active':''}" onclick="openProj()">Columns${state.projCols.length?' ('+state.projCols.length+')':''}</button></div>
       <div class="group"><button class="pill" title="Export JSON Lines" onclick="exportMsgs('jsonl')">.jsonl</button><button class="pill" title="Export CSV" onclick="exportMsgs('csv')">.csv</button></div>
       <div class="group"><button class="pill ${state.diffSel.length>=2?'active':''}" onclick="runDiff()">Diff</button></div>
-      <div class="group"><button class="pill" onclick="prevPage()">Prev</button><button class="pill" onclick="nextPage()">Next</button><span class="muted" id="pageInfo" style="padding:0 8px;font-size:11px"></span></div>
-      <div class="group"><button class="pill" title="Copy curl (REST proxy 8082)" onclick="copyCurl(state.topic)">curl</button><button class="pill" title="Copy Go consumer snippet" onclick="copyConsumer(state.topic)">consumer.go</button></div>
-      <label class="btn ghost" style="padding:6px 11px;font-size:12px" title="Import .jsonl ke topik ini">Import<input type="file" accept=".jsonl,.ndjson" style="display:none" onchange="doImportFile(this)"></label>
+      <div class="group"><button class="pill" onclick="prevPage()">Prev</button><button class="pill" onclick="nextPage()">Next</button><span class="muted" id="pageInfo" style="padding:0 6px;font-size:11px"></span></div>
+      <div class="group"><button class="pill" title="Copy curl command" onclick="copyCurl(state.topic)">curl</button><button class="pill" title="Copy Go consumer snippet" onclick="copyConsumer(state.topic)">consumer.go</button></div>
+      ${readOnly?`<button class="btn ghost" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')" style="font-size:11px">Import</button>`:`<label class="btn ghost" style="padding:5px 11px;font-size:11px" title="Import .jsonl to this topic">Import<input type="file" accept=".jsonl,.ndjson" style="display:none" onchange="doImportFile(this)"></label>`}
     </div>
     <div id="tailBar"></div>
     ${state.filterPanel?filterPanelHtml():''}
@@ -1144,7 +1174,7 @@ function viewDataBrowser(){
         <h3 style="display:flex;align-items:center;gap:10px;margin-bottom:12px">Message Inspector<span style="flex:1"></span><button class="cbtn" id="inspCpAll" onclick="copyInspJson(this)">copy json</button><button class="cbtn" id="inspCpVal" onclick="copyInspValue(this)">copy value</button></h3>
         <pre id="insp" style="max-height:calc(100vh - 280px)"></pre>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="replaySelected()">Replay / DLQ</button>
+          ${readOnly?`<button class="btn ghost" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Replay / DLQ</button>`:`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="replaySelected()">Replay / DLQ</button>`}
           <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="closeInspector()">Close</button>
         </div>
       </aside>
@@ -1177,10 +1207,25 @@ function nextPage(){ if(!state.msgs.length)return; const last=Math.max(...state.
 window.nextPage=nextPage;
 function filteredMsgs(){ return state.msgs.filter(passesFilters); }
 // passesFilters dipakai juga saat tail menyisipkan baris satu per satu, supaya
-// baris yang difilter tidak pernah masuk DOM.
-function passesFilters(m){ if(!state.filters.length)return true; const v=jsonOf(m); return state.filters.every(f=>evalFilter(f,v)); }
-function rowHtml(m){const val=fmtValue(m);const sel=state.diffSel.includes(m.offset);return `<td class="chkCell"><input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleDiffSel(${m.offset})"></td><td>${timeCell(m.timestamp)}</td><td><span class="chip">P${m.partition}</span></td><td>${m.offset}</td><td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td><td><div class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</div></td>${state.projCols.map(c=>`<td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(getPath(jsonOf(m),c))}</td>`).join('')}<td style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td><td style="white-space:nowrap"><button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();replayOne(${m.offset})">Replay</button></td>`;}
-function rowTr(m){ return '<tr class="rowclick" onclick="insp('+JSON.stringify(m).replace(/"/g,'&quot;')+')">'+rowHtml(m)+'</tr>'; }
+// baris yang difilter tidak pernah masuk DOM. Pencarian key/value dan jendela
+// timestamp ikut di sini: loadMsgs mengirimkannya ke server, jalur tail hanya
+// punya data yang sudah tiba, jadi keduanya harus menilai dengan aturan sama.
+function passesFilters(m){
+  if(state.search){ const hay=(String(m.key||'')+'\u0000'+String(m.value||'')).toLowerCase(); if(!hay.includes(String(state.search).toLowerCase()))return false; }
+  const fromTs=Number(state.fromTs||0), toTs=Number(state.toTs||0);
+  if(fromTs>0&&Number(m.timestamp)<fromTs)return false;
+  if(toTs>0&&Number(m.timestamp)>toTs)return false;
+  if(!state.filters.length)return true;
+  const v=jsonOf(m); return state.filters.every(f=>evalFilter(f,v));
+}
+function rowHtml(m){const val=fmtValue(m);const sel=state.diffSel.includes(m.offset);return `<td class="chkCell"><input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleDiffSel(${m.offset})"></td><td>${timeCell(m.timestamp)}</td><td><span class="chip">P${m.partition}</span></td><td>${m.offset}</td><td>${m.key?esc(m.key):'<span class="muted">(null)</span>'}</td><td><div class="hdr">${Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('')||'<span class="muted">-</span>'}</div></td>${state.projCols.map(c=>`<td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(getPath(jsonOf(m),c))}</td>`).join('')}<td style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(val)}</td><td style="white-space:nowrap">${replayCell(m)}</td>`;}
+function replayCell(m){
+  if(!isKafkaTarget())return `<button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();replayOne(${m.offset})">Replay</button>`;
+  const note='Kafka targets are read-only; import and replay are disabled.';
+  return `<button class="btn ghost" aria-disabled="true" style="padding:2px 8px;font-size:11px" title="${note}" onclick="toast('${note}')">Replay</button>`;
+}
+function rowTr(m){ return '<tr class="rowclick" onclick="inspOffset('+m.partition+','+m.offset+')">'+rowHtml(m)+'</tr>'; }
+window.inspOffset=function(p,off){const m=state.msgs.find(x=>x.offset===off&&x.partition===p);if(m)insp(m);};
 /* Di atas VIRT_MIN baris hanya potongan yang terlihat (plus cadangan) yang
    dibangun, dengan spacer di kedua ujung supaya panjang gulir tetap sepadan. */
 const VIRT_MIN=300, VIRT_OVERSCAN=12;
@@ -1245,7 +1290,7 @@ function jnode(key,val,force){tnId++;const id=tnId;
   return '<div><div class="jrow" onclick="toggleNode('+id+')"><span class="jarrow" id="ta-'+id+'">'+(open?'v':'>')+'</span><span class="jkey">"'+esc(key)+'"</span>: <span class="jnum">'+label+'</span></div><div class="jnode" id="tn-'+id+'" style="'+(open?'':'display:none')+'">'+(body||'<div class="muted" style="padding-left:14px">(empty)</div>')+'</div></div>';}
 window.toggleNode=function(id){const b=document.getElementById('tn-'+id),a=document.getElementById('ta-'+id);if(b){const o=b.style.display!=='none';b.style.display=o?'none':'block';a.innerHTML=o?'>':'v';}};
 let _inspCur=null;
-window.insp=function(m){_inspCur=m;$('#inspector').classList.remove('hidden');const obj={topic:m.topic,partition:m.partition,offset:m.offset,timestamp:new Date(m.timestamp).toISOString(),key:m.key,headers:m.headers,valueSize:m.valueSize,value:fmtValue(m)};let body='';for(const k in obj)body+=jnode(k,obj[k],k==='value');$('#insp').innerHTML='<div class="jnode" style="border:none;margin:0;padding-left:0">'+body+'</div>';};
+window.insp=function(m){_inspCur=m;$('#inspector').classList.remove('hidden');let val=m.value;if(state.decoder==='hex')val=hex(m.valueB64);else if(m.isJSON){try{val=JSON.parse(m.value||'null');}catch(e){val=m.value;}}const obj={topic:m.topic,partition:m.partition,offset:m.offset,timestamp:new Date(m.timestamp).toISOString(),key:m.key,headers:m.headers,valueSize:m.valueSize,value:val};let body='';for(const k in obj)body+=jnode(k,obj[k],k==='value');$('#insp').innerHTML='<div class="jnode" style="border:none;margin:0;padding-left:0">'+body+'</div>';};
 window.closeInspector=function(){_inspCur=null;const el=document.getElementById('inspector');if(el)el.classList.add('hidden');};
 function inspJsonText(){
   const m=_inspCur; if(!m)return '';
@@ -1265,7 +1310,7 @@ function copyInspTo(t,btn,label){
   if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(done).catch(()=>{fallbackCopy(t);done();}); }
   else{ fallbackCopy(t);done(); }
 }
-function fmtValue(m){ if(state.decoder==='hex')return hex(m.valueB64); if(m.isJSON)return JSON.stringify(JSON.parse(m.value||'null'),null,2); return m.value; }
+function fmtValue(m){ if(state.decoder==='hex')return hex(m.valueB64); return m.value; }
 function hex(b64){let s='',bin=atob(b64||'');for(let i=0;i<bin.length;i++)s+=bin.charCodeAt(i).toString(16).padStart(2,'0')+' ';return s.trim();}
 function copyInsp(){const p=$('#insp');navigator.clipboard.writeText(p.textContent).then(()=>{const b=document.querySelector('.inspector .btn');if(b){const old=b.textContent;b.textContent='Copied';b.style.color='var(--success)';setTimeout(()=>{b.textContent=old;b.style.color='';},1500);}else toast('Copied');});}
 window.copyInsp=copyInsp;
@@ -1277,31 +1322,36 @@ function refreshFieldHints(){ if(!state.topic)return; const s=state.msgs.slice(0
 function filterPanelHtml(){
   const presets=JSON.parse(localStorage.getItem('pk_presets')||'[]');
   const rows=state.filters.map((f,i)=>`<div class="filterRow">
-    <div class="autocomplete"><input id="fld-${i}" class="fField" placeholder="field (e.g. order.status)" value="${esc(f.field)}" oninput="acField(${i})" onfocus="acField(${i})"><div id="acl-${i}" class="acList" style="display:none"></div></div>
-    <select class="fOp" onchange="state.filters[${i}].op=this.value">
+    <div class="autocomplete"><input id="fld-${i}" class="fField" placeholder="field (e.g. order.status)" value="${esc(f.field)}" oninput="acField(${i})" onfocus="acField(${i})" onchange="state.filters[${i}].field=this.value;applyFiltersNow()"><div id="acl-${i}" class="acList" style="display:none"></div></div>
+    <select class="fOp" onchange="state.filters[${i}].op=this.value;applyFiltersNow()">
       ${['==','!=','>','<','>=','<=','contains','regex','exists'].map(o=>`<option value="${o}" ${f.op===o?'selected':''}>${o}</option>`).join('')}
     </select>
-    <input class="fVal" placeholder="value" value="${esc(f.value||'')}" oninput="state.filters[${i}].value=this.value">
+    <input class="fVal" placeholder="value" value="${esc(f.value||'')}" oninput="state.filters[${i}].value=this.value" onkeydown="if(event.key==='Enter')applyFiltersNow()">
     <button class="frmBtn" title="Remove" onclick="delFilter(${i})">&times;</button>
   </div>`).join('');
   return `<div class="filterPanel">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
       <b style="font-size:13px">Filter Builder</b>
       <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="addFilter()">+ Add rule</button>
+      <button class="btn" style="padding:4px 12px;font-size:11px" onclick="applyFiltersNow()">Apply filters</button>
+      <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="clearAllFilters()">Clear all</button>
       <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="savePreset()">Save preset</button>
       <span class="sp" style="flex:1"></span>
+      ${state.filters.length?`<span class="muted" style="font-size:11px">${filteredMsgs().length}/${state.msgs.length} messages</span>`:''}
       <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="toggleFilterPanel()">Close</button>
     </div>
     ${rows||'<div class="muted" style="font-size:12px;margin-bottom:8px">No rules yet. Add a rule to filter messages by JSON field.</div>'}
     <div style="margin-top:8px">${presets.map(p=>`<span class="presetChip" onclick="applyPreset('${esc(JSON.stringify(p.filters))}')">${esc(p.name)}<button title="delete" onclick="event.stopPropagation();delPreset('${esc(p.name)}')">&times;</button></span>`).join('')||''}</div>
   </div>`; }
+window.applyFiltersNow=function(){renderMsgRows();const fp=state.filterPanel?filterPanelHtml():'';const el=document.querySelector('.filterPanel');if(el&&fp){el.outerHTML=fp;}};
+window.clearAllFilters=function(){state.filters=[];render();};
 window.toggleFilterPanel=function(){state.filterPanel=!state.filterPanel;if(state.filterPanel)refreshFieldHints();render();};
 window.addFilter=function(){state.filters.push({field:'',op:'==',value:''});render();};
-window.delFilter=function(i){state.filters.splice(i,1);render();};
-window.acField=function(i){ const inp=document.getElementById('fld-'+i); const box=document.getElementById('acl-'+i); if(!inp||!box)return; const q=inp.value.toLowerCase(); const items=state.fieldHint.filter(k=>k.toLowerCase().includes(q)); box.style.display=items.length?'block':'none'; box.innerHTML=items.map(k=>`<div onclick="pickField(${i},'${esc(k)}')">${esc(k)}</div>`).join(''); };
-window.pickField=function(i,k){state.filters[i].field=k;const inp=document.getElementById('fld-'+i);inp.value=k;const box=document.getElementById('acl-'+i);if(box)box.style.display='none';};
+window.delFilter=function(i){state.filters.splice(i,1);renderMsgRows();render();};
+window.acField=function(i){ const inp=document.getElementById('fld-'+i); const box=document.getElementById('acl-'+i); if(!inp||!box)return; state.filters[i].field=inp.value; const q=inp.value.toLowerCase(); const items=state.fieldHint.filter(k=>k.toLowerCase().includes(q)); box.style.display=items.length?'block':'none'; box.innerHTML=items.map(k=>`<div onclick="pickField(${i},'${esc(k)}')">${esc(k)}</div>`).join(''); };
+window.pickField=function(i,k){state.filters[i].field=k;const inp=document.getElementById('fld-'+i);inp.value=k;const box=document.getElementById('acl-'+i);if(box)box.style.display='none';applyFiltersNow();};
 window.savePreset=function(){const nm=prompt('Preset name:');if(!nm)return;const presets=JSON.parse(localStorage.getItem('pk_presets')||'[]');presets.push({name:nm,filters:JSON.parse(JSON.stringify(state.filters))});localStorage.setItem('pk_presets',JSON.stringify(presets));render();};
-window.applyPreset=function(s){state.filters=JSON.parse(s);render();};
+window.applyPreset=function(s){state.filters=JSON.parse(s);renderMsgRows();render();};
 window.delPreset=function(nm){let p=JSON.parse(localStorage.getItem('pk_presets')||'[]');p=p.filter(x=>x.name!==nm);localStorage.setItem('pk_presets',JSON.stringify(p));render();};
 function getPath(o,path){ if(!o||!path)return''; return path.split('.').reduce((acc,k)=>(acc==null||typeof acc!=='object')?undefined:acc[k],o); }
 function evalFilter(f,v){
@@ -1343,6 +1393,30 @@ function replayModal(m){ return `<div class="overlay"><div class="modal"><h3>Rep
 window.replayOne=function(off){ const m=byOff(off); if(!m)return; document.body.insertAdjacentHTML('beforeend',replayModal(m)); };
 window.replaySelected=function(){ const a=state.diffSel; const m=byOff(a[0])||byOff(a[1]); if(!m){toast('Select a message first');return;} document.body.insertAdjacentHTML('beforeend',replayModal(m)); };
 window.closeOverlay=function(){ const o=document.querySelector('.overlay'); if(o)o.remove(); };
+/* Fitur: dialog konfirmasi dalam aplikasi, pengganti confirm() bawaan browser.
+   Dipakai lewat Promise supaya pemanggil bisa `await` seperti confirm() biasa,
+   tapi tetap konsisten dengan pola overlay/modal yang sudah ada (replayModal). */
+window.askConfirm=function(opts){
+  opts=opts||{};
+  const title=opts.title||'',body=opts.body||'',confirmLabel=opts.confirmLabel||'Confirm',danger=!!opts.danger,typeToConfirm=opts.typeToConfirm||null;
+  return new Promise(resolve=>{
+    let done=false;
+    const onKey=e=>{ if(e.key==='Escape')finish(false); };
+    const finish=v=>{ if(done)return; done=true; document.removeEventListener('keydown',onKey); closeOverlay(); resolve(v); };
+    const typeHtml=typeToConfirm?`<label style="margin-top:10px">Type "${esc(typeToConfirm)}" to confirm</label><input id="confirmType" autocomplete="off">`:'';
+    const html=`<div class="overlay"><div class="modal"><h3>${esc(title)}</h3><div class="muted" style="margin:8px 0">${esc(body)}</div>${typeHtml}<div style="margin-top:14px;display:flex;gap:8px"><button class="btn ${danger?'danger':''}" id="confirmOk"${typeToConfirm?' disabled aria-disabled="true"':''}>${esc(confirmLabel)}</button><button class="btn ghost" id="confirmCancel">Cancel</button></div></div></div>`;
+    document.body.insertAdjacentHTML('beforeend',html);
+    const overlay=document.querySelector('.overlay'),okBtn=document.getElementById('confirmOk'),cancelBtn=document.getElementById('confirmCancel'),input=document.getElementById('confirmType');
+    if(typeToConfirm){
+      const updateOk=()=>{ const match=input.value===typeToConfirm; okBtn.disabled=!match; if(match)okBtn.removeAttribute('aria-disabled'); else okBtn.setAttribute('aria-disabled','true'); };
+      input.addEventListener('input',updateOk); input.focus();
+    } else { cancelBtn.focus(); }
+    okBtn.addEventListener('click',()=>{ if(typeToConfirm&&input.value!==typeToConfirm)return; finish(true); });
+    cancelBtn.addEventListener('click',()=>finish(false));
+    overlay.addEventListener('click',e=>{ if(e.target===overlay)finish(false); });
+    document.addEventListener('keydown',onKey);
+  });
+};
 window.doReplay=async function(off){ const m=byOff(off); if(!m)return; const topic=document.getElementById('rpTopic').value||m.topic; const body={key:document.getElementById('rpKey').value,value:document.getElementById('rpValue').value}; try{ const r=await api('/api/v1/topics/'+encodeURIComponent(topic)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); toast('Replayed to '+topic+' @ offset '+r.offset); closeOverlay(); }catch(e){toast(e.message);} };
 
 async function seek(w){ if(!state.topic)return;
@@ -1381,9 +1455,13 @@ function closeTailSocket(){
 }
 function toggleTail(){
   if(!state.topic){state.tail=false;const button=$('#liveBtn');if(button)button.textContent='Live Tail';return;}
-  if(isTargetUnavailable()||isKafkaTarget()){
+  if(isTargetUnavailable()){
     state.tail=false;const button=$('#liveBtn');if(button)button.textContent='Live Tail';
-    toast(isTargetUnavailable()?targetUnavailableMessage():'Message browsing and live tail are not supported for Kafka targets.');return;
+    toast(targetUnavailableMessage());return;
+  }
+  if(isKafkaTarget()&&!hasTargetCapability('topic.tail')){
+    state.tail=false;const button=$('#liveBtn');if(button)button.textContent='Live Tail';
+    toast('Live tail is not supported by this Kafka target.');return;
   }
   state.tail=!state.tail;const button=$('#liveBtn');if(button)button.innerHTML=state.tail?'<span class="live-dot"></span> Pause':'Live Tail';
   closeTailSocket();if(!state.tail)return;
@@ -1398,7 +1476,7 @@ function connectTail(){
   if(targetName!=='local'){
     const entry=activeTargetEntry();
     if(!entry){state.tail=false;toast(targetUnavailableMessage());return;}
-    if((entry.kind||'').toLowerCase()==='kafka'){state.tail=false;toast('Message browsing and live tail are not supported for Kafka targets.');return;}
+    if((entry.kind||'').toLowerCase()==='kafka'&&!hasTargetCapability('topic.tail')){state.tail=false;toast('Live tail is not supported by this Kafka target.');return;}
   }
   const proto=location.protocol==='https:'?'wss':'ws',part=(!state.partition||state.partition==='all')?'all':state.partition;
   const apiPath=`/api/v1/topics/${encodeURIComponent(state.topic)}/tail?partition=${encodeURIComponent(part)}`;
@@ -1432,23 +1510,24 @@ function prependMsgRow(m){const rows=$('#rows');if(!rows)return;const tr=documen
 /* Topics */
 function viewTopics(){
   const readOnly=isKafkaTarget(),readOnlyNote='Kafka targets are read-only; topic mutations are disabled.',canDetail=!isKafkaTarget()||hasTargetCapability('topic.partitions.read'),detailUnavailable='Topic partition details are not supported by this Kafka target.';
-  const createControl=readOnly?`<button class="btn" disabled title="${readOnlyNote}">Create</button>`:`<input id="newT" placeholder="new topic name" style="max-width:220px"><input id="newP" type="number" min="1" max="64" value="1" title="Partitions" style="max-width:70px"><button class="btn" onclick="createTopic()">Create</button>`;
+  const createControl=readOnly?`<button class="btn" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Create</button>`:`<input id="newT" placeholder="new topic name" style="max-width:220px"><input id="newP" type="number" min="1" max="64" value="1" title="Partitions" style="max-width:70px"><button class="btn" onclick="createTopic()">Create</button>`;
   return `<div>${pageHeader('Topics','Create and inspect topics, partitions, and log positions.')}<div class="card"><div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap">
     <div><div class="kicker">Namespace</div><div class="statXL">${(state.topics||[]).length}<small>topics</small></div></div>
     <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${createControl}</div>
-  </div>${readOnly?`<p class="muted" style="font-size:11px;margin-bottom:10px">${readOnlyNote}</p>`:''}
+  </div>${readOnly?`<div class="card" style="padding:10px 12px;border-color:var(--warn-line);margin-bottom:10px"><span class="badge b-amber">Read-only</span><span class="muted" style="font-size:12px;margin-left:8px">${readOnlyNote}</span></div>`:''}
   <div class="tableScroll"><table><thead><tr><th class="sortable" onclick="sortRows('topics','name')">Topic<span class="sortInd">${sortInd('topics','name')}</span></th><th class="sortable" onclick="sortRows('topics','leo')">Log End<span class="sortInd">${sortInd('topics','leo')}</span></th><th class="sortable" onclick="sortRows('topics','size')">Size<span class="sortInd">${sortInd('topics','size')}</span></th><th>Partitions</th><th></th></tr></thead><tbody>
   ${sortedTopics().map(t=>{
     const ps=t.partitions||[],max=Math.max(1,...ps.map(p=>p.logEndOffset||0));
     const bars=ps.map(p=>`<div class="pbar" title="P${p.partition}: LEO ${p.logEndOffset||0}"><span style="width:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"></span></div>`).join('')||'<span class="muted">-</span>',p=ps[0]||{};
     const topicLink=canDetail?`<a style="color:var(--primary-text);cursor:pointer" onclick="openTopicDetail('${esc(t.name)}')">${esc(t.name)}</a>`:`<span title="${detailUnavailable}">${esc(t.name)}</span>`;
-    const detail=canDetail?`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="openTopicDetail('${esc(t.name)}')">Detail</button>`:`<button class="btn ghost" disabled title="${detailUnavailable}">Detail</button>`;
-    const remove=readOnly?`<button class="btn danger" disabled title="${readOnlyNote}">Delete</button>`:`<button class="btn danger" style="padding:4px 10px;font-size:11px" onclick="delTopic('${esc(t.name)}')">Delete</button>`;
-    return `<tr><td class="mono">${topicLink}</td><td>${p.logEndOffset??0}</td><td>${fmtBytesOpt(t.totalBytes)}</td><td style="min-width:90px">${bars}</td><td><div class="clRowActions">${detail}${remove}</div></td></tr>`;
+    const detail=canDetail?`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="openTopicDetail('${esc(t.name)}')">Detail</button>`:`<button class="btn ghost" aria-disabled="true" title="${detailUnavailable}" onclick="toast('${detailUnavailable}')">Detail</button>`;
+    const remove=readOnly?`<button class="btn danger" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Delete</button>`:`<button class="btn danger" style="padding:4px 10px;font-size:11px" onclick="delTopic('${esc(t.name)}')">Delete</button>`;
+    const roFlag=readOnly?'<span class="badge muted">Read-only</span>':'';
+    return `<tr><td class="mono">${topicLink}</td><td>${p.logEndOffset??0}</td><td>${fmtBytesOpt(t.totalBytes)}</td><td style="min-width:90px">${bars}</td><td><div class="clRowActions">${detail}${remove}${roFlag}</div></td></tr>`;
   }).join('')||`<tr><td colspan="5" class="muted" style="padding:20px">No topics yet.${readOnly?'':' <button class="btn" style="padding:4px 12px;font-size:12px" onclick="document.getElementById(\'newT\').focus()">Create the first one</button>'}</td></tr>`}
   </tbody></table></div></div></div>`;
 }
-window.openTopic=async n=>{state.topic=n;state.partition='all';await goView('databrowser');loadMsgs();};
+window.openTopic=async n=>{state.topic=n;state.partition='all';await goView('databrowser');};
 window.openTopicDetail=async n=>{
   if(isTargetUnavailable()){toast(targetUnavailableMessage());return;}
   if(isKafkaTarget()&&!hasTargetCapability('topic.partitions.read')){toast('Topic partition details are not supported by this Kafka target.');return;}
@@ -1467,12 +1546,12 @@ function viewTopicDetail(){
   const bars=ps.map(p=>{const leo=((p.logEndOffset||0)/max)*100,hwm=((p.highWatermark||0)/max)*100;
     return `<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;margin-bottom:4px"><span>P${p.partition}</span><span class="muted">LEO ${p.logEndOffset??'n/a'} / HWM ${p.highWatermark??'n/a'} / earliest ${p.earliestOffset??'n/a'}</span></div>
       <div class="pbar" style="height:14px"><span style="width:${leo}%"></span></div><div class="pbar" style="height:6px;margin-top:2px"><span style="width:${hwm}%;background:var(--live)"></span></div>
-      <div class="muted" style="font-size:10px;margin-top:4px">${fmtBytesOpt(p.bytes)} &middot; ${(p.segments||[]).length} segment(s)</div><div style="margin-top:6px;display:flex;gap:6px">${readOnly?`<button class="btn ghost" disabled title="${reason}">Truncate</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="truncateTopic(${p.partition})">Truncate</button>`}</div></div>`;
+      <div class="muted" style="font-size:10px;margin-top:4px">${fmtBytesOpt(p.bytes)} &middot; ${(p.segments||[]).length} segment(s)</div><div style="margin-top:6px;display:flex;gap:6px">${readOnly?`<button class="btn ghost" aria-disabled="true" title="${reason}" onclick="toast('${reason}')">Truncate</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="truncateTopic(${p.partition})">Truncate</button>`}</div></div>`;
   }).join('');
   const policy=readOnly?'cleanup.policy unavailable':(state.topicCfg&&state.topicCfg.compacted?'cleanup.policy=compact':'cleanup.policy=delete');
   return `<div>${pageHeader(esc(t),'Partition offsets, watermarks, and compaction controls.')}<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
     <h3 style="font-size:15px">${esc(t)}</h3><span class="badge ${state.topicCfg&&state.topicCfg.compacted?'b-purple':'b-amber'}">${policy}</span>
-    ${readOnly?`<button class="btn ghost" disabled title="${reason}">Enable/disable compaction</button><button class="btn ghost" disabled title="${reason}">Compact now</button>`:`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="toggleTopicCompact()">${state.topicCfg&&state.topicCfg.compacted?'Disable compaction':'Enable compaction'}</button><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="compactTopic()">Compact now</button>`}
+    ${readOnly?`<button class="btn ghost" aria-disabled="true" title="${reason}" onclick="toast('${reason}')">Enable/disable compaction</button><button class="btn ghost" aria-disabled="true" title="${reason}" onclick="toast('${reason}')">Compact now</button>`:`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="toggleTopicCompact()">${state.topicCfg&&state.topicCfg.compacted?'Disable compaction':'Enable compaction'}</button><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="compactTopic()">Compact now</button>`}
     <button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.topicDetail=null;render()">Back</button></div>
     ${readOnly?`<p class="muted" style="font-size:11px;margin-bottom:8px">${reason}</p>`:''}<div style="margin-bottom:6px" class="muted">LEO (log end) vs HWM (high watermark) per partition</div>${bars||'<div class="muted">No partitions</div>'}
   </div></div>`;
@@ -1481,18 +1560,19 @@ window.truncateTopic=async function(p){const o=prompt('Truncate partition '+p+' 
 window.compactTopic=async function(){try{await api(`/api/v1/topics/${encodeURIComponent(state.topicDetail)}/compact`,{method:'POST'});toast('Compaction triggered');}catch(e){toast(e.message);}};
 async function createTopic(){const n=$('#newT').value;if(!n)return;const parts=Math.max(1,Math.min(64,parseInt($('#newP')?.value||'1',10)||1));try{await api('/api/v1/topics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,partitions:parts})});toast('Created '+n+' ('+parts+'p)');await refresh();render();}catch(e){toast(e.message);}}
 window.createTopic=createTopic;
-async function delTopic(n){if(!confirm('Delete topic '+n+'?'))return;try{await api('/api/v1/topics/'+encodeURIComponent(n),{method:'DELETE'});toast('Deleted '+n);await refresh();render();}catch(e){toast(e.message);}}
+async function delTopic(n){if(!await askConfirm({title:'Delete topic',body:'Deleting "'+n+'" removes its data permanently. This cannot be undone.',confirmLabel:'Delete topic',danger:true,typeToConfirm:n}))return;try{await api('/api/v1/topics/'+encodeURIComponent(n),{method:'DELETE'});toast('Deleted '+n);await refresh();render();}catch(e){toast(e.message);}}
 window.delTopic=delTopic;
 
 /* Groups */
 function viewGroups(){
   const readOnly=isKafkaTarget(),readOnlyNote='Kafka consumer groups are read-only; offset import/reset and deletion are disabled.',canDetail=!isKafkaTarget()||hasTargetCapability('group.detail.read'),detailUnavailable='Consumer group details are not supported by this Kafka target.';
-  if(!(state.groups||[]).length)return `<div>${pageHeader('Consumer Groups','Review consumer membership, offsets, and lag.')}<div class="card" style="padding:32px;text-align:center"><div class="muted">No consumer groups reported by this broker.</div>${readOnly?`<p class="muted" style="font-size:11px;margin-top:10px">${readOnlyNote}</p>`:''}</div></div>`;
-  return `<div>${pageHeader('Consumer Groups','Review consumer membership, offsets, and lag.')}<div class="card">${readOnly?`<p class="muted" style="font-size:11px;margin-bottom:10px">${readOnlyNote}</p>`:''}<div class="tableScroll"><table><thead><tr><th class="sortable" onclick="sortRows('groups','name')">Group<span class="sortInd">${sortInd('groups','name')}</span></th><th>State</th><th class="sortable" onclick="sortRows('groups','members')">Members<span class="sortInd">${sortInd('groups','members')}</span></th><th class="sortable" onclick="sortRows('groups','lag')">Lag<span class="sortInd">${sortInd('groups','lag')}</span></th><th></th></tr></thead><tbody>
+  if(!(state.groups||[]).length)return `<div>${pageHeader('Consumer Groups','Review consumer membership, offsets, and lag.')}<div class="card" style="padding:32px;text-align:center"><div class="muted">No consumer groups reported by this broker.</div>${readOnly?`<div class="card" style="padding:10px 12px;border-color:var(--warn-line);margin-top:10px"><span class="badge b-amber">Read-only</span><span class="muted" style="font-size:12px;margin-left:8px">${readOnlyNote}</span></div>`:''}</div></div>`;
+  return `<div>${pageHeader('Consumer Groups','Review consumer membership, offsets, and lag.')}<div class="card">${readOnly?`<div class="card" style="padding:10px 12px;border-color:var(--warn-line);margin-bottom:10px"><span class="badge b-amber">Read-only</span><span class="muted" style="font-size:12px;margin-left:8px">${readOnlyNote}</span></div>`:''}<div class="tableScroll"><table><thead><tr><th class="sortable" onclick="sortRows('groups','name')">Group<span class="sortInd">${sortInd('groups','name')}</span></th><th>State</th><th class="sortable" onclick="sortRows('groups','members')">Members<span class="sortInd">${sortInd('groups','members')}</span></th><th class="sortable" onclick="sortRows('groups','lag')">Lag<span class="sortInd">${sortInd('groups','lag')}</span></th><th></th></tr></thead><tbody>
   ${sortedGroups().map(g=>{
     const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0),memberText=Array.isArray(g.members)?(g.members.join(', ')||'-'):'n/a',rowAttrs=canDetail?`class="rowclick" onclick="openGroup('${esc(g.name)}')"`:`title="${detailUnavailable}"`;
-    const detail=canDetail?'':`<button class="btn ghost" disabled title="${detailUnavailable}">Details</button>`;
-    const mutations=readOnly?`<button class="btn ghost" disabled title="Group offset export is not supported by Kafka targets">Export</button><button class="btn ghost" disabled title="${readOnlyNote}">Import</button><button class="btn danger" disabled title="${readOnlyNote}">Delete</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();exportGroupOffsets('${esc(g.name)}')" title="Export offset snapshot">Export</button><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();importGroupOffsets('${esc(g.name)}')" title="Import offset snapshot">Import</button><button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();delGroup('${esc(g.name)}')">Delete</button>`;
+    const detail=canDetail?'':`<button class="btn ghost" aria-disabled="true" title="${detailUnavailable}" onclick="toast('${detailUnavailable}')">Details</button>`;
+    const groupExportNote='Group offset export is not supported by Kafka targets';
+    const mutations=readOnly?`<button class="btn ghost" aria-disabled="true" title="${groupExportNote}" onclick="toast('${groupExportNote}')">Export</button><button class="btn ghost" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Import</button><button class="btn danger" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Delete</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();exportGroupOffsets('${esc(g.name)}')" title="Export offset snapshot">Export</button><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();importGroupOffsets('${esc(g.name)}')" title="Import offset snapshot">Import</button><button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();delGroup('${esc(g.name)}')">Delete</button>`;
     return `<tr ${rowAttrs}><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span></td><td class="mono">${memberText}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td><td><div class="clRowActions">${detail}${mutations}</div></td></tr>`;
   }).join('')}
   </tbody></table></div></div></div>`;
@@ -1512,7 +1592,7 @@ window.loadGroupDetail=loadGroupDetail;
 function viewGroupDetail(){
   const g=state.groupDetail;if(!g)return '<div class="card">'+skel(140)+' '+skel(90)+' '+skel(60)+'</div>';
   const readOnly=isKafkaTarget(),reason='Kafka consumer groups are read-only; offset reset is disabled.';
-  const lagRows=((g.offsets)||[]).map(o=>`<tr><td class="mono">${esc(o.topic)}</td><td>${o.partition}</td><td>${o.current_offset}</td><td>${o.log_end_offset}</td><td><span class="badge ${o.lag>0?'b-amber':'b-green'}">${o.lag}</span></td><td>${readOnly?`<button class="btn ghost" disabled title="${reason}">Reset</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="resetGroupOffset('${esc(o.topic)}',${o.partition})">Reset</button>`}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">No committed offsets</td></tr>';
+  const lagRows=((g.offsets)||[]).map(o=>`<tr><td class="mono">${esc(o.topic)}</td><td>${o.partition}</td><td>${o.current_offset}</td><td>${o.log_end_offset}</td><td><span class="badge ${o.lag>0?'b-amber':'b-green'}">${o.lag}</span></td><td>${readOnly?`<button class="btn ghost" aria-disabled="true" title="${reason}" onclick="toast('${reason}')">Reset</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="resetGroupOffset('${esc(o.topic)}',${o.partition})">Reset</button>`}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">No committed offsets</td></tr>';
   const memberRecords=Array.isArray(g.members)?g.members:null;
   const members=memberRecords?memberRecords.map(m=>`<div class="chip" style="padding:3px 10px;margin:2px">${esc(m.member_id)}${m.client_host?' @ '+esc(m.client_host):''}</div>`).join('')||'<span class="muted">No members reported.</span>':'<span class="muted">Member details unavailable.</span>';
   const memberCount=memberRecords?`${memberRecords.length} member(s)`:'n/a (member details unavailable)';
@@ -1528,7 +1608,7 @@ window.resetGroupOffset=async function(topic,part){
   catch(e){if(generation!==state.targetGeneration||e.staleTargetResponse)return;toast(e.message);}
 };
 window.delGroup=async function(g){
-  if(!confirm('Delete group '+g+'?'))return;const generation=state.targetGeneration;
+  if(!await askConfirm({title:'Delete group',body:'Delete group '+g+'?',confirmLabel:'Delete group',danger:true}))return;const generation=state.targetGeneration;
   try{await api('/api/v1/groups/'+encodeURIComponent(g),{method:'DELETE'});if(generation!==state.targetGeneration)return;toast('Deleted '+g);await refresh();if(generation===state.targetGeneration)render();}
   catch(e){if(generation!==state.targetGeneration||e.staleTargetResponse)return;toast(e.message);}
 };
@@ -1686,22 +1766,31 @@ window.copyIssuedDelegatedToken=async function(){
   document.getElementById('delegatedTokenOnce')?.replaceChildren();
   toast('Delegated token copied. Paste it into the source Clusters form.');
 };
-window.revokeDelegatedToken=async function(id){if(!id||!confirm('Revoke delegated token '+id+'?'))return;try{await apiLocal('/api/v1/auth/delegated-tokens/'+encodeURIComponent(id),{method:'DELETE'});toast('Delegated token revoked');loadDelegatedTokens();}catch(e){toast(e.message);}};
+window.revokeDelegatedToken=async function(id){if(!id||!await askConfirm({title:'Revoke delegated token',body:'Revoke delegated token '+id+'?',confirmLabel:'Revoke token',danger:true}))return;try{await apiLocal('/api/v1/auth/delegated-tokens/'+encodeURIComponent(id),{method:'DELETE'});toast('Delegated token revoked');loadDelegatedTokens();}catch(e){toast(e.message);}};
 
 /* Fitur 4.6: In-App Health Alarms */
+/* Setiap alarm punya id tetap (mis. "lag:<grup>") yang terpisah dari teksnya.
+   Sebelumnya id = teks lengkap termasuk angka lag, jadi begitu lag bergerak
+   sedikit alarm lama dianggap "sudah tidak aktif" dan Dismiss tidak pernah
+   menempel. Ambang lag grup juga bisa diatur (pk_group_lag_warn): kelompok sync
+   pada topik besar memang tertinggal ratusan juta pesan, dan ambang 1000
+   membuat banner itu menyala selamanya. */
+function groupLagWarn(){ return Number(state.groupLagWarn)||1000000000; }
 function activeAlerts(){
   const alerts=[];
-  // Consumer lag > 1000
   const gs=Array.isArray(state.groups)?state.groups:[];
-  for(const g of gs){ const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0); if(lag>1000){ alerts.push('Consumer lag '+lag+' on group '+g.name+' (>1000)'); } }
-  // Disk usage > 85% (uses the broker's data dir; cluster reports totalBytes as a proxy)
+  const warn=groupLagWarn();
+  for(const g of gs){
+    const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0);
+    if(lag>warn){ alerts.push({id:'lag:'+g.name, text:'Consumer lag '+lag+' on group '+g.name+' (>'+warn+')'}); }
+  }
   const c=state.cluster||{};
-  if(c.diskUsagePct && c.diskUsagePct>85){ alerts.push('Disk usage '+c.diskUsagePct+'% (>85%)'); }
+  if(c.diskUsagePct && c.diskUsagePct>85){ alerts.push({id:'disk', text:'Disk usage '+c.diskUsagePct+'% (>85%)'}); }
   // DLQ: only topics that actually hold messages (LEO > 0 or non-empty bytes)
   for(const t of (Array.isArray(state.topics)?state.topics:[])){
     if(/-(dlq|dead)$/i.test(t.name)){
       const hasMsgs=(t.totalBytes||0)>0||(t.partitions||[]).some(p=>(p.logEndOffset||0)>0);
-      if(hasMsgs){ alerts.push('DLQ topic '+t.name+' has messages'); }
+      if(hasMsgs){ alerts.push({id:'dlq:'+t.name, text:'DLQ topic '+t.name+' has messages'}); }
     }
   }
   return alerts;
@@ -1709,23 +1798,33 @@ function activeAlerts(){
 function checkAlarms(){
   const alerts=activeAlerts();
   // Forget dismissals for alerts that no longer fire, so a recurring
-  // condition re-alarms when it comes back later.
-  for(const k of [...state.alarmsDismissed]) if(!alerts.includes(k)) state.alarmsDismissed.delete(k);
-  const shown=alerts.filter(a=>!state.alarmsDismissed.has(a));
+  // condition re-alarms when it comes back later. Matching is by id, never by
+  // the rendered text: a lag number moves on every poll.
+  const live=new Set(alerts.map(a=>a.id));
+  for(const k of [...state.alarmsDismissed]) if(!live.has(k)) state.alarmsDismissed.delete(k);
+  const shown=alerts.filter(a=>!state.alarmsDismissed.has(a.id));
   const existing=document.getElementById('alarmBanner');
   if(shown.length){
     if(!existing){ const b=document.createElement('div'); b.id='alarmBanner'; b.className='alarmBanner'; document.body.prepend(b); }
     const b=document.getElementById('alarmBanner');
-    b.innerHTML='<b>ALERT</b> '+shown.map(esc).join(' &middot; ')+' <button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="dismissAlarms()">Dismiss</button>';
+    b.innerHTML='<b>ALERT</b> '+shown.map(a=>esc(a.text)).join(' &middot; ')+' <button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="dismissAlarms()">Dismiss</button>';
   }
   else if(existing){ existing.remove(); }
 }
-// Dismiss remembers the decision for this session so the 5s auto-refresh
-// does not resurrect the banner.
+// Dismiss remembers the decision across reloads so the 5s auto-refresh (or a
+// browser restart) does not resurrect the banner.
 window.dismissAlarms=function(){
-  for(const a of activeAlerts()) state.alarmsDismissed.add(a);
-  try{ sessionStorage.setItem('pk_dismissed',JSON.stringify([...state.alarmsDismissed])); }catch(e){}
+  for(const a of activeAlerts()) state.alarmsDismissed.add(a.id);
+  try{ localStorage.setItem('pk_alarms_dismissed',JSON.stringify([...state.alarmsDismissed])); }catch(e){}
   const b=document.getElementById('alarmBanner'); if(b)b.remove();
+};
+window.setGroupLagWarn=function(v){
+  const n=Number(v);
+  if(!isFinite(n)||n<0){ toast('Threshold harus angka >= 0'); return; }
+  state.groupLagWarn=n; localStorage.setItem('pk_group_lag_warn',String(n));
+  state.alarmsDismissed.clear();
+  try{ localStorage.setItem('pk_alarms_dismissed','[]'); }catch(e){}
+  checkAlarms(); render();
 };
 /* Batch 1-3: fitur frontend */
 /* URL sync + sorting helpers */
@@ -1770,6 +1869,211 @@ async function loadThroughput(){
     }catch(e){ m.textContent='error: '+e.message; } }
 }
 window.loadThroughput=loadThroughput;
+
+/* Integrations view: alamat & contoh pakai tiap ingress surface (MQTT, REST Proxy,
+   Schema Registry, Prometheus). Data datang dari satu endpoint read-only, jadi
+   render dibuat defensif terhadap field yang hilang (peer bisa kirim parsial). */
+function viewIntegrations(){
+  const body=state.integrations?renderIntegrations(state.integrations):`<div id="integrationsBody" class="muted" style="font-size:12px">${skel(120)}</div>`;
+  return `<div>${pageHeader('Integrations','Addresses and usage snippets for the ingress surfaces this broker exposes.')}
+  ${state.integrations?`<div id="integrationsBody">${body}</div>`:body}
+  </div>`;
+}
+/* pecah "host:port" secara defensif; 0.0.0.0 diganti localhost karena itu alamat bind,
+   bukan alamat yang bisa dipakai klien untuk connect */
+function splitHostPort(addr){
+  const s=String(addr||'');
+  const i=s.lastIndexOf(':');
+  let host=i>=0?s.slice(0,i):s, port=i>=0?s.slice(i+1):'';
+  const bindAll=host==='0.0.0.0'||host==='';
+  if(bindAll)host='localhost';
+  return {host:host||'localhost',port:port||'-',bindAll};
+}
+function copyRow(id,label){
+  return `<button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="copyText('#${id}','${label}')">Copy</button>`;
+}
+function renderIntegrations(d){
+  const mqtt=(d&&d.mqtt)||{}, restProxy=(d&&d.restProxy)||{}, schemaRegistry=(d&&d.schemaRegistry)||{}, metrics=(d&&d.metrics)||{};
+  /* --- Kartu 1: MQTT --- */
+  const mqttHp=splitHostPort(mqtt.listen);
+  const mqttTopics=(state.topics||[]).filter(t=>(t.name||'').startsWith('mqtt-'));
+  const mqttTopicsHtml=mqttTopics.length
+    ? mqttTopics.map(t=>`<div class="row" style="justify-content:space-between"><span class="mono">${esc(t.name)}</span><button class="btn ghost" style="padding:2px 8px;font-size:11px" onclick="pickTopicNav('${esc(t.name)}')">Open in Data Browser</button></div>`).join('')
+    : `<span class="muted">No mqtt-* topics yet.</span>`;
+  const mqttCard=`<div class="card"><div class="kicker">Edge</div><h3>MQTT Bridge</h3>
+    <div class="row">${mqtt.enabled===true?'<span class="badge b-green">LISTENING</span>':'<span class="badge muted">Bridge not running</span>'}
+      <span class="mono" id="mqttAddr">${esc(mqtt.listen||'-')}</span>${copyRow('mqttAddr','Address')}</div>
+    <div class="row" style="margin-top:8px"><span class="statSub">${mqtt.connections??0} / ${mqtt.maxConnections??0} clients</span><span class="statSub">${mqtt.bridged??0} messages bridged</span></div>
+    <div class="row" style="margin-top:8px"><span class="mono">${esc(mqtt.topicPattern||'-')} &rarr; ${esc(mqtt.kafkaTopicPattern||'-')}, key &lt;device&gt;, header ${esc(mqtt.topicHeader||'-')}</span></div>
+    <div class="hr"></div>
+    <div class="kicker">mqtt-* topics</div>
+    ${mqttTopicsHtml}
+    <div class="hr"></div>
+    <div class="kicker">Publish</div>
+    <pre id="mqttPub">mosquitto_pub -h ${esc(mqttHp.host)} -p ${esc(mqttHp.port)} -t sensors/&lt;device&gt;/&lt;metric&gt; -m '{"v":23.5}'</pre>
+    ${copyRow('mqttPub','Snippet')}
+    <div class="kicker" style="margin-top:12px">Subscribe</div>
+    <pre id="mqttSub">mosquitto_sub -h ${esc(mqttHp.host)} -p ${esc(mqttHp.port)} -t 'sensors/#' -v</pre>
+    ${copyRow('mqttSub','Snippet')}
+    ${mqttHp.bindAll?`<div class="muted" style="font-size:11px;margin-top:6px">Listener binds all interfaces (0.0.0.0); use the broker's reachable hostname when connecting remotely.</div>`:''}
+  </div>`;
+  /* --- Kartu 2: REST Proxy --- */
+  const restHp=splitHostPort(restProxy.listen);
+  const restHostPort=`${restHp.host}:${restHp.port}`;
+  const restEndpoints=(restProxy.endpoints||[]).length
+    ? (restProxy.endpoints||[]).map(e=>`<div class="mono">${esc(e)}</div>`).join('')
+    : `<span class="muted">No endpoints reported.</span>`;
+  const restAuthHtml=restProxy.auth===true
+    ? `<span class="badge muted">authentication required</span><div class="muted" style="font-size:11px;margin-top:4px">SASL/ACL is enabled; send the credential documented in the README (section 4).</div>`
+    : `<span class="badge muted">no auth</span>`;
+  const restCard=`<div class="card"><div class="kicker">HTTP</div><h3>REST Proxy</h3>
+    <div class="row"><span class="mono" id="restAddr">${esc(restProxy.listen||'-')}</span>${copyRow('restAddr','Address')}</div>
+    <div class="kicker" style="margin-top:12px">Endpoints</div>
+    ${restEndpoints}
+    <div class="row" style="margin-top:8px">${restAuthHtml}</div>
+    <div class="hr"></div>
+    <div class="kicker">Publish</div>
+    <pre id="restPub">curl -s -X POST http://${esc(restHostPort)}/topics/&lt;topic&gt;/messages -H 'Content-Type: application/json' -d '{"key":"k","value":"v"}'</pre>
+    ${copyRow('restPub','Snippet')}
+    <div class="kicker" style="margin-top:12px">Consume</div>
+    <pre id="restSub">curl -s 'http://${esc(restHostPort)}/topics/&lt;topic&gt;/messages?limit=5'</pre>
+    ${copyRow('restSub','Snippet')}
+  </div>`;
+  /* --- Kartu 3: Schema Registry --- */
+  const srHp=splitHostPort(schemaRegistry.listen);
+  const srAddr=schemaRegistry.listen||'-';
+  const srCard=`<div class="card"><div class="kicker">Schemas</div><h3>Schema Registry</h3>
+    <div class="row"><span class="mono" id="srAddr">${esc(srAddr)}</span>${copyRow('srAddr','Address')}
+      <button class="btn ghost" onclick="goView('schemas')">Open Schemas</button></div>
+    <div class="row" style="margin-top:8px"><span class="statSub">${schemaRegistry.subjects??0} subject(s)</span></div>
+    ${schemaRegistry.enabled===false?`<div class="muted" style="font-size:12px;margin-top:6px">Schema registry is not available.</div>`:''}
+    <div class="hr"></div>
+    <pre id="srList">curl -s http://${esc(srHp.host)}:${esc(srHp.port)}/subjects</pre>
+    ${copyRow('srList','Snippet')}
+  </div>`;
+  /* --- Kartu 4: Prometheus / Grafana --- */
+  const scrapeYaml=`scrape_configs:
+  - job_name: pocketkafka
+    static_configs:
+      - targets: ['${esc(window.location.host)}']
+    metrics_path: ${esc(metrics.path||'/metrics')}`;
+  const metricsCard=`<div class="card"><div class="kicker">Observability</div><h3>Prometheus &amp; Grafana</h3>
+    <div class="row"><a href="/metrics" target="_blank" rel="noreferrer">/metrics</a></div>
+    ${metrics.authRequired===true?`<div class="muted" style="font-size:11px;margin-top:6px">Requires a session cookie or bearer token while authentication is enabled.</div>`:''}
+    <div class="hr"></div>
+    <div class="kicker">Prometheus scrape config</div>
+    <pre id="scrapeCfg">${esc(scrapeYaml)}</pre>
+    ${copyRow('scrapeCfg','Snippet')}
+    <div class="statSub" style="margin-top:8px">Import ${esc(metrics.grafanaDashboard||'-')} into Grafana.</div>
+    <div class="muted" style="font-size:11px;margin-top:6px">Only pocketkafka_messages_in_total and pocketkafka_bytes_in_total per topic are exported today.</div>
+  </div>`;
+  return mqttCard+restCard+srCard+metricsCard;
+}
+async function loadIntegrations(){
+  const el=document.getElementById('integrationsBody');
+  if(!el)return;
+  try{
+    const d=await api('/api/v1/integrations');
+    state.integrations=d; state.integrationsError='';
+    el.innerHTML=renderIntegrations(d);
+  }catch(e){
+    state.integrationsError=e.message;
+    if(/404|not allowed|does not provide integrations/i.test(e.message)){
+      el.innerHTML=`<div class="muted">This peer does not expose integrations.</div><div class="mono" style="margin-top:4px">${esc(e.message)}</div>`;
+    }else{
+      el.innerHTML=`Failed to load integrations: <span class="mono">${esc(e.message)}</span>`;
+    }
+  }
+}
+window.loadIntegrations=loadIntegrations;
+window.copyText=function(sel,label){const n=document.querySelector(sel);if(!n)return;navigator.clipboard.writeText(n.textContent).then(()=>toast((label||'Text')+' copied')).catch(()=>toast('Copy failed'));};
+
+/* Broker configuration (read-only): satu endpoint efektif (default sudah diterapkan,
+   rahasia sudah diredaksi server). Dibaca defensif karena peer lama bisa kirim payload
+   parsial; view tidak boleh melempar exception hanya karena satu field hilang. */
+function renderBrokerCfg(c){
+  c=c||{};
+  const r=(k,v)=>`<div class="row" style="justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--border-soft)"><span class="muted">${esc(k)}</span><span class="mono">${esc(v==null?'-':v)}</span></div>`;
+  const section=(title,rowsHtml)=>`<div class="kicker" style="margin-top:14px">${esc(title)}</div>${rowsHtml}`;
+  const kv=(obj)=>Object.keys(obj||{}).length?Object.entries(obj||{}).map(([k,v])=>r(k,v)).join(''):r('(none)','-');
+
+  const broker=c.broker||{};
+  const brokerRows=r('Broker ID',broker.id)+r('Cluster ID',broker.clusterId)+r('Rack',broker.rack);
+
+  const listenersRows=kv(c.listeners);
+  const advListenersRows=kv(c.advertisedListeners);
+
+  const storage=c.storage||{};
+  const retention=storage.retention||{};
+  const tiered=storage.tiered||{};
+  const storageRows=r('Data dir',storage.dataDir)+r('Segment max bytes',storage.segmentMaxBytes)+r('Index interval bytes',storage.indexIntervalBytes)
+    +r('Flush policy',storage.flushPolicy)+r('Flush interval (ms)',storage.flushIntervalMs)+r('Sync on acks=all',storage.syncOnAcksAll)
+    +r('Retention check interval (ms)',retention.checkIntervalMs)+r('Retention hours',retention.retentionHours)+r('Retention bytes',retention.retentionBytes)
+    +r('Tiered storage',tiered.enabled)+r('Tiered endpoint',tiered.endpoint)+r('Tiered bucket',tiered.bucket)+r('Tiered region',tiered.region)
+    +r('Tiered prefix',tiered.prefix)+r('Offload after (hours)',tiered.offloadAfterHours)+r('Tiered check interval (ms)',tiered.checkIntervalMs);
+
+  const topics=c.topics||{};
+  const topicsRows=r('Auto-create',topics.autoCreate)+r('Default partitions',topics.defaultPartitions)+r('Default replication factor',topics.defaultReplicationFactor);
+
+  const coordinator=c.coordinator||{};
+  const coordinatorRows=r('Session timeout (ms)',coordinator.sessionTimeoutMs)+r('Rebalance timeout (ms)',coordinator.rebalanceTimeoutMs)
+    +r('Heartbeat interval (ms)',coordinator.heartbeatIntervalMs)+r('Offsets retention (minutes)',coordinator.offsetsRetentionMinutes)+r('Storage backend',coordinator.storageBackend);
+
+  const network=c.network||{};
+  const networkRows=r('Max connections',network.maxConnections)+r('Read buffer bytes',network.readBufferBytes)+r('Write buffer bytes',network.writeBufferBytes)
+    +r('Max request size bytes',network.maxRequestSizeBytes)+r('Read timeout (ms)',network.readTimeoutMs)+r('Write timeout (ms)',network.writeTimeoutMs)+r('Idle timeout (ms)',network.idleTimeoutMs);
+
+  const logging=c.logging||{};
+  const loggingRows=r('Level',logging.level)+r('Format',logging.format);
+
+  const web=c.web||{};
+  const webClusters=(web.clusters||[]).length
+    ? web.clusters.map(cl=>r(cl&&cl.name,cl&&cl.url)).join('')
+    : r('Clusters','none');
+  const webRows=r('Listen',web.listen)+r('Enabled',web.enabled)+r('Auth',web.auth)+webClusters;
+
+  const ingressRows=r('Schema registry listen',(c.schemaRegistry||{}).listen)+r('Gateway listen',(c.gateway||{}).listen)+r('MQTT listen',(c.mqtt||{}).listen);
+
+  const security=c.security||{};
+  const tls=security.tls||{};
+  const users=(security.users||[]).length?security.users.map(u=>r('User',u)).join(''):r('Users','none');
+  const securityRows=r('Enabled',security.enabled)+users+r('TLS enabled',tls.enabled)+r('TLS listen',tls.listen)+r('TLS cert file',tls.certFile)+r('TLS key file',tls.keyFile);
+
+  return `<div class="row" style="justify-content:space-between;align-items:center">
+      <span class="muted" style="font-size:11px">Effective values after defaults. Secrets (passwords, tokens, keys) are omitted by the server.</span>
+      <button class="btn ghost" onclick="copyBrokerCfg()">Copy JSON</button>
+    </div>`
+    +section('Broker',brokerRows)
+    +section('Listeners',listenersRows)
+    +section('Advertised listeners',advListenersRows)
+    +section('Storage',storageRows)
+    +section('Topics',topicsRows)
+    +section('Coordinator',coordinatorRows)
+    +section('Network',networkRows)
+    +section('Logging',loggingRows)
+    +section('Web',webRows)
+    +section('Ingress',ingressRows)
+    +section('Security',securityRows);
+}
+async function loadBrokerConfig(){
+  const el=document.getElementById('brokerCfgBody');
+  if(!el)return;
+  if(isKafkaTarget()){el.innerHTML='<span class="muted">Broker configuration is not available for Kafka targets.</span>';return;}
+  if(state.brokerCfg)el.innerHTML=renderBrokerCfg(state.brokerCfg);
+  try{
+    const d=await api('/api/v1/config');
+    state.brokerCfg=d; state.brokerCfgError='';
+    el.innerHTML=renderBrokerCfg(d);
+  }catch(e){
+    state.brokerCfgError=e.message;
+    if(/404|not allowed|not supported/i.test(e.message)){
+      el.innerHTML='<span class="muted">This broker does not expose its configuration.</span><div class="mono" style="margin-top:4px">'+esc(e.message)+'</div>';
+    }else{
+      el.innerHTML='Failed to load configuration: <span class="mono">'+esc(e.message)+'</span>';
+    }
+  }
+}
+window.copyBrokerCfg=function(){ if(!state.brokerCfg)return; navigator.clipboard.writeText(JSON.stringify(state.brokerCfg,null,2)).then(()=>toast('Configuration copied')).catch(()=>toast('Copy failed')); };
 
 /* Connections juga di-refresh oleh timer, jadi ia ikut di-patch di tempat
    supaya view yang sedang dilihat tidak berkedip tiap refreshMs. */
@@ -1988,6 +2292,8 @@ function clearTargetViewData(){
   state.cluster=null;state.topics=[];state.groups=[];state.schemas=[];state.topic=null;state.topicDetail=null;state.topicParts=[];state.topicCfg=null;
   state.group=null;state.groupDetail=null;state.lagHist={};state.msgs=[];state.fieldHint=[];state.off=null;state.leo=null;state.earliest=null;
   state.filters=[];state.diffSel=[];state.tpSamples=[];state.tpTotal=0;healthData=null;healthErr=null;overviewData=null;overviewErr=null;overviewLoading=true;healthOpenTopics.clear();
+  state.integrations=null;state.integrationsError='';
+  state.brokerCfg=null;state.brokerCfgError='';
 }
 function cancelTargetWork(){
   state.targetGeneration++;
@@ -2225,7 +2531,7 @@ window.saveCluster=async function(){
 };
 window.deleteCluster=async function(name){
   if(!name)return;
-  if(!confirm('Stop monitoring "'+name+'"? Its stored credentials are removed too.'))return;
+  if(!await askConfirm({title:'Remove cluster',body:'Stop monitoring "'+name+'"? Its stored credentials are removed too.',confirmLabel:'Remove cluster',danger:true}))return;
   try{
     await apiLocal('/api/v1/clusters/'+encodeURIComponent(name),{method:'DELETE'});
     toast('Cluster removed');
@@ -2352,6 +2658,8 @@ function bindView(){
     if(!state.targetSwitching&&!isTargetUnavailable()&&!isKafkaTarget()){loadACLs();loadAudit();}
   }
   if(viewReady&&state.view==='metrics')loadThroughput();
+  if(viewReady&&state.view==='integrations')loadIntegrations();
+  if(localViewReady&&state.view==='settings')loadBrokerConfig();
   if(viewReady&&state.view==='logs')loadLogs();
   if(viewReady&&state.view==='topology')renderTopoSvg();
   if(viewReady&&state.view==='databrowser')bindTailPause();

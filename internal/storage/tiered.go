@@ -37,10 +37,11 @@ func (s *Store) EnableTiering(client *tier.S3Client, threshold, interval time.Du
 }
 
 // attach wires an object-store fetcher onto a partition so remote segments can
-// be restored on demand.
+// be restored on demand, and a deleter so retention can drop their objects.
 func (s *Store) attach(p *Partition) {
 	if s.s3 != nil {
 		p.remoteFetch = s.fetchRemote
+		p.remoteDelete = s.deleteRemote
 	}
 }
 
@@ -52,6 +53,21 @@ func (s *Store) fetchRemote(key string) ([]byte, error) {
 	return s.s3.GetObject(key)
 }
 
+// deleteRemote removes an offloaded segment's log and index objects. Both are
+// attempted; the first failure is returned so the caller can ignore it.
+func (s *Store) deleteRemote(logKey, indexKey string) error {
+	if s.s3 == nil {
+		return fmt.Errorf("tiered storage not enabled")
+	}
+	var firstErr error
+	for _, key := range []string{logKey, indexKey} {
+		if err := s.s3.DeleteObject(key); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // offloadAll moves old closed segments of every partition to object storage.
 func (s *Store) offloadAll() {
 	for _, t := range s.TopicsSnapshot() {
@@ -61,52 +77,78 @@ func (s *Store) offloadAll() {
 	}
 }
 
-// offloadPartition uploads closed segments older than the threshold.
+// offloadPartition uploads closed segments older than the threshold. It picks
+// candidates under the partition lock, does the reads and uploads without it
+// (so produce/fetch are not stalled behind S3), then re-takes the lock to mark
+// only the segments that are still present and not already remote.
 func (s *Store) offloadPartition(p *Partition) {
 	if s.s3 == nil {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	cutoff := time.Now().Add(-s.tierThreshold)
-	kept := p.closedSegments[:0]
+	p.mu.Lock()
+	var candidates []*Segment
 	for _, seg := range p.closedSegments {
 		if seg.isRemote() {
-			kept = append(kept, seg)
 			continue
 		}
-		mtime, err := fileMtime(seg.logPath())
+		mtime, err := seg.modTime()
 		if err != nil || !mtime.Before(cutoff) {
-			kept = append(kept, seg)
 			continue
 		}
+		candidates = append(candidates, seg)
+	}
+	p.mu.Unlock()
+
+	type uploaded struct {
+		seg      *Segment
+		logKey   string
+		indexKey string
+	}
+	var uploadedSegs []uploaded
+	for _, seg := range candidates {
 		logData, err := os.ReadFile(seg.logPath())
 		if err != nil {
-			kept = append(kept, seg)
 			continue
 		}
 		indexData, err := os.ReadFile(seg.indexPath())
 		if err != nil {
-			kept = append(kept, seg)
 			continue
 		}
 		logKey := s.tierKey(p, seg, ".log")
 		indexKey := s.tierKey(p, seg, ".index")
 		if err := s.s3.PutObject(logKey, logData); err != nil {
-			kept = append(kept, seg)
 			continue
 		}
 		if err := s.s3.PutObject(indexKey, indexData); err != nil {
-			kept = append(kept, seg)
 			continue
 		}
-		if err := seg.markRemote(logKey, indexKey); err != nil {
-			kept = append(kept, seg)
+		uploadedSegs = append(uploadedSegs, uploaded{seg: seg, logKey: logKey, indexKey: indexKey})
+	}
+	if len(uploadedSegs) == 0 {
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, u := range uploadedSegs {
+		if !p.hasClosedSegmentLocked(u.seg) || u.seg.isRemote() {
 			continue
+		}
+		_ = u.seg.markRemote(u.logKey, u.indexKey)
+	}
+}
+
+// hasClosedSegmentLocked reports whether seg is still one of the partition's
+// closed segments.
+func (p *Partition) hasClosedSegmentLocked(seg *Segment) bool {
+	for _, s := range p.closedSegments {
+		if s == seg {
+			return true
 		}
 	}
-	p.closedSegments = kept
+	return false
 }
 
 // tierKey builds the object-store key for a segment file.

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="pkm-title">
+  <title id="pkm-title">PocketKafka</title>
+  <!-- Logo mark on a transparent background, for light or dark pages. -->
+  <g fill="none" stroke="#4c7dff" stroke-width="46" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M120 192V392"/>
+    <circle cx="178" cy="250" r="58"/>
+    <path d="M320 120V308"/>
+    <path d="M388 190L320 258"/>
+    <path d="M346 232L392 308"/>
+  </g>
+</svg>

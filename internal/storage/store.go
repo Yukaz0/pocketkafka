@@ -170,21 +170,26 @@ func (s *Store) createLocked(name string, partitions int) (*Topic, bool, error) 
 	return t, true, nil
 }
 
-// DeleteTopic removes a topic and all of its partition data from disk.
+// DeleteTopic removes a topic and all of its partition data from disk. The
+// topic is unlinked from the store under the lock, then the files are deleted
+// after it is released so the whole broker is not stalled behind disk I/O.
 func (s *Store) DeleteTopic(name string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	t, ok := s.topics[name]
 	if !ok {
+		s.mu.Unlock()
 		return fmt.Errorf("unknown topic: %s", name)
 	}
+	delete(s.topics, name)
+	s.mu.Unlock()
+
+	var firstErr error
 	for _, p := range t.Partitions {
-		if err := p.Delete(); err != nil {
-			return err
+		if err := p.Delete(); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	delete(s.topics, name)
-	return nil
+	return firstErr
 }
 
 // GetPartition returns the partition for a topic, or nil if it does not exist.
@@ -244,16 +249,23 @@ func (s *Store) CompactNow(topic string) error {
 }
 
 // SyncAll fsyncs every partition's active segment. It is the interval flush
-// policy's periodic action and is also called before shutdown.
+// policy's periodic action and is also called before shutdown. The topic map is
+// snapshotted under the lock and released before the fsyncs, so topic
+// create/delete and partition lookups are not blocked behind disk I/O.
 func (s *Store) SyncAll() error {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var firstErr error
+	var partitions []*Partition
 	for _, t := range s.topics {
 		for _, p := range t.Partitions {
-			if err := p.Sync(); err != nil && firstErr == nil {
-				firstErr = err
-			}
+			partitions = append(partitions, p)
+		}
+	}
+	s.mu.RUnlock()
+
+	var firstErr error
+	for _, p := range partitions {
+		if err := p.Sync(); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
 	return firstErr

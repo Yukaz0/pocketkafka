@@ -37,6 +37,10 @@ type Partition struct {
 
 	// remoteFetch downloads an object-store key (set when tiering is enabled).
 	remoteFetch func(key string) ([]byte, error)
+	// remoteDelete removes the object-store keys of an offloaded segment
+	// (set when tiering is enabled). It is best-effort: a failure never fails
+	// the retention pass that issued it.
+	remoteDelete func(logKey, indexKey string) error
 
 	// compacting keeps a second compaction from racing the first on one partition.
 	compacting atomic.Bool
@@ -123,17 +127,20 @@ func (p *Partition) recover() error {
 // DataWaiter returns a channel that is closed on the next Append, plus the
 // current high watermark. Fetch long-polls wait on this channel (with a
 // timeout) instead of sleep-polling the HWM, so an idle partition costs zero
-// CPU for both broker and clients. The wake is not lost: Append closes the
-// snapshot channel under appendMu; a waiter that snapshots after the close
-// receives an already-closed channel and simply rechecks the HWM.
+// CPU for both broker and clients.
+//
+// The channel is snapshotted before the HWM is read. Append closes the channel
+// before advancing the HWM, so a waiter that reads the HWM as unchanged is
+// guaranteed to hold a channel that the append will close; reading the HWM
+// first would let an append slip between the two reads and lose the wake.
 func (p *Partition) DataWaiter() (<-chan struct{}, int64) {
-	p.mu.RLock()
-	hwm := p.highWatermark
-	p.mu.RUnlock()
-
 	p.appendMu.Lock()
 	ch := p.appendCh
 	p.appendMu.Unlock()
+
+	p.mu.RLock()
+	hwm := p.highWatermark
+	p.mu.RUnlock()
 	return ch, hwm
 }
 
@@ -193,11 +200,16 @@ func (p *Partition) AppendIdempotentSynced(pid int64, epoch int16, baseSeq int32
 	})
 }
 
-// Sync flushes the active segment's log and index to stable storage.
+// Sync flushes the active segment's log and index to stable storage. It is a
+// no-op when nothing has been written since the last sync, so the interval
+// flusher does not fsync idle partitions.
 func (p *Partition) Sync() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.activeSegment != nil {
+		if p.activeSegment.syncedBytes == p.activeSegment.size {
+			return nil
+		}
 		return p.activeSegment.sync()
 	}
 	return nil
@@ -293,17 +305,54 @@ func (p *Partition) roll() error {
 
 // Read returns raw RecordBatch bytes starting at startOffset up to maxBytes
 // along with the current high watermark. It reads across segment boundaries.
+//
+// The fast path runs under the read lock. A restoring read mutates the segment
+// struct and its file handles, so when a remote segment is in range it takes
+// the write lock, restores every remote segment in that range, and only then
+// runs the read body under that same write lock.
 func (p *Partition) Read(startOffset int64, maxBytes int32) ([]byte, int64, error) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
 	if startOffset < 0 {
 		startOffset = 0
 	}
-	if startOffset >= p.highWatermark {
-		return nil, p.highWatermark, nil
-	}
 
+	// Phase 1 (read lock): find whether anything in range needs a restore.
+	p.mu.RLock()
+	if startOffset >= p.highWatermark {
+		hwm := p.highWatermark
+		p.mu.RUnlock()
+		return nil, hwm, nil
+	}
+	restore := false
+	for _, seg := range p.orderedSegmentsLocked() {
+		if seg.logEndOffset() > startOffset && seg.isRemote() {
+			restore = true
+			break
+		}
+	}
+	if !restore {
+		out, hwm, err := p.readLocked(startOffset, maxBytes)
+		p.mu.RUnlock()
+		return out, hwm, err
+	}
+	p.mu.RUnlock()
+
+	// Phase 2 (write lock): restore every remote segment in range, then read.
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, seg := range p.orderedSegmentsLocked() {
+		if seg.logEndOffset() > startOffset && seg.isRemote() {
+			if err := p.restoreSegmentLocked(seg); err != nil {
+				return nil, p.highWatermark, err
+			}
+		}
+	}
+	return p.readLocked(startOffset, maxBytes)
+}
+
+// readLocked is the read body shared by both Read phases. It must be called
+// with p.mu held (read or write). A still-remote segment is an error: restoring
+// is only valid under the write lock, so callers must have restored in range.
+func (p *Partition) readLocked(startOffset int64, maxBytes int32) ([]byte, int64, error) {
 	segs := p.orderedSegmentsLocked()
 	idx := 0
 	for ; idx < len(segs); idx++ {
@@ -318,9 +367,7 @@ func (p *Partition) Read(startOffset int64, maxBytes int32) ([]byte, int64, erro
 			break
 		}
 		if segs[idx].isRemote() {
-			if err := p.restoreSegmentLocked(segs[idx]); err != nil {
-				return out, p.highWatermark, err
-			}
+			return out, p.highWatermark, fmt.Errorf("segment %d is remote and was not restored", segs[idx].baseOffset)
 		}
 		data, err := segs[idx].read(startOffset, maxBytes-int32(len(out)))
 		if err != nil {
@@ -333,6 +380,8 @@ func (p *Partition) Read(startOffset int64, maxBytes int32) ([]byte, int64, erro
 }
 
 // restoreSegmentLocked downloads an offloaded segment's data and restores it.
+// It mutates the segment and its file handles, so it must only be called while
+// holding p.mu for writing.
 func (p *Partition) restoreSegmentLocked(seg *Segment) error {
 	if p.remoteFetch == nil {
 		return fmt.Errorf("remote segment %d has no fetcher configured", seg.baseOffset)

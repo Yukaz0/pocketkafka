@@ -101,6 +101,34 @@ func (c *S3Client) GetObject(key string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// DeleteObject removes an object by key. A missing object (404) counts as
+// success so deleting an already-gone segment is idempotent.
+func (c *S3Client) DeleteObject(key string) error {
+	u := c.objectURL(key)
+	now := time.Now().UTC()
+	emptyHash := sha256hex(nil)
+	req, err := http.NewRequest(http.MethodDelete, u, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("x-amz-content-sha256", emptyHash)
+	req.Header.Set("x-amz-date", now.Format("20060102T150405Z"))
+	c.sign(req, now, emptyHash, nil)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("s3 delete %s: status %d", key, resp.StatusCode)
+	}
+	return nil
+}
+
 // sign adds the SigV4 Authorization header to a request.
 func (c *S3Client) sign(req *http.Request, now time.Time, payloadHash string, query map[string]string) {
 	amzDate := now.Format("20060102T150405Z")

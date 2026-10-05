@@ -277,7 +277,11 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	topic := r.PathValue("topic")
 	q := r.URL.Query()
-	offset, _ := strconv.ParseInt(q.Get("offset"), 10, 64)
+	offset := int64(0)
+	hasOffset := q.Has("offset") && q.Get("offset") != ""
+	if hasOffset {
+		offset, _ = strconv.ParseInt(q.Get("offset"), 10, 64)
+	}
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit <= 0 || limit > 500 {
 		limit = 50
@@ -291,6 +295,14 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	if p == nil {
 		writeErr(w, 404, "unknown topic or partition")
 		return
+	}
+
+	if !hasOffset && search == "" && fromTS == 0 && toTS == 0 {
+		// Tanpa offset dan filter: buka jendela pesan terbaru secara instan
+		offset = p.LogEndOffset() - int64(limit)
+		if offset < p.EarliestOffset() {
+			offset = p.EarliestOffset()
+		}
 	}
 
 	// Kendali penerimaan: menolak lebih jujur daripada menumpuk pemindaian.
@@ -328,6 +340,7 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	pageBytes := int32(limit*4096 + 4096)
+	searchLower := strings.ToLower(search)
 
 	for len(matches) < limit && next < p.LogEndOffset() {
 		// Klien pergi: hentikan pemindaian di server, jangan menunggu sampai
@@ -369,9 +382,9 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 			if toTS > 0 && rec.Timestamp > toTS {
 				continue
 			}
-			if search != "" {
-				hay := strings.ToLower(rec.Key + "\x00" + rec.Value)
-				if !strings.Contains(hay, strings.ToLower(search)) {
+			if searchLower != "" {
+				if !strings.Contains(strings.ToLower(rec.Key), searchLower) &&
+					!strings.Contains(strings.ToLower(rec.Value), searchLower) {
 					continue
 				}
 			}
