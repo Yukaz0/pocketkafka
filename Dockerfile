@@ -1,7 +1,19 @@
-# pocketkafka: multi-stage scratch build (< 25MB, zero external deps).
+# pocketkafka: multi-stage build (< 30MB, zero third-party deps).
+#
+# Both base images are pinned by tag *and* digest: the tag keeps the file
+# readable, the digest makes the build reproducible and immune to a re-tagged
+# or compromised upstream image. Digests are the multi-arch (OCI index) digests
+# so the same file builds for linux/amd64 and linux/arm64.
+# Dependabot (docker) bumps these weekly.
 
 # Stage 1: build the broker binary
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS builder
+
+# Cross-compilation targets, injected by `docker buildx build --platform ...`.
+# Defaults keep plain `docker build` working on amd64.
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=dev
 
 WORKDIR /app
 RUN apk add --no-cache git
@@ -11,15 +23,22 @@ COPY go.mod ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags="-s -w -X main.version=1.0.0" \
+RUN CGO_ENABLED=0 \
+    GOOS=${TARGETOS:-linux} \
+    GOARCH=${TARGETARCH:-amd64} \
+    go build \
+    -trimpath \
+    -buildvcs=true \
+    -ldflags="-s -w -X main.version=${VERSION:-dev}" \
     -o /app/bin/pocketkafka ./cmd/server
 
 # Stage 2: minimal runtime image
-FROM alpine:3.20
+FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 
 WORKDIR /app
-RUN apk add --no-cache ca-certificates tzdata netcat-openbsd su-exec
+# No extra probing tools in the runtime image: the healthcheck below uses the
+# broker's own `healthcheck` subcommand.
+RUN apk add --no-cache ca-certificates tzdata su-exec
 
 COPY --from=builder /app/bin/pocketkafka /usr/local/bin/pocketkafka
 COPY config/config.yaml /etc/pocketkafka/config.yaml
@@ -46,7 +65,8 @@ ENV KAFKA_DATA_DIR=/var/lib/pocketkafka/data
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["--config", "/etc/pocketkafka/config.yaml"]
 
-# Built-in healthcheck (Fitur 19): the TCP listener must accept connections and
-# the embedded web UI must answer /healthz.
+# Built-in healthcheck: `pocketkafka healthcheck --addr <host:port>` exits 0 when
+# the broker is serving, non-zero otherwise (see cmd/server). This replaces the
+# old `nc`/`wget` probe so the runtime image needs no extra packages.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-  CMD nc -z localhost 9092 && wget -qO- http://localhost:8080/healthz || exit 1
+  CMD ["/usr/local/bin/pocketkafka", "healthcheck", "--addr", "127.0.0.1:9092"]

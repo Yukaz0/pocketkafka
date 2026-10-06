@@ -69,7 +69,7 @@ func NewOffsetStore(backend, dir string) (*OffsetStore, error) {
 		// Nothing to load.
 	case BackendFile:
 		s.path = filepath.Join(dir, "offsets.gob")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, err
 		}
 		if err := s.loadSnapshot(); err != nil {

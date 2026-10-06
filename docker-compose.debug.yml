@@ -1,0 +1,19 @@
+# Debug overlay: profiling.
+#
+# pprof exposes the command line, the heap, the goroutine stacks and a CPU
+# profiler that can be started by anyone who can reach it, so it is opt-in and
+# never part of the default stack.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up
+#
+# KAFKA_PPROF_LISTEN only accepts a non-loopback address together with
+# KAFKA_PPROF_ALLOW_PUBLIC=true; inside a container the listener must be
+# reachable from the host for the profile to be usable at all, which is what
+# that flag acknowledges. Publish 6060 only to loopback on the host.
+services:
+  kafka-engine:
+    ports:
+      - "127.0.0.1:6060:6060"
+    environment:
+      - KAFKA_PPROF_LISTEN=0.0.0.0:6060
+      - KAFKA_PPROF_ALLOW_PUBLIC=true

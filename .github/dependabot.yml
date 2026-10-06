@@ -1,0 +1,39 @@
+# Dependabot: keep dependencies and pinned action SHAs current.
+# Everything here is deliberately weekly: the project has zero third-party Go
+# modules, so these PRs are mostly action-SHA bumps.
+version: 2
+
+updates:
+  # Go modules. Retreats to a no-op most weeks, but stays in place so the first
+  # require line (if one is ever added) is covered from day one.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      go-modules:
+        patterns: ['*']
+
+  # GitHub Actions: bump the pinned commit SHAs.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  # Dockerfile at the repository root.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore(deps)'

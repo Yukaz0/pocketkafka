@@ -5,14 +5,20 @@ on:
     branches: [master]
   pull_request:
 
+# Least privilege by default (supply-chain hardening, F18): every job gets read
+# access to the repository only; jobs that genuinely need more override this
+# block locally (see `codeql`).
+permissions:
+  contents: read
+
 jobs:
   # Fast gate: formatting, build, vet, unit/integration tests, race detector.
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.26'
 
@@ -35,9 +41,9 @@ jobs:
   fuzz:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.26'
 
@@ -54,9 +60,9 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.26'
 
@@ -78,7 +84,112 @@ jobs:
           echo "total coverage: ${total}%"
           awk -v c="$total" 'BEGIN { if (c+0 < 51.0) { printf "coverage %.1f%% below floor 51%%\n", c; exit 1 } }'
 
+      # Pinned release (not @latest): a moving target is a supply-chain risk and
+      # makes the finding reproducible. Bump deliberately via Dependabot.
       - name: Vulnerability scan
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
           govulncheck ./...
+
+  # Static analysis over the whole tree. Runs after the fast gate so a broken
+  # build does not produce noise (and saves runner minutes).
+  gosec:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.26'
+
+      # Rule exclusions, each with a reason (the rest of the default set is a
+      # gate: `gosec -exclude=... -severity=medium -confidence=medium ./...`
+      # reports nothing on a clean checkout).
+      #   G104 unhandled errors   - mostly deliberate (Close/Flush/encoder writes)
+      #                             in a codebase where a failed flush is already
+      #                             reported by the caller's own error path
+      #   G115 integer conversion - inherent to a binary protocol codec that
+      #                             narrows values it has already range-checked
+      #   G304 file path variable - the broker opens paths from its own config and
+      #                             data dir by design
+      #   G109 Atoi overflow      - every site feeds a bounded lookup (partition,
+      #                             offset, port); an out-of-range value resolves
+      #                             to "unknown", it cannot escape the range
+      - name: gosec
+        uses: securego/gosec@deb54465fea23d19a77f037e11e6589021f8501d # v2.29.0
+        with:
+          args: -exclude=G104,G115,G304,G109 -severity=medium -confidence=medium ./...
+
+  # Secrets in the working tree and in every reachable commit. Independent of the
+  # test job: a leaked credential matters even when the build is red, so this one
+  # deliberately has no `needs:`.
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      # gitleaks-action is free for individuals/public repos; organisations need a
+      # GITLEAKS_LICENSE secret.
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # CodeQL for Go. Manual build mode keeps the instrumented build explicit
+  # (`go build ./...`) instead of relying on autobuild heuristics.
+  codeql:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write # required to upload the SARIF results
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.26'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3.38.2
+        with:
+          languages: go
+          build-mode: manual
+
+      - name: Build
+        run: go build ./...
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3.38.2
+        with:
+          category: /language:go
+
+  # Software bill of materials for the source tree. Zero third-party Go modules
+  # means this is mostly a build-toolchain inventory, but it is cheap and gives
+  # downstream consumers something to diff between releases. The repo publishes
+  # no images, so there is nothing to sign.
+  sbom:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: pocketkafka-sbom.cdx.json
+          upload-artifact: false
+          dependency-snapshot: false
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pocketkafka-sbom
+          path: pocketkafka-sbom.cdx.json
+          if-no-files-found: error

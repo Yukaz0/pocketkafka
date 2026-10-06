@@ -67,7 +67,7 @@ func (h *Handler) Handle(apiKey, version int16, body []byte, ctx RequestContext)
 	case protocol.APKApiVersions:
 		return h.handleApiVersions(version, body)
 	case protocol.APKMetadata:
-		return h.handleMetadata(version, body, ctx.ListenerPort)
+		return h.handleMetadata(version, body, ctx)
 	case protocol.APKProduce:
 		return h.handleProduce(version, body, ctx)
 	case protocol.APKFetch:
@@ -93,13 +93,13 @@ func (h *Handler) Handle(apiKey, version int16, body []byte, ctx RequestContext)
 	case protocol.APKOffsetFetch:
 		return h.handleOffsetFetch(version, body, ctx)
 	case protocol.APKListGroups:
-		return h.handleListGroups(version, body)
+		return h.handleListGroups(version, body, ctx)
 	case protocol.APKDescribeGroups:
-		return h.handleDescribeGroups(version, body)
+		return h.handleDescribeGroups(version, body, ctx)
 	case protocol.APKDeleteGroups:
 		return h.handleDeleteGroups(version, body, ctx)
 	case protocol.APKInitProducerID:
-		return h.handleInitProducerID(version, body)
+		return h.handleInitProducerID(version, body, ctx)
 	default:
 		return nil, fmt.Errorf("unsupported api key %d", apiKey)
 	}

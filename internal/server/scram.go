@@ -2,90 +2,20 @@
 package server
 
 import (
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/sha512"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/binary"
 	"fmt"
-	"hash"
 	"strings"
+
+	"github.com/Yukaz0/pocketkafka/internal/credential"
 )
-
-// scramMechanism is one SCRAM hash family.
-type scramMechanism struct {
-	name       string
-	newHash    func() hash.Hash
-	keySize    int // StoredKey/ServerKey size in bytes
-	iterations int
-}
-
-var (
-	scramSHA256 = scramMechanism{name: "SCRAM-SHA-256", newHash: sha256.New, keySize: sha256.Size, iterations: 4096}
-	scramSHA512 = scramMechanism{name: "SCRAM-SHA-512", newHash: sha512.New, keySize: sha512.Size, iterations: 4096}
-)
-
-// pbkdf2Key derives a salted password using PBKDF2-HMAC (RFC 2898).
-func pbkdf2Key(h func() hash.Hash, password, salt []byte, iter, keyLen int) []byte {
-	prf := hmac.New(h, password)
-	hashLen := prf.Size()
-	numBlocks := (keyLen + hashLen - 1) / hashLen
-
-	var buf [4]byte
-	dk := make([]byte, 0, numBlocks*hashLen)
-	u := make([]byte, hashLen)
-	for block := 1; block <= numBlocks; block++ {
-		prf.Reset()
-		prf.Write(salt)
-		binary.BigEndian.PutUint32(buf[:], uint32(block))
-		prf.Write(buf[:])
-		dk = prf.Sum(dk)
-		t := dk[len(dk)-hashLen:]
-		copy(u, t)
-		for n := 2; n <= iter; n++ {
-			prf.Reset()
-			prf.Write(u)
-			u = u[:0]
-			u = prf.Sum(u)
-			for x := range u {
-				t[x] ^= u[x]
-			}
-		}
-	}
-	return dk[:keyLen]
-}
-
-// scramCredential holds the server-side SCRAM secrets for one user.
-type scramCredential struct {
-	salt       []byte
-	iterations int
-	storedKey  []byte
-	serverKey  []byte
-}
-
-// newScramCredential derives a credential from a plaintext password.
-func newScramCredential(m scramMechanism, password string, salt []byte, iterations int) *scramCredential {
-	salted := pbkdf2Key(m.newHash, []byte(password), salt, iterations, m.keySize)
-	clientKey := hmacSum(m.newHash, salted, []byte("Client Key"))
-	h := m.newHash()
-	h.Write(clientKey)
-	storedKey := h.Sum(nil) // SHA-256/512 of ClientKey
-	serverKey := hmacSum(m.newHash, salted, []byte("Server Key"))
-	return &scramCredential{salt: salt, iterations: iterations, storedKey: storedKey, serverKey: serverKey}
-}
-
-func hmacSum(h func() hash.Hash, key, msg []byte) []byte {
-	m := hmac.New(h, key)
-	m.Write(msg)
-	return m.Sum(nil)
-}
 
 // scramSession drives the server side of one SCRAM authentication exchange.
+// It holds a verifier, never the password.
 type scramSession struct {
-	mechanism   scramMechanism
-	cred        *scramCredential
+	mech        credential.Mechanism
+	verifier    credential.Verifier
 	clientFirst string
 	clientNonce string
 	serverNonce string
@@ -95,35 +25,28 @@ type scramSession struct {
 
 // newScramSession starts a session and returns the ServerFirstMessage ready to
 // send to the client.
-func newScramSession(m scramMechanism, cred *scramCredential, clientFirst string) (*scramSession, string, error) {
-	// client-first: n,,n=<user>,r=<clientNonce>[,extensions]
-	rest := clientFirst
-	if idx := strings.Index(clientFirst, ",,"); idx >= 0 {
-		rest = clientFirst[idx+2:]
-	}
-	clientNonce := ""
-	for _, part := range strings.Split(rest, ",") {
-		if strings.HasPrefix(part, "r=") {
-			clientNonce = strings.TrimPrefix(part, "r=")
-		}
-	}
+func newScramSession(m credential.Mechanism, v credential.Verifier, clientFirst string) (*scramSession, string, error) {
+	clientNonce := scramNonce(clientFirst)
 	if clientNonce == "" {
 		return nil, "", fmt.Errorf("missing client nonce")
 	}
-
 	serverNonce, err := randomNonce()
 	if err != nil {
 		return nil, "", err
 	}
 	s := &scramSession{
-		mechanism:   m,
-		cred:        cred,
+		mech:        m,
+		verifier:    v,
 		clientFirst: clientFirst,
 		clientNonce: clientNonce,
 		serverNonce: serverNonce,
 	}
-	serverFirst := fmt.Sprintf("r=%s,s=%s,i=%d", clientNonce+serverNonce, base64.StdEncoding.EncodeToString(cred.salt), cred.iterations)
-	s.authMessage = clientFirst + "," + serverFirst + ","
+	serverFirst := fmt.Sprintf("r=%s,s=%s,i=%d", clientNonce+serverNonce,
+		base64.StdEncoding.EncodeToString(v.Salt), v.Iterations)
+	// RFC 5802: AuthMessage is built from client-first-message-bare, so the gs2
+	// header ("n,," or "n,a=<authzid>,") is excluded. Including it would make
+	// this broker's signatures disagree with every compliant client.
+	s.authMessage = scramBare(clientFirst) + "," + serverFirst + ","
 	return s, serverFirst, nil
 }
 
@@ -136,49 +59,47 @@ func (s *scramSession) finish(clientFinal string) ([]byte, error) {
 	if len(parts) < 3 {
 		return nil, fmt.Errorf("malformed client-final-message")
 	}
-	var proofB64 string
+	var proofB64, fullNonce string
 	for _, p := range parts {
-		if strings.HasPrefix(p, "p=") {
+		switch {
+		case strings.HasPrefix(p, "p="):
 			proofB64 = strings.TrimPrefix(p, "p=")
+		case strings.HasPrefix(p, "r="):
+			fullNonce = strings.TrimPrefix(p, "r=")
 		}
 	}
 	if proofB64 == "" {
 		return nil, fmt.Errorf("missing client proof")
 	}
-	fullNonce := ""
-	for _, p := range parts {
-		if strings.HasPrefix(p, "r=") {
-			fullNonce = strings.TrimPrefix(p, "r=")
-		}
-	}
 	if fullNonce != s.clientNonce+s.serverNonce {
 		return nil, fmt.Errorf("nonce mismatch")
 	}
 
-	withoutProof := clientFinal[:strings.LastIndex(clientFinal, ",p=")]
-	authMessage := s.authMessage + withoutProof
-	clientSignature := hmacSum(s.mechanism.newHash, s.cred.storedKey, []byte(authMessage))
+	idx := strings.LastIndex(clientFinal, ",p=")
+	if idx < 0 {
+		return nil, fmt.Errorf("malformed client-final-message")
+	}
+	authMessage := s.authMessage + clientFinal[:idx]
+	clientSignature := s.verifier.Signature(s.verifier.StoredKey, []byte(authMessage))
 	clientProof, err := base64.StdEncoding.DecodeString(proofB64)
 	if err != nil {
 		return nil, fmt.Errorf("bad proof encoding")
 	}
-	// ClientKey = ClientProof XOR ClientSignature
+	if len(clientProof) != s.mech.KeySize {
+		return nil, fmt.Errorf("proof size mismatch")
+	}
+	// ClientKey = ClientProof XOR ClientSignature; StoredKey = H(ClientKey).
 	clientKey := make([]byte, len(clientProof))
 	for i := range clientProof {
 		clientKey[i] = clientProof[i] ^ clientSignature[i]
 	}
-	if len(clientKey) != s.mechanism.keySize {
-		return nil, fmt.Errorf("proof size mismatch")
-	}
-	// Recompute StoredKey = H(ClientKey) and compare.
-	h := s.mechanism.newHash()
+	h := s.mech.NewHash()
 	h.Write(clientKey)
-	recomputed := h.Sum(nil)
-	if subtle.ConstantTimeCompare(recomputed, s.cred.storedKey) != 1 {
+	if subtle.ConstantTimeCompare(h.Sum(nil), s.verifier.StoredKey) != 1 {
 		return nil, fmt.Errorf("authentication failed")
 	}
 
-	serverSignature := hmacSum(s.mechanism.newHash, s.cred.serverKey, []byte(authMessage))
+	serverSignature := s.verifier.Signature(s.verifier.ServerKey, []byte(authMessage))
 	s.finished = true
 	return []byte("v=" + base64.StdEncoding.EncodeToString(serverSignature)), nil
 }
@@ -189,4 +110,53 @@ func randomNonce() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
+}
+
+// scramBare strips the gs2 header from a client-first message: "n,," or
+// "n,a=<authzid>," leaves the bare "n=<user>,r=<nonce>[,extensions]".
+func scramBare(clientFirst string) string {
+	if idx := strings.Index(clientFirst, ",,"); idx >= 0 {
+		return clientFirst[idx+2:]
+	}
+	if idx := strings.Index(clientFirst, ",a="); idx >= 0 {
+		if next := strings.Index(clientFirst[idx+3:], ","); next >= 0 {
+			return clientFirst[idx+3+next+1:]
+		}
+	}
+	return clientFirst
+}
+
+// scramNonce extracts the client nonce (r=) from a client-first message.
+func scramNonce(clientFirst string) string {
+	for _, part := range strings.Split(scramBare(clientFirst), ",") {
+		if strings.HasPrefix(part, "r=") {
+			return strings.TrimPrefix(part, "r=")
+		}
+	}
+	return ""
+}
+
+// unescapeSCRAMName decodes the RFC 5802 "=2C"/"=3D" escapes in a username.
+func unescapeSCRAMName(name string) string {
+	if !strings.Contains(name, "=") {
+		return name
+	}
+	out := strings.Builder{}
+	out.Grow(len(name))
+	for i := 0; i < len(name); i++ {
+		if name[i] == '=' && i+2 < len(name) {
+			switch name[i+1 : i+3] {
+			case "2C":
+				out.WriteByte(',')
+				i += 2
+				continue
+			case "3D":
+				out.WriteByte('=')
+				i += 2
+				continue
+			}
+		}
+		out.WriteByte(name[i])
+	}
+	return out.String()
 }

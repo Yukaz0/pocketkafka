@@ -132,7 +132,7 @@ func stageCompaction(tmpDir string, maxSegBytes, indexInterval int64, segs []*Se
 	if err := os.RemoveAll(tmpDir); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o750); err != nil {
 		return nil, err
 	}
 	w, err := newCompactWriter(tmpDir, maxSegBytes, indexInterval)
@@ -283,7 +283,7 @@ func writeManifest(tmpDir string, m compactionManifest) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, compactManifest), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, compactManifest), data, 0o600); err != nil {
 		return err
 	}
 	return syncDir(tmpDir)

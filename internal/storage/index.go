@@ -35,7 +35,7 @@ type indexFile struct {
 
 // openIndex opens (or creates) the sparse index file for a segment.
 func openIndex(path string, baseOffset int64, interval int64) (*indexFile, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}

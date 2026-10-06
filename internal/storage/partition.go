@@ -53,7 +53,7 @@ type Partition struct {
 
 // OpenPartition opens (or creates) a partition directory and recovers its state.
 func OpenPartition(dir, topic string, partitionID int32, maxSegmentBytes, indexInterval int64) (*Partition, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create partition dir: %w", err)
 	}
 	p := &Partition{

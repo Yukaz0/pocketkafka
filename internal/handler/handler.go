@@ -106,7 +106,7 @@ func (h *Handler) handleApiVersions(version int16, body []byte) ([]byte, error) 
 	return protocol.EncodeApiVersionsResponse(resp)
 }
 
-func (h *Handler) handleMetadata(version int16, body []byte, localPort int32) ([]byte, error) {
+func (h *Handler) handleMetadata(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeMetadataRequest(version, body)
 	if err != nil {
 		return nil, err
@@ -114,7 +114,7 @@ func (h *Handler) handleMetadata(version int16, body []byte, localPort int32) ([
 	// Advertise per-listener: klien yang masuk lewat listener tertentu harus
 	// mendapat alamat yang reachable dari jalur yang sama (mencegah klien
 	// docker-internal dial localhost yang tidak reachable).
-	host, port := h.advertisedFor(localPort)
+	host, port := h.advertisedFor(ctx.ListenerPort)
 	resp := &protocol.MetadataResponse{
 		Version:                     version,
 		ThrottleTimeMs:              0,
@@ -129,7 +129,8 @@ func (h *Handler) handleMetadata(version int16, body []byte, localPort int32) ([
 	}
 
 	var requested []string
-	if req.Topics != nil {
+	fullListing := req.Topics == nil
+	if !fullListing {
 		for _, t := range req.Topics {
 			requested = append(requested, t.Topic)
 		}
@@ -140,24 +141,33 @@ func (h *Handler) handleMetadata(version int16, body []byte, localPort int32) ([
 	for _, name := range requested {
 		mt := protocol.MetadataTopic{Name: name, IsInternal: false}
 		t := h.store.GetTopic(name)
+		if t == nil && h.cfg.Topics.AutoCreate &&
+			h.authorize(ctx, authz.OpWrite, authz.Resource{Type: authz.ResourceTopic, Name: name}) == nil {
+			// Auto-creation is a write: a client that may only read some other
+			// topic must not be able to make the broker mint topics by asking
+			// for their metadata.
+			h.store.EnsureTopic(name, h.cfg.Topics.DefaultPartitions)
+			t = h.store.GetTopic(name)
+		}
 		if t == nil {
-			// Auto-create a referenced topic when auto creation is enabled,
-			// regardless of the request flag, for robust client interop.
-			if h.cfg.Topics.AutoCreate {
-				h.store.EnsureTopic(name, h.cfg.Topics.DefaultPartitions)
-				t = h.store.GetTopic(name)
-			}
-			if t == nil {
-				mt.ErrorCode = protocol.ErrUnknownTopicOrPartition
-				resp.Topics = append(resp.Topics, mt)
+			if fullListing {
 				continue
 			}
+			mt.ErrorCode = protocol.ErrUnknownTopicOrPartition
+			resp.Topics = append(resp.Topics, mt)
+			continue
 		}
-		ids := make([]int, 0, len(t.Partitions))
-		for id := range t.Partitions {
-			ids = append(ids, int(id))
+		if err := h.authorize(ctx, authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: name}); err != nil {
+			if fullListing {
+				// A listing shows only what the caller may see, so it cannot be
+				// used to enumerate the whole cluster.
+				continue
+			}
+			mt.ErrorCode = protocol.ErrTopicAuthorizationFailed
+			resp.Topics = append(resp.Topics, mt)
+			continue
 		}
-		for i := 0; i < len(t.Partitions); i++ {
+		for i := range len(t.Partitions) {
 			mt.Partitions = append(mt.Partitions, protocol.MetadataPartition{
 				Partition:   int32(i),
 				Leader:      h.nodeID,
@@ -166,7 +176,6 @@ func (h *Handler) handleMetadata(version int16, body []byte, localPort int32) ([
 				ISR:         []int32{h.nodeID},
 			})
 		}
-		_ = ids
 		resp.Topics = append(resp.Topics, mt)
 	}
 	return protocol.EncodeMetadataResponse(resp)
@@ -586,14 +595,19 @@ func (h *Handler) handleOffsetFetch(version int16, body []byte, ctx RequestConte
 	return protocol.EncodeOffsetFetchResponse(resp)
 }
 
-// handleListGroups (Key 16) lists all registered consumer groups.
-func (h *Handler) handleListGroups(version int16, body []byte) ([]byte, error) {
+// handleListGroups (Key 16) lists the consumer groups this principal may see.
+// A group the caller cannot describe is omitted rather than reported, so the
+// call cannot be used to enumerate every group id in the cluster.
+func (h *Handler) handleListGroups(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeListGroupsRequest(version, body)
 	if err != nil {
 		return nil, err
 	}
 	resp := &protocol.ListGroupsResponse{Version: req.Version, ErrorCode: protocol.ErrNone}
 	for _, id := range h.coord.ListGroupIDs() {
+		if h.authorize(ctx, authz.OpDescribe, authz.Resource{Type: authz.ResourceGroup, Name: id}) != nil {
+			continue
+		}
 		resp.Groups = append(resp.Groups, protocol.ListGroupsResponseGroup{
 			GroupID:      id,
 			ProtocolType: "consumer",
@@ -603,16 +617,24 @@ func (h *Handler) handleListGroups(version int16, body []byte) ([]byte, error) {
 }
 
 // handleDescribeGroups (Key 15) returns per-group state, members and protocol.
-func (h *Handler) handleDescribeGroups(version int16, body []byte) ([]byte, error) {
+// Member metadata, assignments and client hosts are only disclosed to a
+// principal that may describe the group.
+func (h *Handler) handleDescribeGroups(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeDescribeGroupsRequest(version, body)
 	if err != nil {
 		return nil, err
 	}
 	resp := &protocol.DescribeGroupsResponse{Version: req.Version}
 	for _, id := range req.GroupIDs {
-		// No group ACLs are modelled, so authorized operations are reported as
-		// "not available", which is what the protocol reserves INT32_MIN for.
+		// Authorized operations are reported as "not available" (the INT32_MIN
+		// the protocol reserves for that), because the ACL model here does not
+		// map onto Kafka's per-operation bitmask.
 		g := protocol.DescribeGroupsResponseGroup{GroupID: id, AuthorizedOperations: math.MinInt32}
+		if err := h.authorize(ctx, authz.OpDescribe, authz.Resource{Type: authz.ResourceGroup, Name: id}); err != nil {
+			g.ErrorCode = protocol.ErrGroupAuthorizationFailed
+			resp.Groups = append(resp.Groups, g)
+			continue
+		}
 		info := h.coord.DescribeGroup(id)
 		if info == nil {
 			g.ErrorCode = protocol.ErrGroupIDNotFound
@@ -666,10 +688,20 @@ func (h *Handler) handleDeleteGroups(version int16, body []byte, ctx RequestCont
 // idempotent producers. Transactional producers are accepted here but cannot
 // make progress: the transactional APIs are not advertised (see
 // DisabledTransactionAPIKeys) and always answer UNSUPPORTED_VERSION.
-func (h *Handler) handleInitProducerID(version int16, body []byte) ([]byte, error) {
+func (h *Handler) handleInitProducerID(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeInitProducerIdRequest(version, body)
 	if err != nil {
 		return nil, err
+	}
+	// Allocating a producer id is a cluster-scoped write: Kafka gates it on
+	// IDEMPOTENT_WRITE on the cluster. Without the check any authenticated
+	// client could mint producer ids.
+	if err := h.authorize(ctx, authz.OpWrite, authz.Resource{Type: authz.ResourceCluster, Name: "cluster"}); err != nil {
+		resp := &protocol.InitProducerIdResponse{
+			Version:   req.Version,
+			ErrorCode: protocol.ErrClusterAuthorizationFailed,
+		}
+		return protocol.EncodeInitProducerIdResponse(resp)
 	}
 	pid, epoch := h.coord.NextProducerID(req.TransactionalID)
 	resp := &protocol.InitProducerIdResponse{

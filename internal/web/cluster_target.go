@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -29,7 +28,7 @@ const (
 
 var peerTargetTransport = &http.Transport{
 	Proxy:                 nil,
-	DialContext:           (&net.Dialer{Timeout: peerTargetTimeout, KeepAlive: 30 * time.Second}).DialContext,
+	DialContext:           clusterDialContext,
 	TLSHandshakeTimeout:   peerTargetTimeout,
 	ResponseHeaderTimeout: peerTargetTimeout,
 	IdleConnTimeout:       90 * time.Second,
@@ -607,7 +606,7 @@ func (s *Server) handleKafkaTailWS(w http.ResponseWriter, r *http.Request, entry
 		pid, _ := strconv.Atoi(qp)
 		partID = int32(pid)
 	}
-	conn, err := upgradeWebSocket(w, r)
+	conn, err := s.upgradeWebSocket(w, r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "websocket upgrade failed: "+err.Error())
 		return
@@ -673,9 +672,11 @@ func (s *Server) handleKafkaTailWS(w http.ResponseWriter, r *http.Request, entry
 	for {
 		// Drain client frames without waiting for one. A blocking read here paces
 		// the whole tail at the read deadline, which delivers records in
-		// one-second bursts instead of as they land.
-		conn.SetReadDeadline(time.Now())
-		readWSPing(conn)
+		// one-second bursts instead of as they land. A protocol violation ends
+		// the stream.
+		if err := wsDrain(conn); err != nil {
+			return
+		}
 
 		var pending []messageRecord
 		var mu sync.Mutex
@@ -877,6 +878,8 @@ func (s *Server) proxyPeerAPI(w http.ResponseWriter, r *http.Request, entry Clus
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
+	//#nosec G704 -- the target is a registered peer and peerTargetTransport dials
+	// through guardDialAddr; redirects are rejected below.
 	response, err := peerTargetClient.Do(request)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "peer request failed")

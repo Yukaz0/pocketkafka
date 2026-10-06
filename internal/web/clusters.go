@@ -129,6 +129,48 @@ func validateEntry(e ClusterEntry) error {
 func validateClusterURL(raw string) error   { return config.ValidateClusterURL(raw) }
 func validateClusterName(name string) error { return config.ValidateClusterName(name) }
 
+// samePeerTarget reports whether a request names exactly the peer that was
+// stored, which is the condition for reusing its stored token.
+func samePeerTarget(stored, want ClusterEntry) bool {
+	return normalizeKind(stored.Kind) == clusterKindPeer &&
+		normalizeClusterURL(stored.URL) == normalizeClusterURL(want.URL)
+}
+
+// sameKafkaTarget reports whether a request names exactly the Kafka cluster
+// that was stored. The broker list is compared as a set: reordering it in the
+// form does not make it a different target, but changing an address does.
+func sameKafkaTarget(stored, want ClusterEntry) bool {
+	if normalizeKind(stored.Kind) != clusterKindKafka {
+		return false
+	}
+	if strings.TrimSpace(stored.SASLUser) != strings.TrimSpace(want.SASLUser) {
+		return false
+	}
+	return sameStringSet(stored.Brokers, want.Brokers)
+}
+
+func normalizeClusterURL(u string) string {
+	return strings.TrimRight(strings.TrimSpace(u), "/")
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, v := range a {
+		seen[strings.TrimSpace(v)]++
+	}
+	for _, v := range b {
+		key := strings.TrimSpace(v)
+		if seen[key] == 0 {
+			return false
+		}
+		seen[key]--
+	}
+	return true
+}
+
 // clusterStore owns the registry and its two files.
 type clusterStore struct {
 	mu          sync.Mutex
@@ -477,12 +519,32 @@ type remoteReport struct {
 	Attention []json.RawMessage `json:"attention"`
 }
 
+// clusterHTTPClient fetches a peer's health report. It never follows a
+// redirect (a redirect is how a URL the operator registered turns into a
+// request against a host nobody registered) and dials through the address
+// guard in netguard.go.
+var clusterHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:                 nil,
+		DialContext:           clusterDialContext,
+		TLSHandshakeTimeout:   clusterFetchTimeout,
+		ResponseHeaderTimeout: clusterFetchTimeout,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          32,
+		MaxIdleConnsPerHost:   4,
+	},
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
 // fetchClusterReport fetches a peer's raw health report. The body is returned
 // untouched so the UI can render a remote cluster with the same code path.
 func (s *Server) fetchClusterReport(ctx context.Context, e ClusterEntry, window time.Duration, token string) ([]byte, time.Duration, error) {
 	endpoint := strings.TrimRight(e.URL, "/") + "/api/v1/health/overview?window=" + fmt.Sprintf("%d", int(window.Seconds()))
 	reqCtx, cancel := context.WithTimeout(ctx, clusterFetchTimeout)
 	defer cancel()
+	//#nosec G704 -- endpoint is a registered cluster URL (validateClusterURL) and
+	// the request is issued by clusterHTTPClient, whose dialer refuses
+	// link-local/metadata addresses and never follows a redirect.
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, 0, err
@@ -492,7 +554,11 @@ func (s *Server) fetchClusterReport(ctx context.Context, e ClusterEntry, window 
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	start := time.Now()
-	resp, err := http.DefaultClient.Do(req)
+	//#nosec G704 -- the URL is a registered cluster endpoint and
+	// clusterHTTPClient dials through guardDialAddr, which refuses
+	// link-local/metadata addresses after DNS resolution and never follows a
+	// redirect.
+	resp, err := clusterHTTPClient.Do(req)
 	latency := time.Since(start)
 	if err != nil {
 		return nil, latency, err
@@ -503,6 +569,8 @@ func (s *Server) fetchClusterReport(ctx context.Context, e ClusterEntry, window 
 		return nil, latency, err
 	}
 	if resp.StatusCode != http.StatusOK {
+		// Uniform message: the peer's body is not echoed back, so a probing
+		// cluster admin cannot use this endpoint as a blind request forgery.
 		return nil, latency, fmt.Errorf("peer answered HTTP %d", resp.StatusCode)
 	}
 	return body, latency, nil
@@ -878,17 +946,27 @@ func (s *Server) handleTestCluster(w http.ResponseWriter, r *http.Request) {
 	}
 	if normalizeKind(entry.Kind) == clusterKindKafka {
 		// A Kafka cluster is tested by reading it once: connect with SASL, take
-		// one read-only pass, throw the client away. The stored password is used
-		// when the form left it empty, so "test" does not force an operator to
-		// retype a secret.
+		// one read-only pass, throw the client away.
 		if err := validateKafkaEntry(entry); err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		password := req.SASLPassword
 		if password == "" && entry.Name != "" {
-			password = s.clusters.SASLPassword(entry.Name)
+			// A stored password may only be used for the target it was stored
+			// for. Otherwise this endpoint is a credential exfiltration gadget:
+			// {"name":"prod","brokers":["attacker:9092"]} would hand the stored
+			// SASL password to a host the caller chose.
+			if stored, ok := s.clusters.Get(entry.Name); ok && sameKafkaTarget(stored, entry) {
+				password = s.clusters.SASLPassword(entry.Name)
+			} else {
+				writeErr(w, http.StatusBadRequest,
+					"stored credentials belong to a different broker list or SASL user: send saslPassword explicitly to test a changed target")
+				return
+			}
 		}
+		s.recordAudit(s.actorFrom(r), "cluster.test", entry.Name,
+			fmt.Sprintf("tested kafka cluster %v", entry.Brokers))
 		report, err := s.sampleOnce(r.Context(), entry, password)
 		if err != nil {
 			writeJSON(w, http.StatusOK, clusterSummary{
@@ -904,21 +982,36 @@ func (s *Server) handleTestCluster(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	healthToken := req.Token
+	// A stored token is only for the entry it was stored for: reusing one for a
+	// caller-chosen URL would post the credential to a host the caller picked.
+	healthToken, token := req.Token, req.DashboardToken
 	if req.ClearToken {
 		healthToken = ""
-	} else if healthToken == "" && req.Name != "" {
-		healthToken = s.clusters.Token(req.Name)
 	}
-	token := req.DashboardToken
 	if req.ClearDashboardToken {
 		token = ""
-	} else if token == "" && req.Name != "" {
-		token = s.clusters.DashboardToken(req.Name)
+	}
+	wantHealthToken := !req.ClearToken && req.Token == ""
+	wantDashboard := !req.ClearDashboardToken && req.DashboardToken == ""
+	if req.Name != "" && (wantHealthToken || wantDashboard) {
+		stored, ok := s.clusters.Get(req.Name)
+		if !ok || !samePeerTarget(stored, entry) {
+			writeErr(w, http.StatusBadRequest,
+				"stored credentials belong to a different URL: send the token explicitly to test a changed target")
+			return
+		}
+		if wantHealthToken {
+			healthToken = s.clusters.Token(req.Name)
+		}
+		if wantDashboard {
+			token = s.clusters.DashboardToken(req.Name)
+		}
 	}
 	if token == "" {
 		token = healthToken
 	}
+	s.recordAudit(s.actorFrom(r), "cluster.test", req.Name,
+		fmt.Sprintf("tested peer cluster %s (hasToken=%v)", req.URL, healthToken != ""))
 	body, latency, err := s.fetchClusterReport(r.Context(), entry, defaultWindow, token)
 	if err != nil {
 		writeJSON(w, http.StatusOK, clusterSummary{

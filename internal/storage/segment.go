@@ -60,7 +60,7 @@ func openSegment(dir string, baseOffset int64, maxSegmentBytes, indexInterval in
 		}, nil
 	}
 
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0o644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open segment log: %w", err)
 	}
@@ -329,7 +329,7 @@ func (s *Segment) isRemote() bool { return s.remote }
 // recovered after a restart.
 func (s *Segment) markRemote(logKey, indexKey string) error {
 	content := fmt.Sprintf("%s\n%s\n%d", logKey, indexKey, s.nextOffset)
-	if err := os.WriteFile(s.remoteStub, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(s.remoteStub, []byte(content), 0o600); err != nil {
 		return err
 	}
 	if s.logFile != nil {
@@ -377,10 +377,10 @@ func readRemoteStub(path string) (string, string, int64, error) {
 
 // restoreFrom writes the downloaded .log and .index back and reopens the segment.
 func (s *Segment) restoreFrom(logData, indexData []byte) error {
-	if err := os.WriteFile(s.logPath(), logData, 0o644); err != nil {
+	if err := os.WriteFile(s.logPath(), logData, 0o600); err != nil {
 		return err
 	}
-	if err := os.WriteFile(s.indexPath(), indexData, 0o644); err != nil {
+	if err := os.WriteFile(s.indexPath(), indexData, 0o600); err != nil {
 		return err
 	}
 	os.Remove(s.remoteStub)

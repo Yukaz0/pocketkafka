@@ -3,11 +3,13 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/authz"
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 )
 
@@ -79,15 +81,33 @@ func (s *Server) handleGroupDetail(w http.ResponseWriter, r *http.Request) {
 		State:    info.State,
 		Protocol: "range",
 	}
+	principal := s.requestPrincipal(r)
 	for _, m := range s.gm.MembersDetail(groupID) {
-		out.Members = append(out.Members, groupDetailMember{
+		// A member's assignment names the topics it consumes, so it is subject
+		// to the same per-topic rule as the offset rows below.
+		assigned := make(map[string][]int32, len(m.Assigned))
+		for topic, parts := range m.Assigned {
+			if s.can(principal, authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: topic}) {
+				assigned[topic] = parts
+			}
+		}
+		member := groupDetailMember{
 			MemberID:   m.MemberID,
 			ClientID:   m.ClientID,
 			ClientHost: m.ClientHost,
-			Assigned:   m.Assigned,
-		})
+		}
+		if len(assigned) > 0 {
+			member.Assigned = assigned
+		}
+		out.Members = append(out.Members, member)
 	}
 	for topic, parts := range info.Offsets {
+		// A group grant is not a topic grant: the rows below name topics and
+		// carry their live offsets, so a principal that may describe the group
+		// but not the topic sees nothing about that topic.
+		if !s.can(principal, authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: topic}) {
+			continue
+		}
 		for part, committed := range parts {
 			leo := int64(0)
 			if p := s.store.GetPartition(topic, part); p != nil {
@@ -126,6 +146,12 @@ func (s *Server) handleResetGroupOffset(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, 400, "topic required")
 		return
 	}
+	// Rejecting an invisible topic with the same answer as a missing one keeps
+	// this endpoint from confirming that a topic exists.
+	if !s.can(s.requestPrincipal(r), authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: req.Topic}) {
+		writeErr(w, 404, "unknown topic or partition")
+		return
+	}
 	p := s.store.GetPartition(req.Topic, req.Partition)
 	if p == nil {
 		writeErr(w, 404, "unknown topic or partition")
@@ -144,9 +170,12 @@ func (s *Server) handleResetGroupOffset(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := s.gm.ResetOffsets(groupID, req.Topic, req.Partition, target); err != nil {
+		s.auditFailure(r, "group.offset.reset", groupID, err.Error())
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.auditRequest(r, "group.offset.reset", groupID,
+		fmt.Sprintf("%s partition=%d strategy=%s offset=%d", req.Topic, req.Partition, req.Strategy, target))
 	writeJSON(w, 200, map[string]any{
 		"group":     groupID,
 		"topic":     req.Topic,
@@ -159,9 +188,11 @@ func (s *Server) handleResetGroupOffset(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	groupID := r.PathValue("group")
 	if err := s.gm.DeleteGroup(groupID); err != nil {
+		s.auditFailure(r, "group.delete", groupID, err.Error())
 		writeErr(w, 409, "group is not empty")
 		return
 	}
+	s.auditRequest(r, "group.delete", groupID, "deleted group")
 	writeJSON(w, 200, map[string]string{"deleted": groupID})
 }
 
@@ -215,9 +246,12 @@ func (s *Server) handleTruncateTopic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := p.TruncateTo(req.Offset); err != nil {
+		s.auditFailure(r, "topic.truncate", topic, err.Error())
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.auditRequest(r, "topic.truncate", topic,
+		fmt.Sprintf("partition=%d offset=%d", req.Partition, req.Offset))
 	writeJSON(w, 200, map[string]any{
 		"topic": topic, "partition": req.Partition, "offset": req.Offset,
 	})
@@ -235,9 +269,11 @@ func (s *Server) handleCompactTopic(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 409, err.Error())
 			return
 		}
+		s.auditFailure(r, "topic.compact", topic, err.Error())
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.auditRequest(r, "topic.compact", topic, "compaction started")
 	writeJSON(w, 200, map[string]string{"compacted": topic})
 }
 

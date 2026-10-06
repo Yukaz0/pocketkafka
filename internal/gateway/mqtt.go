@@ -3,7 +3,7 @@ package gateway
 import (
 	"bufio"
 	"bytes"
-	"crypto/subtle"
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -14,8 +14,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/audit"
 	"github.com/Yukaz0/pocketkafka/internal/authz"
 	"github.com/Yukaz0/pocketkafka/internal/config"
+	"github.com/Yukaz0/pocketkafka/internal/credential"
+	"github.com/Yukaz0/pocketkafka/internal/ratelimit"
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
@@ -85,6 +88,13 @@ type MQTTBridge struct {
 	secure     bool
 	users      []config.SecurityUser
 	authorizer authz.Authorizer
+	// tlsConf wraps the MQTT listener when security.tls.mqtt is set.
+	tlsConf *tls.Config
+	// requireTLS refuses a CONNECT that carries a password over an unencrypted
+	// connection: MQTT sends it in the clear inside the CONNECT packet.
+	requireTLS bool
+	// authLimiter delays a source that keeps failing CONNECT.
+	authLimiter *ratelimit.Limiter
 }
 
 // WithSecurity enables MQTT authentication and authorization. When enabled the
@@ -103,6 +113,14 @@ func (b *MQTTBridge) WithSecurity(enabled bool, users []config.SecurityUser, a a
 	return b
 }
 
+// WithTLS serves MQTT over TLS. requireTLS additionally refuses a CONNECT that
+// carries a username/password over an unencrypted connection.
+func (b *MQTTBridge) WithTLS(conf *tls.Config, requireTLS bool) *MQTTBridge {
+	b.tlsConf = conf
+	b.requireTLS = requireTLS
+	return b
+}
+
 // authorize checks a principal's permission, defaulting to anonymous.
 func (b *MQTTBridge) authorize(principal string, op authz.Operation, kafkaTopic string) error {
 	if b.authorizer == nil {
@@ -115,17 +133,25 @@ func (b *MQTTBridge) authorize(principal string, op authz.Operation, kafkaTopic 
 }
 
 // authenticate returns the principal for a CONNECT packet, or ok=false when the
-// credentials are missing or wrong.
+// credentials are missing or wrong. The comparison is constant-time and accepts
+// a plaintext password or a stored PBKDF2 hash.
 func (b *MQTTBridge) authenticate(info *mqttConnectInfo) (string, bool) {
-	for _, u := range b.users {
+	for i := range b.users {
+		u := &b.users[i]
 		if u.Username == "" || u.Username != info.Username {
 			continue
 		}
-		// Compare the password in constant time so a timing side channel cannot
-		// leak how many leading bytes matched.
-		if subtle.ConstantTimeCompare([]byte(u.Password), []byte(info.Password)) == 1 {
+		stored := u.Password
+		if stored == "" {
+			stored = u.PasswordHash
+		}
+		if stored == "" {
+			return "", false
+		}
+		if credential.Matches(stored, info.Password) {
 			return u.Username, true
 		}
+		return "", false
 	}
 	return "", false
 }
@@ -139,21 +165,46 @@ func (b *MQTTBridge) BridgedCount() int64 { return b.bridged.Load() }
 // NewMQTTBridge builds a bridge bound to the storage engine.
 func NewMQTTBridge(store *storage.Store) *MQTTBridge {
 	return &MQTTBridge{
-		store:   store,
-		closeCh: make(chan struct{}),
-		conns:   make(map[net.Conn]struct{}),
-		connSem: make(chan struct{}, mqttMaxConnections),
+		store:       store,
+		closeCh:     make(chan struct{}),
+		conns:       make(map[net.Conn]struct{}),
+		connSem:     make(chan struct{}, mqttMaxConnections),
+		authLimiter: ratelimit.New(3, time.Second, 30*time.Second),
 	}
 }
 
-// Start binds the MQTT listener and accepts connections.
+// isTLSConn reports whether a client connection is encrypted.
+func isTLSConn(conn net.Conn) bool {
+	_, ok := conn.(*tls.Conn)
+	return ok
+}
+
+// remoteHost renders a connection's peer host for the audit trail and the
+// per-source limiter.
+func remoteHost(conn net.Conn) string {
+	if ra := conn.RemoteAddr(); ra != nil {
+		if host, _, err := net.SplitHostPort(ra.String()); err == nil {
+			return host
+		}
+		return ra.String()
+	}
+	return ""
+}
+
+// Start binds the MQTT listener and accepts connections. When a TLS
+// configuration was installed the listener speaks TLS.
 func (b *MQTTBridge) Start(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
+	if b.tlsConf != nil {
+		ln = tls.NewListener(ln, b.tlsConf)
+		log.Printf("pocketkafka MQTT bridge on %s (TLS)", addr)
+	} else {
+		log.Printf("pocketkafka MQTT bridge on %s", addr)
+	}
 	b.listener = ln
-	log.Printf("pocketkafka MQTT bridge on %s", addr)
 	b.wg.Add(1)
 	go b.acceptLoop()
 	return nil
@@ -345,6 +396,13 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 	defer func() { <-b.connSem }()
 	b.active.Add(1)
 	defer b.active.Add(-1)
+	addr := remoteHost(conn)
+	if b.secure {
+		if ok, _ := b.authLimiter.Allow(addr); !ok {
+			// A source that keeps guessing is not even offered the handshake.
+			return
+		}
+	}
 	c := &mqttClient{
 		conn:   conn,
 		br:     bufio.NewReader(conn),
@@ -387,12 +445,31 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 					c.writePacket(mqttConnack, []byte{0x00, 0x01}) // unacceptable protocol
 					return
 				}
+				if b.requireTLS && !isTLSConn(conn) && (info.Username != "" || info.Password != "") {
+					// The password travelled in cleartext; refuse it instead of
+					// validating a credential the network already saw.
+					audit.Log(audit.Event{
+						Actor: audit.Anonymous, Action: "auth.mqtt", Resource: "mqtt",
+						Result: audit.ResultDeny, Detail: "credentials over an unencrypted connection",
+						RemoteAddr: addr,
+					})
+					c.writePacket(mqttConnack, []byte{0x00, 0x05})
+					return
+				}
 				user, ok := b.authenticate(info)
 				if !ok {
+					delay := b.authLimiter.Fail(addr)
+					audit.Log(audit.Event{
+						Actor: info.Username, Action: "auth.mqtt", Resource: "mqtt",
+						Result:     audit.ResultDeny,
+						Detail:     fmt.Sprintf("invalid credentials backoff_ms=%d", delay.Milliseconds()),
+						RemoteAddr: addr,
+					})
 					// 0x05 = not authorized.
 					c.writePacket(mqttConnack, []byte{0x00, 0x05})
 					return
 				}
+				b.authLimiter.Succeed(addr)
 				c.principal = user
 				c.authed = true
 			}
@@ -405,7 +482,10 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 				continue
 			}
 			if err := b.authorize(c.principal, authz.OpWrite, mqttTopicToKafka(ptopic)); err != nil {
-				log.Printf("mqtt publish denied for %q: %v", c.principal, err)
+				audit.Log(audit.Event{
+					Actor: c.principal, Action: "mqtt.publish", Resource: ptopic,
+					Result: audit.ResultDeny, Detail: err.Error(), RemoteAddr: addr,
+				})
 				continue
 			}
 			bridgeErr := b.bridgePublish(ptopic, data)
@@ -440,8 +520,12 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 			codes := make([]byte, len(filters))
 			allowed := make([]bool, len(filters))
 			for i, f := range filters {
-				if b.authorize(c.principal, authz.OpRead, mqttFilterToKafka(f)) != nil {
+				if err := b.authorize(c.principal, authz.OpRead, mqttFilterToKafka(f)); err != nil {
 					codes[i] = 0x80 // failure: not authorized
+					audit.Log(audit.Event{
+						Actor: c.principal, Action: "mqtt.subscribe", Resource: f,
+						Result: audit.ResultDeny, Detail: err.Error(), RemoteAddr: addr,
+					})
 					continue
 				}
 				codes[i] = 0x00

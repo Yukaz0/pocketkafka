@@ -39,7 +39,7 @@ type Store struct {
 
 // NewStore opens (or creates) the data directory and recovers existing topics.
 func NewStore(dir string, maxSegmentBytes, indexInterval int64) (*Store, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 	s := &Store{

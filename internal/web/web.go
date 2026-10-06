@@ -1,22 +1,22 @@
 package web
 
 import (
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/audit"
 	"github.com/Yukaz0/pocketkafka/internal/authz"
 	"github.com/Yukaz0/pocketkafka/internal/config"
 	"github.com/Yukaz0/pocketkafka/internal/coordinator"
 	"github.com/Yukaz0/pocketkafka/internal/gateway"
 	"github.com/Yukaz0/pocketkafka/internal/metrics"
+	"github.com/Yukaz0/pocketkafka/internal/ratelimit"
 	"github.com/Yukaz0/pocketkafka/internal/schemaregistry"
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
@@ -56,10 +56,31 @@ type Server struct {
 	users       []config.SecurityUser
 	authSecret  string
 	authEnabled bool
-	// authorize turns on ACL enforcement for state-changing web API calls. It
-	// is set when security is enabled, so the dashboard cannot act as an
-	// authorization bypass.
+	// authorize turns on ACL enforcement for the web API. It is set when
+	// security is enabled, so the dashboard cannot act as an authorization
+	// bypass.
 	authorize bool
+	// authorizer decides every dashboard permission. It starts as the ACL store
+	// and may be replaced with a wrapper (for example one that grants
+	// security.super_users everything).
+	authorizer authz.Authorizer
+	// authorizerExplicit records that a caller installed its own authorizer, so
+	// WithACLStore does not overwrite it.
+	authorizerExplicit bool
+	// sessions holds the live dashboard logins; logout and expiry act on this
+	// record, not only on the cookie.
+	sessions *sessionStore
+	// loginLimiter slows down credential guessing against the login form.
+	loginLimiter *ratelimit.Limiter
+	// trustedProxies are the peers whose X-Forwarded-Proto is believed when
+	// deciding whether the connection to the browser is HTTPS.
+	trustedProxies []string
+	// allowedHosts are the extra Host header values the WebSocket live tail
+	// accepts (web.allowed_hosts).
+	allowedHosts []string
+	// registered keeps every route pattern routes() installed, so a test can
+	// assert the authorization table covers all of them.
+	registered []string
 
 	// Data dir for persisted UI state (ACLs, etc.).
 	dataDir string
@@ -114,6 +135,20 @@ func (s *Server) WithDataDir(dir string) *Server {
 func (s *Server) WithACLStore(store *authz.Store) *Server {
 	if store != nil {
 		s.aclStore = store
+		if !s.authorizerExplicit {
+			s.authorizer = store
+		}
+	}
+	return s
+}
+
+// WithAuthorizer installs the policy used for dashboard authorization. It is
+// what lets main wrap the ACL store with security.super_users, so an operator
+// named there can administer the dashboard on a fresh install.
+func (s *Server) WithAuthorizer(a authz.Authorizer) *Server {
+	if a != nil {
+		s.authorizer = a
+		s.authorizerExplicit = true
 	}
 	return s
 }
@@ -167,6 +202,7 @@ func (s *Server) WithBrokerInfo(listeners []string, advertised, securityMode str
 
 // New builds a web server bound to the given storage and coordinator.
 func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.Registry, brokerID int32, clusterID string, version string) *Server {
+	acl := authz.NewInMemory()
 	return &Server{
 		store:           store,
 		gm:              gm,
@@ -175,13 +211,29 @@ func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.
 		clusterID:       clusterID,
 		version:         version,
 		startTime:       time.Now(),
-		metrics:         metrics.NewRegistry(),
+		metrics:         newWebMetrics(),
 		monitor:         NewMonitor(),
 		clusters:        newClusterStore("", nil, nil),
 		delegatedTokens: newDelegatedTokenStore(""),
-		aclStore:        authz.NewInMemory(),
+		aclStore:        acl,
+		authorizer:      acl,
+		sessions:        newSessionStore(0, 0),
+		loginLimiter:    ratelimit.New(5, 2*time.Second, 5*time.Minute),
 		rrCounter:       make(map[string]uint64),
 	}
+}
+
+// newWebMetrics builds the registry and exposes the authentication counters the
+// audit trail already maintains, so a scrape can alert on credential guessing.
+func newWebMetrics() *metrics.Registry {
+	reg := metrics.NewRegistry()
+	reg.RegisterGauge("pocketkafka_auth_failures_total", "Refused credentials since start (monotonic counter exposed as a gauge)", func() float64 {
+		return float64(audit.AuthFailures())
+	})
+	reg.RegisterGauge("pocketkafka_authz_denials_total", "Refused permissions since start (monotonic counter exposed as a gauge)", func() float64 {
+		return float64(audit.AuthzDenials())
+	})
+	return reg
 }
 
 // WithAuth enables web UI login using the given credentials. Security enabled
@@ -192,65 +244,102 @@ func (s *Server) WithAuth(cfg config.Config) *Server {
 	s.authSecret = cfg.Web.AuthSecret
 	s.authEnabled = cfg.Security.Enabled || (cfg.Web.Enabled && cfg.Web.Auth)
 	s.authorize = cfg.Security.Enabled
+	s.trustedProxies = cfg.Web.TrustedProxies
+	s.allowedHosts = cfg.Web.AllowedHosts
+	if cfg.Web.SessionTTLMinutes > 0 || cfg.Web.IdleTrimMinutes > 0 {
+		s.sessions = newSessionStore(
+			time.Duration(cfg.Web.SessionTTLMinutes)*time.Minute,
+			time.Duration(cfg.Web.IdleTrimMinutes)*time.Minute,
+		)
+	}
 	return s
 }
 
-// requestPrincipal returns the verified cookie user or the principal mapped to
-// a delegated bearer token. The cluster health token never grants a principal.
-func (s *Server) requestPrincipal(r *http.Request) string {
-	if authorization := r.Header.Get("Authorization"); strings.HasPrefix(authorization, "Bearer ") {
-		token := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
-		if s.clusterToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.clusterToken)) == 1 {
-			return ""
-		}
-		if s.delegatedTokens == nil || !s.authEnabled || !s.authorize {
-			return ""
-		}
-		principal, ok := s.delegatedTokens.Principal(token)
-		if ok && userExists(s.users, principal) {
-			return principal
-		}
-		return ""
+// can reports whether principal may perform op on res. With security disabled
+// every check passes (the historical allow-all behaviour); otherwise the
+// authorizer decides and an empty principal is always denied.
+//
+// One deliberate widening: a cluster-scoped grant satisfies OpDescribe on any
+// resource. An operator who may describe the cluster may see which topics and
+// groups exist, their partitions, log-end offsets and lag — the dashboard would
+// otherwise show an empty cluster to the very role that administers it. Payload
+// access (OpRead on a topic) and mutations (OpWrite/OpAdmin on a topic or group)
+// stay strictly resource-scoped, so a cluster grant is never a licence to read
+// message contents.
+func (s *Server) can(principal string, op authz.Operation, res authz.Resource) bool {
+	if !s.authorize {
+		return true
 	}
-	cookie, err := r.Cookie(authCookieName)
-	if err != nil {
-		return ""
+	if principal == "" || s.authorizer == nil {
+		return false
 	}
-	payload, ok := verifyToken(cookie.Value, s.authSecret)
-	if !ok {
-		return ""
+	if s.authorizer.Authorize(principal, op, res) == nil {
+		return true
 	}
-	principal := authPayloadToUser(payload)
-	if !userExists(s.users, principal) {
-		return ""
+	if op == authz.OpDescribe && res.Type != authz.ResourceCluster {
+		return s.authorizer.Authorize(principal, op, clusterResource) == nil
 	}
-	return principal
+	return false
 }
 
-// authorizeMutations requires cluster Admin (or the more specific ACL) for
-// state-changing API calls when security is enabled. Read-only requests are
-// left to the authentication middleware.
-func (s *Server) authorizeMutations(next http.Handler) http.Handler {
+// canList reports whether principal may call a list endpoint for a resource
+// type. The endpoint is then responsible for filtering its response. A grant
+// that covers the whole cluster (Describe cluster, or any Read/Write/Admin on
+// it) lists everything; a resource-scoped grant lists the resources it covers.
+func (s *Server) canList(principal, resourceType string) bool {
 	if !s.authorize {
-		return next
+		return true
 	}
+	if principal == "" || s.authorizer == nil {
+		return false
+	}
+	if l, ok := s.authorizer.(authz.Lister); ok && l.CanDescribeAny(principal, resourceType) {
+		return true
+	}
+	return s.authorizer.Authorize(principal, authz.OpDescribe, clusterResource) == nil
+}
+
+// authorizeAPI enforces the per-route permission table (authz_map.go). A route
+// that has no rule is denied, so a new endpoint fails closed instead of
+// silently skipping the check. The mux is called to learn which pattern the
+// request matched, because this middleware runs outside it.
+func (s *Server) authorizeAPI(mux *http.ServeMux, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet, http.MethodHead, http.MethodOptions:
+		if !s.authorize || !isAPIPath(r.URL.Path) || apiPublicPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") {
+		if s.clusterTokenPresented(r) {
+			// The auth middleware has already restricted this credential to the
+			// health routes; it carries no principal, so no ACL can apply.
 			next.ServeHTTP(w, r)
 			return
 		}
-		op := authz.OpWrite
-		if strings.Contains(r.URL.Path, "/acls") {
-			op = authz.OpAdmin
+		_, pattern := mux.Handler(r)
+		rule, ok := lookupRule(pattern)
+		if !ok {
+			s.auditDeny(w, r, s.requestPrincipal(r), "auth.route", "no authorization rule for "+r.URL.Path)
+			return
 		}
-		res := authz.Resource{Type: authz.ResourceCluster, Name: "cluster"}
-		if err := s.aclStore.Authorize(s.requestPrincipal(r), op, res); err != nil {
-			writeErr(w, http.StatusForbidden, "forbidden: "+err.Error())
+		params, matched := matchPattern(patternPath(pattern), r.URL.Path)
+		if !matched {
+			// Fail closed: a pattern that does not match its own request would
+			// resolve resource names to "" and authorize the wrong thing.
+			s.auditDeny(w, r, s.requestPrincipal(r), "auth.route", "route pattern did not match the request path")
+			return
+		}
+		principal := s.requestPrincipal(r)
+		if rule.list {
+			if !s.canList(principal, rule.listType) {
+				s.auditDeny(w, r, principal, "auth.list", "may not list "+rule.listType+"s")
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		res := rule.res(params)
+		if !s.can(principal, rule.op, res) {
+			s.auditDeny(w, r, principal, "auth.request", fmt.Sprintf("needs %s on %s %q", rule.op, res.Type, res.Name))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -259,72 +348,83 @@ func (s *Server) authorizeMutations(next http.Handler) http.Handler {
 
 // Handler returns the HTTP handler exposing the dashboard and API.
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	// Serve the embedded SPA without caching so a rebuilt container always shows
-	// the latest frontend (no stale HTML/CSS/JS after docker compose up).
-	mux.Handle("/", noCache(http.FileServer(http.FS(webui.FS()))))
-	mux.HandleFunc("GET /api/v1/cluster", s.handleCluster)
-	mux.HandleFunc("GET /api/v1/topics", s.handleTopics)
-	mux.HandleFunc("POST /api/v1/topics", s.handleCreateTopic)
-	mux.HandleFunc("DELETE /api/v1/topics/{topic}", s.handleDeleteTopic)
-	mux.HandleFunc("GET /api/v1/topics/{topic}/messages", s.handleSearchMessages)
-	mux.HandleFunc("POST /api/v1/topics/{topic}/messages", s.handlePostMessage)
-	mux.HandleFunc("GET /api/v1/topics/{topic}/partitions", s.handleTopicPartitions)
-	mux.HandleFunc("POST /api/v1/topics/{topic}/truncate", s.handleTruncateTopic)
-	mux.HandleFunc("POST /api/v1/topics/{topic}/compact", s.handleCompactTopic)
-	mux.HandleFunc("GET /api/v1/groups", s.handleGroups)
-	mux.HandleFunc("GET /api/v1/groups/{group}", s.handleGroupDetail)
-	mux.HandleFunc("DELETE /api/v1/groups/{group}", s.handleDeleteGroup)
-	mux.HandleFunc("POST /api/v1/groups/{group}/offsets/reset", s.handleResetGroupOffset)
-	mux.HandleFunc("GET /api/v1/groups/{group}/offsets/export", s.handleExportGroupOffsets)
-	mux.HandleFunc("POST /api/v1/groups/{group}/offsets/import", s.handleImportGroupOffsets)
-	mux.HandleFunc("GET /api/v1/topics/{topic}/config", s.handleTopicConfig)
-	mux.HandleFunc("PUT /api/v1/topics/{topic}/config", s.handleTopicConfig)
-	mux.HandleFunc("POST /api/v1/topics/{topic}/import", s.handleImportJSONL)
-	mux.HandleFunc("GET /api/v1/logs", s.handleBrokerLogs)
-	mux.HandleFunc("GET /api/v1/throughput", s.handleThroughput)
-	mux.HandleFunc("POST /api/v1/schemas/register", s.handleRegisterSchema)
-	mux.HandleFunc("GET /api/v1/mqtt", s.handleMQTTStatus)
-	mux.HandleFunc("GET /api/v1/integrations", s.handleIntegrations)
-	mux.HandleFunc("GET /api/v1/config", s.handleConfig)
-	mux.HandleFunc("GET /api/v1/schemas", s.handleSchemas)
-	mux.HandleFunc("GET /api/v1/schemas/{subject}", s.handleSchemaDetail)
-	mux.HandleFunc("GET /api/v1/acls", s.handleListACLs)
-	mux.HandleFunc("PUT /api/v1/acls", s.handleUpsertACL)
-	mux.HandleFunc("DELETE /api/v1/acls", s.handleDeleteACL)
-	mux.HandleFunc("GET /api/v1/audit", s.handleAudit)
-	mux.HandleFunc("GET /api/v1/topics/{topic}/tail", s.handleTailWS)
-	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
-	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
-	mux.HandleFunc("GET /api/v1/auth/status", s.handleAuthStatus)
-	mux.HandleFunc("GET /api/v1/auth/delegated-tokens", s.handleListDelegatedTokens)
-	mux.HandleFunc("POST /api/v1/auth/delegated-tokens", s.handleCreateDelegatedToken)
-	mux.HandleFunc("DELETE /api/v1/auth/delegated-tokens/{id}", s.handleRevokeDelegatedToken)
-	mux.HandleFunc("GET /healthz", s.handleHealthz)
-	mux.HandleFunc("GET /livez", s.handleLivez)
-	mux.HandleFunc("GET /metrics", s.handleMetrics)
-	// Health monitoring: the aggregate report. The dashboard renders it in the
-	// Health view of the embedded SPA (web/dist/index.html).
-	mux.HandleFunc("GET /api/v1/health/overview", s.handleHealthOverview)
-	// Multi-cluster monitoring: the overview fans out to every registered peer
-	// (including this broker), while the registry endpoints edit the list.
-	mux.HandleFunc("GET /api/v1/health/clusters", s.handleClustersOverview)
-	mux.HandleFunc("GET /api/v1/clusters", s.handleClusters)
-	mux.HandleFunc("POST /api/v1/clusters", s.handleUpsertCluster)
-	mux.HandleFunc("POST /api/v1/clusters/test", s.handleTestCluster)
-	mux.HandleFunc("DELETE /api/v1/clusters/{name}", s.handleDeleteCluster)
-	mux.HandleFunc("/api/v1/target/{name}/{path...}", s.handleClusterTarget)
-	authed := newAuthMiddleware(s.users, s.authSecret, s.authEnabled, s.clusterToken, func(token string) (string, bool) {
-		if s.delegatedTokens == nil || !s.authorize {
-			return "", false
-		}
-		principal, ok := s.delegatedTokens.Principal(token)
-		return principal, ok && userExists(s.users, principal)
-	})(s.authorizeMutations(mux))
+	mux := s.routes()
+	authed := s.authMiddleware(mux, s.authorizeAPI(mux, mux))
 	// securityHeaders is outermost so every response (pages included) carries
 	// them; csrfMiddleware then rejects state-changing calls that a cross-site
 	// page could have made with the operator's cookie.
 	return securityHeaders(csrfMiddleware(authed))
+}
+
+// route registers one dashboard route and records its pattern. Recording is
+// what lets the test suite assert that every API route has an entry in the
+// authorization table: a route the table does not know is denied at runtime, so
+// forgetting one turns a working endpoint into a 403.
+func (s *Server) route(mux *http.ServeMux, pattern string, h func(http.ResponseWriter, *http.Request)) {
+	s.registered = append(s.registered, pattern)
+	mux.HandleFunc(pattern, h)
+}
+
+// routes registers every dashboard route. It is separate from Handler so tests
+// can ask the same mux which pattern a request matches (the authorization table
+// is keyed by those patterns).
+func (s *Server) routes() *http.ServeMux {
+	mux := http.NewServeMux()
+	// Serve the embedded SPA without caching so a rebuilt container always shows
+	// the latest frontend (no stale HTML/CSS/JS after docker compose up).
+	mux.Handle("/", noCache(http.FileServer(http.FS(webui.FS()))))
+	s.route(mux, "GET /api/v1/cluster", s.handleCluster)
+	s.route(mux, "GET /api/v1/topics", s.handleTopics)
+	s.route(mux, "POST /api/v1/topics", s.handleCreateTopic)
+	s.route(mux, "DELETE /api/v1/topics/{topic}", s.handleDeleteTopic)
+	s.route(mux, "GET /api/v1/topics/{topic}/messages", s.handleSearchMessages)
+	s.route(mux, "POST /api/v1/topics/{topic}/messages", s.handlePostMessage)
+	s.route(mux, "GET /api/v1/topics/{topic}/partitions", s.handleTopicPartitions)
+	s.route(mux, "POST /api/v1/topics/{topic}/truncate", s.handleTruncateTopic)
+	s.route(mux, "POST /api/v1/topics/{topic}/compact", s.handleCompactTopic)
+	s.route(mux, "GET /api/v1/groups", s.handleGroups)
+	s.route(mux, "GET /api/v1/groups/{group}", s.handleGroupDetail)
+	s.route(mux, "DELETE /api/v1/groups/{group}", s.handleDeleteGroup)
+	s.route(mux, "POST /api/v1/groups/{group}/offsets/reset", s.handleResetGroupOffset)
+	s.route(mux, "GET /api/v1/groups/{group}/offsets/export", s.handleExportGroupOffsets)
+	s.route(mux, "POST /api/v1/groups/{group}/offsets/import", s.handleImportGroupOffsets)
+	s.route(mux, "GET /api/v1/topics/{topic}/config", s.handleTopicConfig)
+	s.route(mux, "PUT /api/v1/topics/{topic}/config", s.handleTopicConfig)
+	s.route(mux, "POST /api/v1/topics/{topic}/import", s.handleImportJSONL)
+	s.route(mux, "GET /api/v1/logs", s.handleBrokerLogs)
+	s.route(mux, "GET /api/v1/throughput", s.handleThroughput)
+	s.route(mux, "POST /api/v1/schemas/register", s.handleRegisterSchema)
+	s.route(mux, "GET /api/v1/mqtt", s.handleMQTTStatus)
+	s.route(mux, "GET /api/v1/integrations", s.handleIntegrations)
+	s.route(mux, "GET /api/v1/config", s.handleConfig)
+	s.route(mux, "GET /api/v1/schemas", s.handleSchemas)
+	s.route(mux, "GET /api/v1/schemas/{subject}", s.handleSchemaDetail)
+	s.route(mux, "GET /api/v1/acls", s.handleListACLs)
+	s.route(mux, "PUT /api/v1/acls", s.handleUpsertACL)
+	s.route(mux, "DELETE /api/v1/acls", s.handleDeleteACL)
+	s.route(mux, "GET /api/v1/audit", s.handleAudit)
+	s.route(mux, "GET /api/v1/topics/{topic}/tail", s.handleTailWS)
+	s.route(mux, "POST /api/v1/auth/login", s.handleLogin)
+	s.route(mux, "POST /api/v1/auth/logout", s.handleLogout)
+	s.route(mux, "GET /api/v1/auth/status", s.handleAuthStatus)
+	s.route(mux, "GET /api/v1/auth/delegated-tokens", s.handleListDelegatedTokens)
+	s.route(mux, "POST /api/v1/auth/delegated-tokens", s.handleCreateDelegatedToken)
+	s.route(mux, "DELETE /api/v1/auth/delegated-tokens/{id}", s.handleRevokeDelegatedToken)
+	s.route(mux, "GET /healthz", s.handleHealthz)
+	s.route(mux, "GET /livez", s.handleLivez)
+	s.route(mux, "GET /metrics", s.handleMetrics)
+	// Health monitoring: the aggregate report. The dashboard renders it in the
+	// Health view of the embedded SPA (web/dist/index.html).
+	s.route(mux, "GET /api/v1/health/overview", s.handleHealthOverview)
+	// Multi-cluster monitoring: the overview fans out to every registered peer
+	// (including this broker), while the registry endpoints edit the list.
+	s.route(mux, "GET /api/v1/health/clusters", s.handleClustersOverview)
+	s.route(mux, "GET /api/v1/clusters", s.handleClusters)
+	s.route(mux, "POST /api/v1/clusters", s.handleUpsertCluster)
+	s.route(mux, "POST /api/v1/clusters/test", s.handleTestCluster)
+	s.route(mux, "DELETE /api/v1/clusters/{name}", s.handleDeleteCluster)
+	s.route(mux, "/api/v1/target/{name}/{path...}", s.handleClusterTarget)
+	return mux
 }
 
 // handleMetrics exposes pocketkafka metrics in Prometheus text format.
@@ -400,12 +500,21 @@ type partitionInfo struct {
 }
 
 func (s *Server) handleTopics(w http.ResponseWriter, r *http.Request) {
+	principal := s.requestPrincipal(r)
 	names := s.store.TopicNames()
 	out := make([]topicInfo, 0, len(names))
 	for _, name := range names {
+		// A listing shows only the topics this principal may describe, so a
+		// scoped grant cannot be used to enumerate the whole cluster.
+		if !s.can(principal, authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: name}) {
+			continue
+		}
 		t := s.store.GetTopic(name)
+		if t == nil {
+			continue
+		}
 		ti := topicInfo{Name: name}
-		for i := 0; i < len(t.Partitions); i++ {
+		for i := range len(t.Partitions) {
 			p := t.Partitions[int32(i)]
 			ti.Partitions = append(ti.Partitions, partitionInfo{
 				Partition: int32(i),
@@ -447,9 +556,11 @@ func (s *Server) handleCreateTopic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.store.CreateTopic(req.Name, req.Partitions); err != nil {
+		s.auditFailure(r, "topic.create", req.Name, err.Error())
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.auditRequest(r, "topic.create", req.Name, fmt.Sprintf("partitions=%d", req.Partitions))
 	writeJSON(w, 201, map[string]interface{}{"name": req.Name, "partitions": req.Partitions})
 }
 
@@ -460,9 +571,11 @@ func (s *Server) handleDeleteTopic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteTopic(topic); err != nil {
+		s.auditFailure(r, "topic.delete", topic, err.Error())
 		writeErr(w, 500, err.Error())
 		return
 	}
+	s.auditRequest(r, "topic.delete", topic, "deleted topic")
 	writeJSON(w, 200, map[string]string{"deleted": topic})
 }
 
@@ -622,9 +735,21 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 		Lag        map[string]int64 `json:"lag"`
 	}
 	out := make([]g, 0, len(infos))
+	principal := s.requestPrincipal(r)
 	for _, info := range infos {
+		// Same rule as the topic list: report only the groups this principal
+		// may describe.
+		if !s.can(principal, authz.OpDescribe, authz.Resource{Type: authz.ResourceGroup, Name: info.Name}) {
+			continue
+		}
 		item := g{Name: info.Name, State: info.State, Generation: info.Generation, Leader: info.LeaderID, Members: info.Members, Lag: map[string]int64{}}
 		for topic, parts := range info.Offsets {
+			// The lag map is keyed by topic-partition and its values are that
+			// topic's log-end offsets, so it is only populated for topics this
+			// principal may describe.
+			if !s.can(principal, authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: topic}) {
+				continue
+			}
 			for part, committed := range parts {
 				leo := int64(0)
 				if p := s.store.GetPartition(topic, part); p != nil {
@@ -663,7 +788,7 @@ func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 		pid, _ := strconv.Atoi(qp)
 		partID = int32(pid)
 	}
-	conn, err := upgradeWebSocket(w, r)
+	conn, err := s.upgradeWebSocket(w, r)
 	if err != nil {
 		writeErr(w, 400, "websocket upgrade failed: "+err.Error())
 		return
@@ -700,9 +825,10 @@ func (s *Server) handleTailWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		// Drain client frames without waiting for one: a blocking read here paces
 		// the whole tail at the read deadline, so records arrive in one-second
-		// bursts instead of as they land.
-		conn.SetReadDeadline(time.Now())
-		readWSPing(conn)
+		// bursts instead of as they land. A protocol violation ends the tail.
+		if err := wsDrain(conn); err != nil {
+			return
+		}
 
 		var pending []messageRecord
 		var unread int64

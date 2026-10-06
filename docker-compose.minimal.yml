@@ -1,4 +1,11 @@
 # Minimal single-service stack: pocketkafka only (no portainer/postgres).
+#
+# This stack is intentionally an OPEN broker: security is off, every ingress
+# binds 0.0.0.0, and security.allow_insecure_public is set so the broker starts
+# anyway. Use it for local development only. For anything reachable from a
+# network you do not control, use config/config.yaml as the base, set
+# security.enabled=true and security.tls.*, and drop the two bind-everything
+# variables below.
 services:
   kafka-engine:
     build:
@@ -16,6 +23,15 @@ services:
       - "1883:1883"   # MQTT Bridge
     environment:
       - KAFKA_DATA_DIR=/var/lib/pocketkafka/data
+      # The shipped config binds loopback; a container has to listen on all
+      # interfaces for the published ports to work, and that is exactly what
+      # allow_insecure_public acknowledges.
+      - KAFKA_LISTENERS=plain://0.0.0.0:9092,internal://0.0.0.0:29092
+      - KAFKA_WEB_LISTEN=0.0.0.0:8080
+      - KAFKA_SCHEMA_REGISTRY_LISTEN=0.0.0.0:8081
+      - KAFKA_GATEWAY_LISTEN=0.0.0.0:8082
+      - KAFKA_MQTT_LISTEN=0.0.0.0:1883
+      - KAFKA_ALLOW_INSECURE_PUBLIC=true
     volumes:
       - kafka_data:/var/lib/pocketkafka/data
 

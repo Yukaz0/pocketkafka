@@ -28,7 +28,9 @@ services:
       POSTGRES_PASSWORD: devpassword
       POSTGRES_DB: devdb
     ports:
-      - "5432:5432"
+      # Bound to loopback: a development database with a well-known password
+      # must not be reachable from the local network.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -38,6 +40,7 @@ services:
   #    - Port 8080: Embedded Web UI Dashboard (Control Center)
   #    - Port 8081: Embedded Schema Registry (Menggantikan cp-schema-registry)
   #    - Port 8082: HTTP REST Proxy
+  #    Profiling (pprof) tidak diaktifkan di sini: lihat docker-compose.debug.yml.
   #    Konsumsi RAM: < 60MB (Ultra Lightweight)
   kafka-engine:
     build:
@@ -72,25 +75,33 @@ services:
     ports:
       - "9092:9092"   # Kafka API (host / luar container)
       - "29092:29092" # Kafka API (internal docker network)
-      - "6060:6060"   # pprof (debug profiling)
       - "8080:8080"   # Embedded Web UI Dashboard (Buka di browser)
       - "8081:8081"   # Embedded Schema Registry
       - "8082:8082"   # HTTP REST Proxy Gateway
       - "1883:1883"   # MQTT Bridge (IoT)
     environment:
       - KAFKA_BROKER_ID=0
-      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
-      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://local-kafka:29092,PLAINTEXT_HOST://localhost:9092
+      - KAFKA_LISTENERS=plain://0.0.0.0:9092,internal://0.0.0.0:29092
+      - KAFKA_ADVERTISED_LISTENERS=plain://localhost:9092,internal://local-kafka:29092
+      # The dashboard is toggled by web.enabled (env: KAFKA_ENABLE_WEB_UI). The
+      # Schema Registry and REST proxy have no off switch: their listeners are
+      # always started, so there is no KAFKA_ENABLE_* variable for them.
       - KAFKA_ENABLE_WEB_UI=true
-      - KAFKA_ENABLE_SCHEMA_REGISTRY=true
-      - KAFKA_ENABLE_REST_PROXY=true
       - KAFKA_DATA_DIR=/var/lib/pocketkafka/data
       - KAFKA_LOG_LEVEL=info
-      - KAFKA_PPROF_LISTEN=0.0.0.0:6060
+      # The shipped config binds loopback; a container must listen on all
+      # interfaces for the published ports to reach it, and
+      # allow_insecure_public is the explicit acknowledgement that this stack
+      # is an open development broker (security.enabled=false).
+      - KAFKA_WEB_LISTEN=0.0.0.0:8080
+      - KAFKA_SCHEMA_REGISTRY_LISTEN=0.0.0.0:8081
+      - KAFKA_GATEWAY_LISTEN=0.0.0.0:8082
+      - KAFKA_MQTT_LISTEN=0.0.0.0:1883
+      - KAFKA_ALLOW_INSECURE_PUBLIC=true
     volumes:
       - kafka_data:/var/lib/pocketkafka/data
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "9092"]
+      test: ["CMD", "/usr/local/bin/pocketkafka", "healthcheck", "--addr", "127.0.0.1:9092"]
       interval: 10s
       timeout: 3s
       retries: 5

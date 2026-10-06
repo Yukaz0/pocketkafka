@@ -88,9 +88,14 @@ type Network struct {
 	ReadBufferBytes     int   `yaml:"read_buffer_bytes"`
 	WriteBufferBytes    int   `yaml:"write_buffer_bytes"`
 	MaxRequestSizeBytes int64 `yaml:"max_request_size_bytes"`
-	ReadTimeoutMs       int   `yaml:"read_timeout_ms"`
-	WriteTimeoutMs      int   `yaml:"write_timeout_ms"`
-	IdleTimeoutMs       int   `yaml:"idle_timeout_ms"`
+	// PreAuthMaxRequestBytes caps a request frame accepted before the
+	// connection has authenticated. SASL exchanges are a few hundred bytes, so
+	// a small bound keeps an anonymous client from forcing a 100 MB allocation
+	// per connection.
+	PreAuthMaxRequestBytes int64 `yaml:"pre_auth_max_request_bytes"`
+	ReadTimeoutMs          int   `yaml:"read_timeout_ms"`
+	WriteTimeoutMs         int   `yaml:"write_timeout_ms"`
+	IdleTimeoutMs          int   `yaml:"idle_timeout_ms"`
 }
 
 // Logging configures the logger.
@@ -125,7 +130,32 @@ type Web struct {
 	// rest. Empty uses KAFKA_SECRETS_KEY, and failing that a key file is
 	// generated once inside the data dir with 0600.
 	SecretsKey string `yaml:"secrets_key"`
+	// TrustedProxies lists proxy addresses whose X-Forwarded-For/Proto headers
+	// are believed. Only then is "the client asked over https" taken from a
+	// header instead of the connection, so the session cookie can be marked
+	// Secure behind a TLS-terminating reverse proxy.
+	TrustedProxies []string `yaml:"trusted_proxies"`
+	// AllowedHosts lists extra Host header values the dashboard accepts for the
+	// WebSocket live tail. By default only IP literals and "localhost" are
+	// accepted, which is what blocks DNS rebinding; a dashboard reached under a
+	// name must list that name here.
+	AllowedHosts []string `yaml:"allowed_hosts"`
+	// SessionTTLMinutes is the absolute lifetime of a dashboard session
+	// (default 1440 = 24h). 0 uses the default.
+	SessionTTLMinutes int `yaml:"session_ttl_minutes"`
+	// SessionIdleMinutes ends a session idle for that long (default 120).
+	IdleTrimMinutes int `yaml:"session_idle_minutes"`
+	// AuditLog is a file that receives the audit trail as JSON lines (0600,
+	// rotated at 8 MiB). Empty keeps the trail in the process log only.
+	AuditLog string `yaml:"audit_log"`
 }
+
+// DefaultSessionTTLMinutes and DefaultSessionIdleMinutes bound a dashboard
+// session when the config leaves them unset.
+const (
+	DefaultSessionTTLMinutes  = 1440
+	DefaultSessionIdleMinutes = 120
+)
 
 // SchemaRegistry configures the embedded Confluent-compatible registry.
 type SchemaRegistry struct {
@@ -142,10 +172,22 @@ type MQTT struct {
 	Listen string `yaml:"listen"`
 }
 
-// SecurityUser is a SASL/PLAIN credential.
+// SecurityUser is a SASL credential. Exactly one of Password, PasswordFile,
+// PasswordHash or SCRAMVerifier supplies the secret:
+//
+//   - password       plaintext (legacy; also what SCRAM derives from)
+//   - password_file  a file holding the plaintext secret, so it stays out of
+//     the YAML
+//   - password_hash  a PBKDF2 verifier usable by SASL/PLAIN and HTTP Basic,
+//     but not by SCRAM (SCRAM needs the password itself)
+//   - scram_verifier a stored SCRAM verifier (salt, iterations, StoredKey,
+//     ServerKey), the form that never exposes the password
 type SecurityUser struct {
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
+	Username      string `yaml:"username"`
+	Password      string `yaml:"password"`
+	PasswordFile  string `yaml:"password_file"`
+	PasswordHash  string `yaml:"password_hash"`
+	SCRAMVerifier string `yaml:"scram_verifier"`
 }
 
 // Security configures SASL/PLAIN authentication.
@@ -153,14 +195,43 @@ type Security struct {
 	Enabled bool           `yaml:"enabled"`
 	Users   []SecurityUser `yaml:"users"`
 	TLS     TLS            `yaml:"tls"`
+	// AllowInsecurePublic permits a listener bound to a non-loopback address
+	// while security.enabled is false. It is an explicit opt-in: an open broker
+	// on a routable address is refused at startup otherwise.
+	AllowInsecurePublic bool `yaml:"allow_insecure_public"`
+	// RequireTLSForPlain refuses SASL/PLAIN on a connection that is not
+	// encrypted (MQTT included). Default true: PLAIN puts the password on the
+	// wire. SCRAM is unaffected, so a SCRAM-only cluster can stay plaintext.
+	RequireTLSForPlain bool `yaml:"require_tls_for_plain"`
+	// AllowWildcardAdmin permits an ACL rule that grants Admin to the
+	// wildcard principal. It is off by default: such a rule hands every
+	// authenticated identity cluster-wide administration.
+	AllowWildcardAdmin bool `yaml:"allow_wildcard_admin"`
+	// SuperUsers bypass every ACL check. Without one, a fresh security-enabled
+	// deployment has nobody who can administer the ACL file.
+	SuperUsers []string `yaml:"super_users"`
+	// SCRAMIterations is the PBKDF2 iteration count used when the broker must
+	// derive a SCRAM credential from a plaintext password. 0 uses the default.
+	SCRAMIterations int `yaml:"scram_iterations"`
 }
 
-// TLS configures an optional TLS (SSL) listener.
+// TLS configures transport encryption. One certificate serves every surface;
+// the booleans select which surfaces use it.
 type TLS struct {
+	// Enabled starts the Kafka SSL:// listener (security.tls.listen).
 	Enabled  bool   `yaml:"enabled"`
 	Listen   string `yaml:"listen"`
 	CertFile string `yaml:"cert_file"`
 	KeyFile  string `yaml:"key_file"`
+	// ClientCAFile turns on mutual TLS: a client certificate signed by this CA
+	// is required. The peer's CN becomes its principal.
+	ClientCAFile string `yaml:"client_ca_file"`
+	// MinVersion is "1.2" (default) or "1.3".
+	MinVersion string `yaml:"min_version"`
+	// HTTP serves the dashboard, Schema Registry and REST proxy over TLS.
+	HTTP bool `yaml:"http"`
+	// MQTT serves the MQTT bridge over TLS.
+	MQTT bool `yaml:"mqtt"`
 }
 
 // Config is the root configuration document.
@@ -185,8 +256,8 @@ func Default() Config {
 	return Config{
 		Broker: Broker{ID: 0, ClusterID: "pocketkafka-local", Rack: ""},
 		Listeners: map[string]string{
-			"plain":    "0.0.0.0:9092",
-			"internal": "0.0.0.0:29092",
+			"plain":    "127.0.0.1:9092",
+			"internal": "127.0.0.1:29092",
 		},
 		AdvertisedListeners: map[string]string{
 			"plain":    "localhost:9092",
@@ -218,16 +289,22 @@ func Default() Config {
 			ReadBufferBytes:     65536,
 			WriteBufferBytes:    65536,
 			MaxRequestSizeBytes: 104857600,
-			ReadTimeoutMs:       30000,
-			WriteTimeoutMs:      30000,
-			IdleTimeoutMs:       120000,
+			// 64 KiB: several times a SASL exchange, far below the 100 MB a
+			// client may send once authenticated.
+			PreAuthMaxRequestBytes: 65536,
+			ReadTimeoutMs:          30000,
+			WriteTimeoutMs:         30000,
+			IdleTimeoutMs:          120000,
 		},
 		Logging:        Logging{Level: "info", Format: "json"},
-		Web:            Web{Listen: "0.0.0.0:8080", Enabled: true, Auth: false, AuthSecret: "pocketkafka-web-secret"},
-		SchemaRegistry: SchemaRegistry{Listen: "0.0.0.0:8081"},
-		Gateway:        Gateway{Listen: "0.0.0.0:8082"},
-		MQTT:           MQTT{Listen: "0.0.0.0:1883"},
-		Security:       Security{TLS: TLS{Listen: "0.0.0.0:9093"}},
+		Web:            Web{Listen: "127.0.0.1:8080", Enabled: true, Auth: false, AuthSecret: "pocketkafka-web-secret"},
+		SchemaRegistry: SchemaRegistry{Listen: "127.0.0.1:8081"},
+		Gateway:        Gateway{Listen: "127.0.0.1:8082"},
+		MQTT:           MQTT{Listen: "127.0.0.1:1883"},
+		Security: Security{
+			RequireTLSForPlain: true,
+			TLS:                TLS{Listen: "127.0.0.1:9093"},
+		},
 	}
 }
 
@@ -266,11 +343,40 @@ func Load(path string) (Config, error) {
 		}
 	}
 	applyEnv(&cfg)
+	if err := cfg.resolvePasswordFiles(); err != nil {
+		return cfg, err
+	}
 	cfg.Normalize()
 	if err := cfg.Validate(); err != nil {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+// resolvePasswordFiles reads security.users[].password_file into the plaintext
+// password field, so an operator can keep the secret out of the YAML (and out
+// of the container image). A file that cannot be read is a startup error: a
+// silently empty password would turn into "no credential" instead of "no
+// access".
+func (c *Config) resolvePasswordFiles() error {
+	for i := range c.Security.Users {
+		u := &c.Security.Users[i]
+		if u.PasswordFile == "" {
+			continue
+		}
+		if u.Password != "" {
+			return fmt.Errorf("security.users[%d] (%s): set either password or password_file, not both", i, u.Username)
+		}
+		data, err := os.ReadFile(u.PasswordFile)
+		if err != nil {
+			return fmt.Errorf("security.users[%d] (%s): read password_file: %w", i, u.Username, err)
+		}
+		u.Password = strings.TrimRight(string(data), "\r\n")
+		if u.Password == "" {
+			return fmt.Errorf("security.users[%d] (%s): password_file %s is empty", i, u.Username, u.PasswordFile)
+		}
+	}
+	return nil
 }
 
 // Normalize rewrites legacy or shorthand values into their canonical form so
@@ -296,6 +402,54 @@ func applyEnv(cfg *Config) {
 	setInt(&cfg.Storage.Retention.RetentionHours, os.Getenv("KAFKA_LOG_RETENTION_HOURS"))
 	setBool(&cfg.Topics.AutoCreate, os.Getenv("KAFKA_AUTO_CREATE_TOPICS"))
 	setStr(&cfg.Logging.Level, os.Getenv("KAFKA_LOG_LEVEL"))
+
+	// Management surfaces bind separately from the Kafka listeners, so an
+	// operator can expose the dashboard without exposing the broker.
+	setStr(&cfg.Web.Listen, os.Getenv("KAFKA_WEB_LISTEN"))
+	setStr(&cfg.SchemaRegistry.Listen, os.Getenv("KAFKA_SCHEMA_REGISTRY_LISTEN"))
+	setStr(&cfg.Gateway.Listen, os.Getenv("KAFKA_GATEWAY_LISTEN"))
+	setStr(&cfg.MQTT.Listen, os.Getenv("KAFKA_MQTT_LISTEN"))
+
+	setBool(&cfg.Web.Enabled, os.Getenv("KAFKA_ENABLE_WEB_UI"))
+	setBool(&cfg.Web.Auth, os.Getenv("KAFKA_WEB_AUTH"))
+	setStr(&cfg.Web.AuthSecret, os.Getenv("KAFKA_WEB_AUTH_SECRET"))
+	setStr(&cfg.Web.ClusterToken, os.Getenv("KAFKA_CLUSTER_TOKEN"))
+	setStr(&cfg.Web.AuditLog, os.Getenv("KAFKA_AUDIT_LOG"))
+
+	setBool(&cfg.Security.Enabled, os.Getenv("KAFKA_SECURITY_ENABLED"))
+	setBool(&cfg.Security.AllowInsecurePublic, os.Getenv("KAFKA_ALLOW_INSECURE_PUBLIC"))
+	setBool(&cfg.Security.RequireTLSForPlain, os.Getenv("KAFKA_REQUIRE_TLS_FOR_PLAIN"))
+	setInt(&cfg.Security.SCRAMIterations, os.Getenv("KAFKA_SCRAM_ITERATIONS"))
+	setBool(&cfg.Security.AllowWildcardAdmin, os.Getenv("KAFKA_ALLOW_WILDCARD_ADMIN"))
+	setList(&cfg.Security.SuperUsers, os.Getenv("KAFKA_SUPER_USERS"))
+
+	setBool(&cfg.Security.TLS.Enabled, os.Getenv("KAFKA_TLS_ENABLED"))
+	setStr(&cfg.Security.TLS.Listen, os.Getenv("KAFKA_TLS_LISTEN"))
+	setStr(&cfg.Security.TLS.CertFile, os.Getenv("KAFKA_TLS_CERT_FILE"))
+	setStr(&cfg.Security.TLS.KeyFile, os.Getenv("KAFKA_TLS_KEY_FILE"))
+	setStr(&cfg.Security.TLS.ClientCAFile, os.Getenv("KAFKA_TLS_CLIENT_CA_FILE"))
+	setStr(&cfg.Security.TLS.MinVersion, os.Getenv("KAFKA_TLS_MIN_VERSION"))
+	setBool(&cfg.Security.TLS.HTTP, os.Getenv("KAFKA_TLS_HTTP"))
+	setBool(&cfg.Security.TLS.MQTT, os.Getenv("KAFKA_TLS_MQTT"))
+}
+
+// setList splits a comma separated environment value into dst.
+func setList(dst *[]string, v string) {
+	if strings.TrimSpace(v) == "" {
+		return
+	}
+	*dst = splitList(v)
+}
+
+// splitList splits a comma separated value, dropping empty entries.
+func splitList(v string) []string {
+	out := make([]string, 0, 4)
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 // parseListeners parses a comma separated list of NAME://host:port pairs.

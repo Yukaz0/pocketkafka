@@ -2,16 +2,36 @@
 /bin/
 *.exe
 *.test
+/coverage.out
+
+# Profiling output (pprof)
+*.prof
+*.pprof
+*.trace
 
 # Local data
 /data/
 *.log
 
+# Never commit credentials or key material: TLS keys/certs and env files are
+# generated per deployment and must stay out of the repository.
+*.pem
+*.key
+*.crt
+*.p12
+.env
+.env.*
+
 # Editor / OS
 .DS_Store
 .idea/
 .vscode/
+
+# Local tooling state (agent sessions, worktrees, plans)
 .commandcode/
 .worktrees/
-# Internal design docs (not published to GitHub)
+.hermes/
+.omp/
+
+# Internal design docs and local reviews (not published to GitHub)
 /docs/

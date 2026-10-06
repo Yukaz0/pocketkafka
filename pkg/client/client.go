@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/netguard"
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
@@ -109,7 +110,7 @@ func (c *KafkaClient) version(key int16) int16 {
 func (c *KafkaClient) connect() error {
 	var lastErr error
 	for _, addr := range c.brokers {
-		conn, err := net.DialTimeout("tcp", addr, c.timeout)
+		conn, err := dialAddr(addr, c.timeout)
 		if err == nil {
 			if tcp, ok := conn.(*net.TCPConn); ok {
 				// A request/response protocol gains nothing from coalescing, and
@@ -122,6 +123,14 @@ func (c *KafkaClient) connect() error {
 		lastErr = err
 	}
 	return fmt.Errorf("connect to brokers %v: %w", c.brokers, lastErr)
+}
+
+// dialAddr connects to a broker through the shared address guard, which refuses
+// link-local, metadata, unspecified and multicast destinations. The check runs
+// on the resolved address, so a hostname that resolves into a blocked range is
+// refused too.
+func dialAddr(addr string, timeout time.Duration) (net.Conn, error) {
+	return netguard.Dialer(timeout).Dial("tcp", addr)
 }
 
 // negotiate requests ApiVersions to cap versions to what the broker supports.

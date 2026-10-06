@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/audit"
 	"github.com/Yukaz0/pocketkafka/internal/authz"
 )
 
@@ -55,15 +56,56 @@ type AuditEntry struct {
 	Detail   string `json:"detail"`
 }
 
-// recordAudit appends an audit entry, capped at 500 entries.
+// auditRingSize bounds the in-memory view the dashboard renders. It is only a
+// view: the durable record is the audit package's trail, which this ring
+// cannot erase by filling up.
+const auditRingSize = 500
+
+// recordAudit appends an audit entry to the in-memory ring and to the
+// persistent trail.
 func (s *Server) recordAudit(actor, action, resource, detail string) {
-	s.auditMu.Lock()
-	defer s.auditMu.Unlock()
-	e := AuditEntry{Time: time.Now().UnixMilli(), Actor: actor, Action: action, Resource: resource, Detail: detail}
-	s.auditLog = append(s.auditLog, e)
-	if len(s.auditLog) > 500 {
-		s.auditLog = s.auditLog[len(s.auditLog)-500:]
+	s.recordAuditEvent(audit.Event{Actor: actor, Action: action, Resource: resource, Detail: detail, Result: audit.ResultOK})
+}
+
+// recordAuditEvent records one event with an explicit result.
+func (s *Server) recordAuditEvent(e audit.Event) {
+	if e.Time == 0 {
+		e.Time = time.Now().UnixMilli()
 	}
+	s.auditMu.Lock()
+	s.auditLog = append(s.auditLog, AuditEntry{
+		Time: e.Time, Actor: e.Actor, Action: e.Action, Resource: e.Resource, Detail: e.Detail,
+	})
+	if len(s.auditLog) > auditRingSize {
+		s.auditLog = s.auditLog[len(s.auditLog)-auditRingSize:]
+	}
+	s.auditMu.Unlock()
+	audit.Log(e)
+}
+
+// auditRequest records a state-changing action together with where it came
+// from, which is what makes the trail usable after an incident.
+func (s *Server) auditRequest(r *http.Request, action, resource, detail string) {
+	s.recordAuditEvent(audit.Event{
+		Actor:      s.actorFrom(r),
+		Action:     action,
+		Resource:   resource,
+		Detail:     detail,
+		Result:     audit.ResultOK,
+		RemoteAddr: clientAddr(r),
+	})
+}
+
+// auditFailure records a refused or failed action.
+func (s *Server) auditFailure(r *http.Request, action, resource, detail string) {
+	s.recordAuditEvent(audit.Event{
+		Actor:      s.actorFrom(r),
+		Action:     action,
+		Resource:   resource,
+		Detail:     detail,
+		Result:     audit.ResultError,
+		RemoteAddr: clientAddr(r),
+	})
 }
 
 func (s *Server) handleListACLs(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +134,9 @@ func (s *Server) handleUpsertACL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.aclStore.Upsert(ruleFromWire(rule)); err != nil {
-		writeErr(w, 500, err.Error())
+		// A rejected rule (unknown operation or resource type) is a bad request,
+		// not a server failure, and the message names the offending field.
+		writeErr(w, 400, err.Error())
 		return
 	}
 	s.recordAudit(s.actorFrom(r), "acl.update", rule.ResourceName, fmt.Sprintf("%s grants %v on %s %s", rule.Principal, rule.Operations, rule.ResourceType, rule.ResourceName))

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -16,6 +17,74 @@ var defaultWebSecrets = map[string]bool{
 	"pocketkafka-web-secret":  true,
 	"change-me-in-production": true,
 	"changeme":                true,
+}
+
+// weakPasswords are the values that show up in every sample config and wordlist.
+// A security-enabled broker refuses to start on one of them: online guessing
+// against a known default is not a hypothetical risk.
+var weakPasswords = map[string]bool{
+	"changeme":                true,
+	"change-me-in-production": true,
+	"password":                true,
+	"passw0rd":                true,
+	"admin":                   true,
+	"administrator":           true,
+	"root":                    true,
+	"secret":                  true,
+	"minioadmin":              true,
+	"devpassword":             true,
+	"pocketkafka":             true,
+	"123456":                  true,
+	"12345678":                true,
+	"qwerty":                  true,
+	"letmein":                 true,
+}
+
+// MinPasswordLength is the shortest plaintext password a security-enabled
+// broker accepts. It applies to config-supplied passwords; verifiers carry
+// their own stronger material.
+const MinPasswordLength = 8
+
+// IsLoopbackHost reports whether a bind host only accepts local connections.
+// An empty host, "0.0.0.0", "::" and any non-loopback name all mean "reachable
+// from the network", which is the conservative reading.
+func IsLoopbackHost(host string) bool {
+	host = strings.TrimSpace(strings.Trim(strings.TrimSpace(host), "[]"))
+	switch strings.ToLower(host) {
+	case "":
+		return false
+	case "localhost":
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// bindTargets lists every address the broker would listen on, labelled with the
+// config field that produced it.
+func bindTargets(c *Config) []bindTarget {
+	out := []bindTarget{}
+	for name, addr := range c.Listeners {
+		out = append(out, bindTarget{"listeners." + name, addr})
+	}
+	if c.Web.Enabled {
+		out = append(out, bindTarget{"web.listen", c.Web.Listen})
+	}
+	out = append(out, bindTarget{"schema_registry.listen", c.SchemaRegistry.Listen})
+	out = append(out, bindTarget{"gateway.listen", c.Gateway.Listen})
+	out = append(out, bindTarget{"mqtt.listen", c.MQTT.Listen})
+	if c.Security.TLS.Enabled || c.Security.TLS.HTTP || c.Security.TLS.MQTT {
+		out = append(out, bindTarget{"security.tls.listen", c.Security.TLS.Listen})
+	}
+	return out
+}
+
+// bindTarget is one configured listen address and the field naming it.
+type bindTarget struct {
+	field string
+	addr  string
 }
 
 // ValidateClusterName checks a monitored-cluster name. The charset is
@@ -75,6 +144,8 @@ func (c *Config) Validate() error {
 	validateListeners(c, add)
 	validateNetwork(c, add)
 	validateStorage(c, add)
+	validateTiered(c, add)
+	validateExposure(c, add)
 	validateSecurity(c, add)
 
 	if len(problems) == 0 {
@@ -127,6 +198,13 @@ func validateNetwork(c *Config, add func(string, ...interface{})) {
 	if c.Network.MaxRequestSizeBytes <= 0 {
 		add("network.max_request_size_bytes: must be > 0 (got %d)", c.Network.MaxRequestSizeBytes)
 	}
+	if c.Network.PreAuthMaxRequestBytes <= 0 {
+		add("network.pre_auth_max_request_bytes: must be > 0 (got %d)", c.Network.PreAuthMaxRequestBytes)
+	}
+	if c.Network.PreAuthMaxRequestBytes > c.Network.MaxRequestSizeBytes {
+		add("network.pre_auth_max_request_bytes: must not exceed max_request_size_bytes (%d > %d)",
+			c.Network.PreAuthMaxRequestBytes, c.Network.MaxRequestSizeBytes)
+	}
 	if c.Network.ReadTimeoutMs < 0 {
 		add("network.read_timeout_ms: must be >= 0 (got %d)", c.Network.ReadTimeoutMs)
 	}
@@ -160,6 +238,62 @@ func validateStorage(c *Config, add func(string, ...interface{})) {
 	}
 }
 
+// validateExposure refuses a broker that is both unauthenticated and reachable
+// from the network. Every ingress (Kafka, dashboard, Schema Registry, REST
+// proxy, MQTT) is default-deny only when security is enabled, so a non-loopback
+// bind with security off means anyone who can route to this host can truncate
+// topics and edit ACLs.
+func validateExposure(c *Config, add func(string, ...interface{})) {
+	if c.Security.Enabled || c.Security.AllowInsecurePublic {
+		return
+	}
+	for _, t := range bindTargets(c) {
+		host, _, err := net.SplitHostPort(strings.TrimSpace(t.addr))
+		if err != nil {
+			continue // shape errors are reported by validateListeners
+		}
+		if IsLoopbackHost(host) {
+			continue
+		}
+		add("%s: binds %s (not loopback) while security.enabled is false; "+
+			"set security.enabled=true, or set security.allow_insecure_public=true to accept "+
+			"an open broker on a routable address", t.field, t.addr)
+	}
+}
+
+// validateTiered rejects a cold-storage configuration that would ship objects
+// with a well-known credential over a plaintext link to a remote host.
+func validateTiered(c *Config, add func(string, ...interface{})) {
+	if !c.Storage.Tiered.Enabled {
+		return
+	}
+	if weakPasswords[strings.ToLower(c.Storage.Tiered.SecretKey)] || c.Storage.Tiered.SecretKey == "" {
+		add("storage.tiered.secret_key: must be set to a non-default value while tiering is enabled")
+	}
+	if strings.TrimSpace(c.Storage.Tiered.AccessKey) == "" {
+		add("storage.tiered.access_key: required while tiering is enabled")
+	}
+	u, err := url.Parse(c.Storage.Tiered.Endpoint)
+	if err != nil || u.Host == "" {
+		add("storage.tiered.endpoint: must be a URL with a host")
+		return
+	}
+	if u.Scheme == "http" && !IsLoopbackHost(u.Hostname()) {
+		add("storage.tiered.endpoint: %s sends objects and credentials in cleartext; use https (http is only accepted for loopback)", c.Storage.Tiered.Endpoint)
+	}
+}
+
+// unresolvedEnv reports a ${NAME} reference that environment expansion could
+// not resolve. It mirrors expandEnv: a "${" with no closing "}" is literal
+// text, not a reference, and must not be rejected.
+func unresolvedEnv(v string) bool {
+	i := strings.Index(v, "${")
+	if i < 0 {
+		return false
+	}
+	return strings.Contains(v[i+2:], "}")
+}
+
 func validateSecurity(c *Config, add func(string, ...interface{})) {
 	// Enabling security also turns on web login (the dashboard must not be an
 	// unauthenticated bypass), so the signing secret must be non-default in
@@ -167,6 +301,21 @@ func validateSecurity(c *Config, add func(string, ...interface{})) {
 	if c.Web.Enabled && (c.Web.Auth || c.Security.Enabled) {
 		if defaultWebSecrets[c.Web.AuthSecret] {
 			add("web.auth_secret: must be set to a non-default value when web.auth or security.enabled is true")
+		}
+		if unresolvedEnv(c.Web.AuthSecret) {
+			// The literal "${NAME}" is not an empty secret: it is a *predictable*
+			// one, and a predictable signing key forges sessions.
+			add("web.auth_secret: %q references an unset environment variable", c.Web.AuthSecret)
+		}
+	}
+	// Same reasoning for the two other shared secrets: a literal ${NAME} that was
+	// never substituted is guessable, whether or not it is "non-default".
+	for _, secret := range []struct{ field, value string }{
+		{"web.cluster_token", c.Web.ClusterToken},
+		{"web.secrets_key", c.Web.SecretsKey},
+	} {
+		if unresolvedEnv(secret.value) {
+			add("%s: %q references an unset environment variable", secret.field, secret.value)
 		}
 	}
 	// Multi-cluster monitoring: a malformed entry would be persisted and then
@@ -193,30 +342,110 @@ func validateSecurity(c *Config, add func(string, ...interface{})) {
 	}
 	// The key that seals stored credentials at rest. A short key protects
 	// nothing; an unset key is fine because one is generated in the data dir.
+	// The environment variable is checked too: it is the effective key whenever
+	// it is set, and validating only the config value would leave the shorter
+	// path open. (The generated key file is 32 random bytes, checked where it is
+	// read.)
 	if c.Web.SecretsKey != "" && len(c.Web.SecretsKey) < 16 {
 		add("web.secrets_key: must be at least 16 characters when set")
 	}
+	if env := os.Getenv("KAFKA_SECRETS_KEY"); env != "" && len(env) < 16 {
+		add("KAFKA_SECRETS_KEY: must be at least 16 characters when set (it seals stored cluster credentials)")
+	}
 	if c.Security.Enabled {
 		useful := 0
-		for _, u := range c.Security.Users {
+		for i, u := range c.Security.Users {
 			if strings.TrimSpace(u.Username) != "" {
 				useful++
 			}
+			validateUserSecret(i, u, add)
 		}
 		if useful == 0 {
 			add("security.users: at least one user with a username is required when security.enabled is true")
 		}
+		// A super user that is not also a configured user can never present a
+		// credential, so the entry would silently grant nothing.
+		known := map[string]bool{}
+		for _, u := range c.Security.Users {
+			known[strings.TrimSpace(u.Username)] = true
+		}
+		for _, su := range c.Security.SuperUsers {
+			if !known[strings.TrimSpace(su)] {
+				add("security.super_users: %q is not listed in security.users", su)
+			}
+		}
 	}
-	if c.Security.TLS.Enabled {
-		if c.Security.TLS.CertFile == "" {
-			add("security.tls.cert_file: required when security.tls.enabled is true")
+	if c.Security.SCRAMIterations < 0 {
+		add("security.scram_iterations: must be >= 0 (got %d)", c.Security.SCRAMIterations)
+	}
+	validateTLS(c, add)
+}
+
+// validateUserSecret checks one user's credential source: exactly one method,
+// and a plaintext password that is neither a known default nor trivially short.
+func validateUserSecret(i int, u SecurityUser, add func(string, ...interface{})) {
+	where := fmt.Sprintf("security.users[%d]", i)
+	if name := strings.TrimSpace(u.Username); name != "" {
+		where += " (" + name + ")"
+	}
+	methods := 0
+	for _, set := range []bool{u.Password != "", u.PasswordHash != "", u.SCRAMVerifier != ""} {
+		if set {
+			methods++
 		}
-		if c.Security.TLS.KeyFile == "" {
-			add("security.tls.key_file: required when security.tls.enabled is true")
+	}
+	switch {
+	case methods == 0:
+		add("%s: needs one of password, password_hash or scram_verifier", where)
+		return
+	case methods > 1:
+		add("%s: set exactly one of password, password_hash or scram_verifier", where)
+		return
+	}
+	for _, v := range []string{u.Password, u.PasswordHash, u.SCRAMVerifier, u.PasswordFile} {
+		if unresolvedEnv(v) {
+			add("%s: %q references an unset environment variable", where, v)
 		}
-		if strings.TrimSpace(c.Security.TLS.Listen) == "" {
-			add("security.tls.listen: required when security.tls.enabled is true")
+	}
+	if u.Password != "" {
+		if weakPasswords[strings.ToLower(u.Password)] || len(u.Password) < MinPasswordLength {
+			add("%s: password is a default/too-short value (min %d characters, no well-known defaults)", where, MinPasswordLength)
 		}
+	}
+	if strings.TrimSpace(u.PasswordFile) != "" && u.Password != "" {
+		add("%s: set either password or password_file, not both", where)
+	}
+}
+
+// validateTLS checks the shared certificate and the surfaces switched over to
+// it.
+func validateTLS(c *Config, add func(string, ...interface{})) {
+	t := c.Security.TLS
+	active := t.Enabled || t.HTTP || t.MQTT
+	if !active {
+		return
+	}
+	if strings.TrimSpace(t.CertFile) == "" {
+		add("security.tls.cert_file: required when any TLS surface is enabled")
+	}
+	if strings.TrimSpace(t.KeyFile) == "" {
+		add("security.tls.key_file: required when any TLS surface is enabled")
+	}
+	if strings.TrimSpace(t.Listen) == "" {
+		add("security.tls.listen: required when security.tls.enabled is true")
+	}
+	for _, v := range []string{t.CertFile, t.KeyFile, t.ClientCAFile} {
+		if unresolvedEnv(v) {
+			add("security.tls: %q references an unset environment variable", v)
+		}
+	}
+	switch t.MinVersion {
+	case "", "1.2", "1.3":
+	default:
+		add("security.tls.min_version: want %q or %q (got %q)", "1.2", "1.3", t.MinVersion)
+	}
+	if t.Enabled && !c.Security.Enabled {
+		add("security.tls.enabled: a TLS listener without security.enabled still accepts anonymous clients; enable security")
 	}
 }
 

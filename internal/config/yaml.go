@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strconv"
 	"strings"
 )
@@ -154,11 +155,36 @@ func asMap(m map[string]interface{}, k string) map[string]interface{} {
 	return nil
 }
 
+// getString returns a string value, expanding ${NAME} references against the
+// environment so a secret never has to be written into the YAML file (or the
+// container image built from it).
 func getString(m map[string]interface{}, k string, def string) string {
 	if v, ok := m[k].(string); ok {
-		return v
+		return expandEnv(v)
 	}
 	return def
+}
+
+// expandEnv replaces every ${NAME} with the value of that environment
+// variable. An unresolvable name is left verbatim so Validate can report it:
+// silently expanding to "" would turn a configured password into no password.
+func expandEnv(s string) string {
+	i := strings.Index(s, "${")
+	if i < 0 {
+		return s
+	}
+	j := strings.Index(s[i+2:], "}")
+	if j < 0 {
+		return s
+	}
+	name := s[i+2 : i+2+j]
+	end := i + 2 + j + 1
+	if v, ok := os.LookupEnv(name); ok {
+		// The substituted value is appended verbatim: expanding it would let a
+		// value that happens to contain "${X}" pull in another variable.
+		return s[:i] + v + expandEnv(s[end:])
+	}
+	return s[:end] + expandEnv(s[end:])
 }
 
 func getInt(m map[string]interface{}, k string, def int) int {
@@ -254,6 +280,7 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 		cfg.Network.ReadBufferBytes = getInt(n, "read_buffer_bytes", cfg.Network.ReadBufferBytes)
 		cfg.Network.WriteBufferBytes = getInt(n, "write_buffer_bytes", cfg.Network.WriteBufferBytes)
 		cfg.Network.MaxRequestSizeBytes = getInt64(n, "max_request_size_bytes", cfg.Network.MaxRequestSizeBytes)
+		cfg.Network.PreAuthMaxRequestBytes = getInt64(n, "pre_auth_max_request_bytes", cfg.Network.PreAuthMaxRequestBytes)
 		cfg.Network.ReadTimeoutMs = getInt(n, "read_timeout_ms", cfg.Network.ReadTimeoutMs)
 		cfg.Network.WriteTimeoutMs = getInt(n, "write_timeout_ms", cfg.Network.WriteTimeoutMs)
 		cfg.Network.IdleTimeoutMs = getInt(n, "idle_timeout_ms", cfg.Network.IdleTimeoutMs)
@@ -269,6 +296,15 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 		cfg.Web.AuthSecret = getString(w, "auth_secret", cfg.Web.AuthSecret)
 		cfg.Web.ClusterToken = getString(w, "cluster_token", cfg.Web.ClusterToken)
 		cfg.Web.SecretsKey = getString(w, "secrets_key", cfg.Web.SecretsKey)
+		cfg.Web.AuditLog = getString(w, "audit_log", cfg.Web.AuditLog)
+		cfg.Web.SessionTTLMinutes = getInt(w, "session_ttl_minutes", cfg.Web.SessionTTLMinutes)
+		cfg.Web.IdleTrimMinutes = getInt(w, "session_idle_minutes", cfg.Web.IdleTrimMinutes)
+		if v := getString(w, "trusted_proxies", ""); v != "" {
+			cfg.Web.TrustedProxies = splitList(v)
+		}
+		if v := getString(w, "allowed_hosts", ""); v != "" {
+			cfg.Web.AllowedHosts = splitList(v)
+		}
 		if list, ok := w["clusters"].([]interface{}); ok {
 			for _, c := range list {
 				if cm, ok := c.(map[string]interface{}); ok {
@@ -291,12 +327,22 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 	}
 	if sec := asMap(m, "security"); sec != nil {
 		cfg.Security.Enabled = getBool(sec, "enabled", cfg.Security.Enabled)
+		cfg.Security.AllowInsecurePublic = getBool(sec, "allow_insecure_public", cfg.Security.AllowInsecurePublic)
+		cfg.Security.RequireTLSForPlain = getBool(sec, "require_tls_for_plain", cfg.Security.RequireTLSForPlain)
+		cfg.Security.SCRAMIterations = getInt(sec, "scram_iterations", cfg.Security.SCRAMIterations)
+		cfg.Security.AllowWildcardAdmin = getBool(sec, "allow_wildcard_admin", cfg.Security.AllowWildcardAdmin)
+		if v := getString(sec, "super_users", ""); v != "" {
+			cfg.Security.SuperUsers = splitList(v)
+		}
 		if users, ok := sec["users"].([]interface{}); ok {
 			for _, u := range users {
 				if um, ok := u.(map[string]interface{}); ok {
 					cfg.Security.Users = append(cfg.Security.Users, SecurityUser{
-						Username: getString(um, "username", ""),
-						Password: getString(um, "password", ""),
+						Username:      getString(um, "username", ""),
+						Password:      getString(um, "password", ""),
+						PasswordFile:  getString(um, "password_file", ""),
+						PasswordHash:  getString(um, "password_hash", ""),
+						SCRAMVerifier: getString(um, "scram_verifier", ""),
 					})
 				}
 			}
@@ -306,6 +352,10 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 			cfg.Security.TLS.Listen = getString(t, "listen", cfg.Security.TLS.Listen)
 			cfg.Security.TLS.CertFile = getString(t, "cert_file", cfg.Security.TLS.CertFile)
 			cfg.Security.TLS.KeyFile = getString(t, "key_file", cfg.Security.TLS.KeyFile)
+			cfg.Security.TLS.ClientCAFile = getString(t, "client_ca_file", cfg.Security.TLS.ClientCAFile)
+			cfg.Security.TLS.MinVersion = getString(t, "min_version", cfg.Security.TLS.MinVersion)
+			cfg.Security.TLS.HTTP = getBool(t, "http", cfg.Security.TLS.HTTP)
+			cfg.Security.TLS.MQTT = getBool(t, "mqtt", cfg.Security.TLS.MQTT)
 		}
 	}
 }

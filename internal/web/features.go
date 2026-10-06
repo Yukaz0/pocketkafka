@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/authz"
 	"github.com/Yukaz0/pocketkafka/internal/gateway"
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
@@ -153,6 +154,7 @@ func (s *Server) handleImportJSONL(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	s.auditRequest(r, "topic.import", topic, fmt.Sprintf("imported=%d records", count))
 	writeJSON(w, 200, map[string]any{"topic": topic, "imported": count})
 }
 
@@ -173,11 +175,21 @@ func (s *Server) handleExportGroupOffsets(w http.ResponseWriter, r *http.Request
 		writeErr(w, 404, "unknown group")
 		return
 	}
+	principal := s.requestPrincipal(r)
 	offs := s.gm.GroupOffsetsSnapshot(group)
+	// A snapshot names every topic the group has committed offsets for; topics
+	// this principal may not describe are dropped here so the export cannot be
+	// used to enumerate them. The wire format is unchanged.
+	visible := make(map[string]map[int32]int64, len(offs))
+	for topic, parts := range offs {
+		if s.can(principal, authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: topic}) {
+			visible[topic] = parts
+		}
+	}
 	writeJSON(w, 200, map[string]any{
 		"group":    group,
 		"exported": time.Now().UTC().Format(time.RFC3339),
-		"offsets":  offs,
+		"offsets":  visible,
 	})
 }
 
@@ -194,6 +206,19 @@ func (s *Server) handleImportGroupOffsets(w http.ResponseWriter, r *http.Request
 	if len(req.Offsets) == 0 {
 		writeErr(w, 400, "offsets array required")
 		return
+	}
+	principal := s.requestPrincipal(r)
+	// Validate every row before applying any: the snapshot is applied as one
+	// request, so a row naming an invisible topic must leave the group's offsets
+	// untouched rather than half-applied.
+	for _, row := range req.Offsets {
+		if row.Topic == "" {
+			continue
+		}
+		if !s.can(principal, authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: row.Topic}) {
+			writeErr(w, http.StatusForbidden, "forbidden: may not set offsets for topic "+row.Topic)
+			return
+		}
 	}
 	applied := 0
 	for _, row := range req.Offsets {

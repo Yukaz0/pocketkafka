@@ -15,7 +15,7 @@ import (
 // is removed if any step fails.
 func Write(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("atomicfile: mkdir %s: %w", dir, err)
 	}
 

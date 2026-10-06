@@ -1,17 +1,27 @@
 # pocketkafka broker configuration.
+#
+# Secrets may be written as ${ENV_VAR} anywhere in this file; an unset variable
+# is a startup error rather than an empty secret, so a password never has to be
+# committed to the file (or baked into an image).
 
 broker:
   id: 0
   cluster_id: "pocketkafka-local"
   rack: ""
 
+# Listeners bind loopback by default: an unconfigured broker is not reachable
+# from the network. Set 0.0.0.0 (or a specific interface) to expose it, and see
+# security.allow_insecure_public for what that implies while security is off.
 listeners:
-  plain: "0.0.0.0:9092"
-  internal: "0.0.0.0:29092"
+  plain: "127.0.0.1:9092"
+  internal: "127.0.0.1:29092"
 
 advertised_listeners:
   plain: "localhost:9092"
   internal: "local-kafka:29092"
+  # Advertised address of the TLS (SSL) listener. Leave unset to reuse the
+  # primary host with the TLS port; set it when the certificate's name differs.
+  # ssl: "kafka.example.internal:9093"
 
 storage:
   data_dir: "./data"
@@ -31,10 +41,12 @@ storage:
     retention_bytes: -1        # -1 = unlimited
   tiered:
     enabled: false             # S3/MinIO cold offload (set true to enable)
-    endpoint: "http://localhost:9000"
+    # http:// is accepted only for a loopback endpoint; anything remote must be
+    # https, because the objects and the access key travel in the request.
+    endpoint: "https://localhost:9000"
     bucket: "pocketkafka"
-    access_key: "minioadmin"
-    secret_key: "minioadmin"
+    access_key: "minioadmin"   # replace before enabling tiering
+    secret_key: "minioadmin"   # replace before enabling tiering
     region: "us-east-1"
     prefix: "segments"
     offload_after_hours: 24
@@ -57,6 +69,10 @@ network:
   read_buffer_bytes: 65536      # socket SO_RCVBUF
   write_buffer_bytes: 65536     # socket SO_SNDBUF
   max_request_size_bytes: 104857600 # 100MB; also caps HTTP request bodies
+  # A frame accepted BEFORE the connection has authenticated. SASL exchanges are
+  # a few hundred bytes, so this bound keeps an anonymous client from forcing a
+  # 100 MB allocation per connection.
+  pre_auth_max_request_bytes: 65536
   read_timeout_ms: 30000        # bound for reading a frame once it has started
   write_timeout_ms: 30000
   idle_timeout_ms: 120000       # bound for waiting for the next frame
@@ -66,17 +82,37 @@ logging:
   format: "json"
 
 web:
-  listen: "0.0.0.0:8080"  # Embedded dashboard (REST + WebSocket live tail)
-  enabled: true           # enabled: false starts no dashboard at all
+  listen: "127.0.0.1:8080" # Embedded dashboard (REST + WebSocket live tail)
+  enabled: true           # enabled: false starts no dashboard at all (env: KAFKA_ENABLE_WEB_UI)
   auth: false             # Require login even with security disabled (uses security.users)
   # Signing key for the login cookie. MUST be changed: startup fails if it is
   # empty or still a placeholder while web.auth or security.enabled is true.
-  auth_secret: "change-me-in-production"
+  auth_secret: "${KAFKA_WEB_AUTH_SECRET}"
+  # Absolute and idle lifetime of a dashboard session. Logout revokes the
+  # session server-side; the cookie alone is never sufficient.
+  # A session is bound to the scheme that issued it: a cookie issued over HTTPS
+  # is not accepted over plain HTTP (and the reverse), so the two are separate
+  # logins.
+  session_ttl_minutes: 1440   # 24h
+  session_idle_minutes: 120
+  # Proxy addresses whose X-Forwarded-Proto header is trusted, so the session
+  # cookie can be marked Secure behind a TLS-terminating reverse proxy.
+  # Accepts plain addresses and CIDR blocks. Leave empty when nothing terminates
+  # TLS in front of the dashboard: then the plain (non-__Host-, non-Secure)
+  # cookie class is used, and an HTTPS-only session is never assumed.
+  trusted_proxies: ""      # e.g. "10.0.0.9, 172.16.0.0/12"
+  # Extra Host header values the WebSocket live tail accepts. By default only
+  # IP literals and "localhost" are accepted, which is what blocks DNS
+  # rebinding; a dashboard reached as http://kafka.lan:8080 needs that name
+  # here.
+  allowed_hosts: ""        # e.g. "kafka.lan, dashboard.internal"
+  # Durable audit trail. Empty emits the trail to the process log only; a path
+  # appends JSON lines (0600, rotated at 8 MiB).
+  audit_log: ""            # e.g. "./data/audit.log"
   # Multi-cluster monitoring. This dashboard can report the health of other
   # brokers: entries here SEED the list, the UI can edit it afterwards, and the
   # result persists in <data_dir>/__clusters.json (same pattern as the ACLs).
-  # Only URLs listed here or added through the UI are ever fetched, so the
-  # fan-out can never be turned into a request against an arbitrary address.
+  # Only URLs listed here or added through the UI are ever fetched.
   # Per-cluster bearer tokens are entered in the UI and stored write-only in
   # <data_dir>/__cluster_tokens.json (0600); they never appear in any response.
   # clusters:
@@ -84,8 +120,8 @@ web:
   #     url: "http://192.168.212.26:8080"
   # Bearer token THIS broker accepts from another broker's dashboard that
   # aggregates its health report. Empty disables this health-only credential.
-  # Must be at least 16 characters. It grants reads only: mutations still
-  # require an ACL grant.
+  # Must be at least 16 characters. It grants reads of the health report only:
+  # every other route refuses it, and mutations always require an ACL grant.
   # cluster_token: ""
   # Separately, security-enabled cluster Admins can issue principal-bound dashboard
   # bearer tokens with POST /api/v1/auth/delegated-tokens. The raw value is returned
@@ -94,28 +130,76 @@ web:
   # Key that seals stored credentials (the per-cluster tokens above) at rest.
   # Empty uses KAFKA_SECRETS_KEY, and failing that a key file is generated once
   # inside the data dir with mode 0600: back that file up, because without it
-  # the stored tokens cannot be read. Set it to at least 16 characters.
+  # the stored tokens cannot be read. Set it to at least 16 characters. Prefer
+  # the environment variable: a key file inside the volume it protects does not
+  # survive the volume being copied.
   # secrets_key: ""
   #
-  # NOTE: every state-changing /api request must now carry the header
+  # NOTE: every state-changing /api request must carry the header
   # "X-PocketKafka-Request: 1" (the dashboard sends it automatically). A script
   # or curl call that POSTs, PUTs or DELETEs, including /api/v1/auth/login,
   # needs it too, otherwise the request is refused with 403.
 
 schema_registry:
-  listen: "0.0.0.0:8081"  # Confluent-compatible Schema Registry
+  listen: "127.0.0.1:8081"  # Confluent-compatible Schema Registry
 
 gateway:
-  listen: "0.0.0.0:8082"  # HTTP REST Proxy
+  listen: "127.0.0.1:8082"  # HTTP REST Proxy
 
 mqtt:
-  listen: "0.0.0.0:1883"  # MQTT Bridge (IoT)
+  listen: "127.0.0.1:1883"  # MQTT Bridge (IoT)
 
 security:
+  # ACL shape (rules live in <data_dir>/__acls.json, editable from the
+  # dashboard's ACL page):
+  #   Read/Write/Admin/Describe apply to one resource; Read/Write/Admin imply
+  #   Describe. A cluster-scoped Describe (or any cluster Read/Write/Admin)
+  #   additionally counts as Describe for every topic and group, so a cluster
+  #   admin can see the cluster's shape without gaining payload access: reading
+  #   message contents or mutating a topic/group still needs a grant on that
+  #   resource. Use resourceType "*" for a rule that covers every resource.
   # disabled -> allow-all (historical behaviour). enabled -> default-deny:
   # Kafka, REST proxy, MQTT and the web dashboard all require identity and are
   # checked against the ACLs under <data_dir>/__acls.json.
   enabled: false
+  # A non-loopback listener while security is disabled is refused at startup
+  # unless this is explicitly set: an open broker on a routable address can be
+  # truncated and reconfigured by anyone who can reach it.
+  allow_insecure_public: false
+  # Refuse SASL/PLAIN (and HTTP Basic, and MQTT credentials) on a connection
+  # that is not encrypted. SCRAM is unaffected, so a SCRAM-only cluster may stay
+  # on plaintext. Set false only when a trusted hop terminates TLS for you.
+  require_tls_for_plain: true
+  # Principals that bypass every ACL check. Without one, a deployment that turns
+  # security on has nobody who can administer the ACL file.
+  super_users: ""   # e.g. "admin"
+  # An ACL rule that grants Admin to the wildcard principal hands every
+  # authenticated identity cluster-wide administration; such a rule is refused
+  # unless this is set.
+  allow_wildcard_admin: false
+  # PBKDF2 iteration count used when the broker derives a SCRAM credential from
+  # a plaintext password. 0 uses the default (15000).
+  scram_iterations: 0
+  # Each user needs exactly one credential source:
+  #   password        plaintext (also what SCRAM derives from)
+  #   password_file   a file holding the plaintext secret
+  #   password_hash   a PBKDF2 verifier for PLAIN/Basic: generate with
+  #                   `pocketkafka hash-password`
+  #   scram_verifier  a stored SCRAM verifier: generate with
+  #                   `pocketkafka scram-verifier` (never holds the password)
   users:
     - username: "app"
-      password: "changeme"
+      password: "${KAFKA_APP_PASSWORD}"
+
+  # Transport encryption. One certificate serves every surface marked below.
+  tls:
+    enabled: false            # Kafka SSL:// listener on `listen`
+    listen: "127.0.0.1:9093"
+    cert_file: ""
+    key_file: ""
+    # When set, clients must present a certificate signed by this CA and its
+    # subject becomes the connection's principal (mTLS instead of SASL).
+    client_ca_file: ""
+    min_version: "1.2"        # "1.2" (AEAD-only cipher allow-list) or "1.3"
+    http: false               # dashboard + schema registry + REST proxy
+    mqtt: false               # MQTT bridge

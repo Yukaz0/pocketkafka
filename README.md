@@ -299,12 +299,115 @@ file, not this README, as the source of truth.
 
 Behaviour that matters when you point real workloads at the broker:
 
+### Exposure
+
+- **Everything binds loopback by default.** `listeners.*`, `web.listen`,
+  `schema_registry.listen`, `gateway.listen` and `mqtt.listen` default to
+  `127.0.0.1`. A non-loopback bind while `security.enabled=false` is *refused at
+  startup*; the message names the field, and `security.allow_insecure_public=true`
+  is the explicit acknowledgement for a deliberately open development broker
+  (that is what the shipped compose files set).
+- **`security.enabled=true` means default-deny** on every ingress: Kafka, REST
+  proxy, Schema Registry, MQTT and the dashboard. `security.super_users` names
+  the principals that bypass the ACLs, so a fresh install has somebody who can
+  administer them. With no super user and an empty ACL file, everyone is denied
+  (by design).
+- **Dashboard routes are authorized one by one.** Each route names the operation
+  and resource it needs (`GET /topics/{t}/messages` → `Read topic:{t}`,
+  `truncate` → `Admin topic:{t}`, `/acls`, `/audit`, `/logs`, `/config` →
+  `Admin cluster`). A route with no rule is denied, and every handler that
+  returns a collection filters it: `/topics`, `/groups`, the group detail rows
+  and the group offset snapshot (including its `lag`/offset entries) omit
+  resources the caller may not `Describe`. `Describe` is implied by
+  `Read`/`Write`/`Admin`, so ACLs written before it existed keep working.
+- **A cluster grant is visibility, not payload access.** A `Describe cluster`
+  grant (implied by any cluster-level `Read`/`Write`/`Admin`) satisfies
+  `Describe` on every resource, so an operator who administers the broker sees
+  the topics and groups it holds — their partitions, log-end offsets and lag.
+  It does *not* grant `Read` on a topic (message contents) or on a group
+  (membership/offsets), and it does not grant `Write`/`Admin` on a topic or
+  group: those stay strictly resource-scoped, so a cluster admin still needs an
+  explicit group grant to export or reset that group's offsets.
+  A group grant is likewise never a topic grant: group endpoints show only the
+  topics that principal may describe, and resetting/importing offsets for an
+  invisible topic is refused (with the same answer as an unknown topic, so the
+  endpoint cannot be used to probe for existence).
+- **The cluster health token is read-only in practice**: it reaches
+  `/api/v1/health/overview` and nothing else. It carries no principal, and an
+  empty principal is never authorized. A wildcard `Admin` ACL rule now requires
+  `security.allow_wildcard_admin=true`.
+- **pprof is opt-in and loopback-only.** Set `KAFKA_PPROF_LISTEN` to enable it;
+  a non-loopback address additionally needs `KAFKA_PPROF_ALLOW_PUBLIC=true`, and
+  the handlers are served from a dedicated mux instead of `DefaultServeMux`.
+
+### Authentication
+
+- **Sessions expire and can be revoked.** A session has an absolute
+  (`web.session_ttl_minutes`) and an idle (`web.session_idle_minutes`) lifetime,
+  logout deletes the server-side record, and a user removed from the config can
+  no longer use an old cookie. The cookie is `HttpOnly`, `SameSite=Strict`, and
+  `Secure` + `__Host-` prefixed when the browser's connection is HTTPS
+  (behind a TLS-terminating proxy, list the proxy in `web.trusted_proxies`).
+- **Credential guessing is delayed.** Login, HTTP Basic, SASL and MQTT CONNECT
+  share an exponential backoff keyed on the source *address* (not address:port,
+  so reconnecting does not reset it), plus a per-account counter for the login
+  form; a Kafka connection is refused at the door while its source is in
+  backoff, and one that fails three SASL attempts is closed. Everything is
+  audit-logged, and `pocketkafka_auth_failures_total` /
+  `pocketkafka_authz_denials_total` expose the counts on `/metrics`. Note the
+  consequence of a per-source rule: clients sharing one NAT address (or one mTLS
+  identity's address) wait out the same backoff, which is bounded at 30s
+  (login: 5 attempts, 2s doubling to 5min).
+- **Sessions are scoped to the connection scheme.** A session issued over HTTPS
+  (cookie `__Host-`, `Secure`) is not honoured over plain HTTP and vice versa, so
+  a login is only valid on the scheme that issued it. Behind a TLS-terminating
+  proxy, list the proxy in `web.trusted_proxies` or the dashboard stays on the
+  plain cookie class.
+- **Passwords need not be in the file.** `security.users[]` accepts `password`,
+  `password_file`, `password_hash` (PBKDF2, `pocketkafka hash-password`) or
+  `scram_verifier` (SCRAM, `pocketkafka scram-verifier`). Every comparison is
+  constant-time. `${ENV_VAR}` is expanded anywhere in the YAML, and an unset
+  variable is a startup error rather than an empty secret. A default or
+  too-short password stops startup once security is on.
+- **PLAIN needs TLS.** `security.require_tls_for_plain` (default true) keeps
+  SASL/PLAIN, HTTP Basic and MQTT credentials off unencrypted connections; PLAIN
+  is not even offered on a plaintext connection, so a client is steered to
+  SCRAM. SCRAM-SHA-256/512 use a per-user salt derived from the server secret
+  (stable across restarts) and answer uniformly, so the mechanism cannot be used
+  to enumerate users.
+- **Stored cluster credentials are sealed with AES-256-GCM** under a PBKDF2
+  derived key (`web.secrets_key`/`KAFKA_SECRETS_KEY`, or a generated 0600 key
+  file next to the data). The test endpoint only reuses a stored token or SASL
+  password for the exact target it was stored for.
+
+### Transport, traffic and trail
+
+- **TLS covers every surface** from one certificate:
+  `security.tls.{enabled,listen}` for the Kafka `SSL://` listener,
+  `security.tls.http` for the dashboard/Schema Registry/REST proxy,
+  `security.tls.mqtt` for the MQTT bridge. `min_version` selects TLS 1.2
+  (AEAD-only cipher allow-list) or 1.3, and `client_ca_file` turns on mTLS, where
+  the verified certificate subject *is* the connection principal. A client that
+  arrives over TLS is never advertised a plaintext listener.
+- **Frames are bounded before authentication.** `network.pre_auth_max_request_bytes`
+  (64 KiB) applies until SASL succeeds, so an anonymous client cannot make the
+  broker allocate the 100 MB it accepts from a producer.
+- **WebSockets check Origin and Host.** The handshake requires `Origin` to match
+  `Host` and the host to be an IP literal, `localhost`, or a name listed in
+  `web.allowed_hosts` (which is what stops DNS rebinding). Client frames must be
+  masked, control frames stay within 125 bytes, data frames within 64 KiB.
+- **Outbound monitoring fetches are guarded.** Peer requests never follow
+  redirects, every dial refuses link-local/metadata addresses after resolution
+  (DNS rebinding included), and errors are uniform.
+- **The audit trail is durable.** Every security-relevant event (login
+  success/failure, logout, denials, topic create/delete/truncate/compact,
+  offset reset, import, ACL and cluster edits, token issue/revoke) is written as
+  a structured log line and, with `web.audit_log`, appended to a rotated 0600
+  JSON-lines file. The dashboard's in-memory view is only a view.
 - **Configuration is validated before any listener opens.** `config.Load`
   normalizes and validates ports, buffer/timeout limits, storage backend, flush
-  policy, and security settings; a bad value stops startup with the field name.
-- **The dashboard is never an auth bypass.** Enabling `security` also requires a
-  web login, and state-changing web API calls need an `Admin` ACL. The same ACL
-  store backs the REST proxy and the MQTT bridge.
+  policy, TLS material, credential strength, tiered-storage endpoint scheme and
+  security settings; a bad value stops startup naming the field.
 - **Durability is explicit.** `storage.flush_policy` selects `none` (OS decides),
   `interval` (periodic fsync, default), or `request` (fsync before the produce
   ack). Independent of that, `acks=-1` syncs when
@@ -318,6 +421,10 @@ Behaviour that matters when you point real workloads at the broker:
   restarts and `AVRO`/`JSON` payloads are syntax-checked, but full
   backward/forward compatibility checking is not implemented; `PROTOBUF` is
   rejected until a validator exists.
+
+Authorization has a table-driven test in the local (unpublished) suite: it walks
+every dashboard route with a scoped reader, a topic admin, a cluster admin and the
+cluster token, so a route that loses its rule fails that run.
 
 ---
 

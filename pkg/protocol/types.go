@@ -73,6 +73,7 @@ const (
 	ErrInvalidCommitOffsetSize            int16 = 28
 	ErrTopicAuthorizationFailed           int16 = 29
 	ErrGroupAuthorizationFailed           int16 = 30
+	ErrClusterAuthorizationFailed         int16 = 31
 	ErrIllegalSaslState                   int16 = 34
 	ErrUnsupportedVersion                 int16 = 35
 	ErrTopicAlreadyExists                 int16 = 36
