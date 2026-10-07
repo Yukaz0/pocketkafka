@@ -194,6 +194,26 @@
   .cbtn:hover{border-color:var(--primary);color:var(--primary-text)}
   .cbtn.ok{border-color:var(--live);color:var(--success)}
   /* topology svg */
+  .topoWrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .topoCardView{display:none}
+  .topoCardGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;position:relative}
+  .topoCol{display:flex;flex-direction:column;gap:8px;padding:12px 10px}
+  .topoColHead{font-size:9px;text-transform:uppercase;letter-spacing:.16em;color:var(--muted);font-family:var(--font-mono);margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+  .topoColDiv{border-right:1px solid var(--border)}
+  .topoNode{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;cursor:pointer;transition:border-color .12s}
+  .topoNode:hover{border-color:var(--primary)}
+  .topoNode.broker{border-color:var(--primary-strong)}
+  .topoNode b{display:block;font-size:12px;font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topoNode small{display:block;font-size:10px;color:var(--muted);font-family:var(--font-mono);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topoNode .chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px}
+  .topoNode .chips span{font-size:9px;padding:1px 5px;background:var(--primary-soft);color:var(--primary-text);border-radius:2px;font-family:var(--font-mono);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .topoNodeErr .topoNode{border-color:var(--danger-line)}
+  @media(max-width:760px){
+    .topoSvgWrap{display:none}
+    .topoCardView{display:block}
+    .topoCardGrid{grid-template-columns:1fr}
+    .topoColDiv{border-right:none;border-bottom:1px solid var(--border)}
+  }
   .topoSvg{width:100%;display:block}
   .topoSvg text{font-family:var(--font-mono);fill:var(--text);font-size:12px}
   .topoSvg text.sub{fill:var(--muted);font-size:9.5px}
@@ -229,6 +249,7 @@
   .topbar .sp{flex:1}
   #topActions{display:flex;align-items:center;gap:8px;flex-shrink:0;white-space:nowrap}
   .btn{background:var(--primary);color:var(--on-primary);border:1px solid var(--primary);padding:7px 14px;border-radius:4px;font-weight:500;cursor:pointer;font-size:13px;font-family:var(--font-ui);transition:background .12s,border-color .12s}
+  .toolbar .btn{height:var(--tb-h);padding:0 14px;font-size:var(--tb-fs);box-sizing:border-box;display:inline-flex;align-items:center;gap:4px}
   .btn:hover{background:var(--primary-strong);border-color:var(--primary-strong)}
   .btn:active{transform:translateY(1px)}
   .btn:focus-visible{outline:2px solid var(--primary);outline-offset:2px;box-shadow:none}
@@ -256,19 +277,31 @@
   .conn .k{color:var(--muted)}
   .conn .actions{display:flex;gap:8px;margin-top:16px}
 
-  /* toolbar */
-  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
-  .toolbar .group{display:flex;gap:2px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px}
-  .toolbar .pill{background:transparent;border:none;color:var(--muted);padding:6px 11px;border-radius:3px;cursor:pointer;font-size:12px;transition:background .12s,color .12s}
+  /* toolbar – all interactive elements share --tb-h for consistent height */
+  :root{--tb-h:30px;--tb-fs:12px}
+  .toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:14px}
+  /* consecutive toolbars (filter row under the main controls) get extra breathing room */
+  .toolbar+.toolbar{margin-top:10px}
+  /* grouped pills (partition buttons, nav pills) */
+  .toolbar .group{display:flex;gap:2px;align-items:stretch;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px;height:var(--tb-h);box-sizing:border-box}
+  .toolbar .pill{display:inline-flex;align-items:center;gap:4px;background:transparent;border:none;color:var(--muted);padding:0 10px;border-radius:3px;cursor:pointer;font-size:var(--tb-fs);transition:background .12s,color .12s;white-space:nowrap;height:100%}
   .toolbar .pill:hover{background:var(--surface2);color:var(--text)}
   .toolbar .pill.active{background:var(--primary-soft);color:var(--primary-text)}
-  .pill.part{background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:4px 10px;cursor:pointer;font-size:11px;color:var(--muted);transition:all .12s;font-family:var(--font-mono)}
+  /* standalone partition pills */
+  .pill.part{display:inline-flex;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:0 10px;height:100%;box-sizing:border-box;cursor:pointer;font-size:11px;color:var(--muted);transition:all .12s;font-family:var(--font-mono)}
   .pill.part:hover{color:var(--text)}
   .pill.part.active{background:var(--primary-soft);color:var(--primary-text);border-color:var(--primary)}
-  select,input{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:7px 11px;font-size:12px;transition:border-color .12s,box-shadow .12s;font-family:var(--font-ui)}
+  /* part pills inside a group share the group's chrome: drop their own border/
+     background so every pill in the box reads as one consistent control */
+  .toolbar .group .pill.part{background:transparent;border:1px solid transparent;border-radius:3px;font-size:var(--tb-fs)}
+  .toolbar .group .pill.part:hover{background:var(--surface2);color:var(--text)}
+  .toolbar .group .pill.part.active{background:var(--primary-soft);color:var(--primary-text);border-color:transparent}
+  /* inputs & selects */
+  select,input{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:0 10px;height:var(--tb-h);box-sizing:border-box;font-size:var(--tb-fs);transition:border-color .12s,box-shadow .12s;font-family:var(--font-ui)}
   select:focus,input:focus{outline:none;border-color:var(--primary);box-shadow:var(--ring)}
   select option{background:var(--bg-canvas);color:var(--text)}
   input{width:100%}
+  .toolbar .group input{height:100%;border:none;border-radius:2px;box-shadow:none}
 
   /* pulsing live dot */
   .live-dot{position:relative;display:inline-flex;width:9px;height:9px}
@@ -337,6 +370,20 @@
   .pbar>span{display:block;height:100%;background:var(--primary);border-radius:2px}
 
   /* Fitur 3.2: filter builder */
+  /* toolbar action dropdowns */
+  .tbDrop{position:relative;display:inline-flex}
+  .tbDropBtn{display:inline-flex;align-items:center;gap:5px;padding:0 10px;height:var(--tb-h);box-sizing:border-box;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);font-size:var(--tb-fs);cursor:pointer;font-family:var(--font-ui);white-space:nowrap}
+  .tbDropBtn:hover{border-color:var(--primary);color:var(--primary-text)}
+  .tbDropBtn svg{flex-shrink:0;opacity:.75}
+  .tbDropBtn .caret{font-size:9px;opacity:.6;margin-left:2px}
+  .tbDropMenu{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;min-width:180px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:4px}
+  .tbDropMenu.right{left:auto;right:0}
+  .tbDrop:focus-within .tbDropMenu,.tbDropMenu:hover{display:block}
+  .tbDropItem{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:2px;cursor:pointer;font-size:12px;color:var(--text);white-space:nowrap;border:none;background:none;width:100%;text-align:left}
+  .tbDropItem:hover{background:var(--surface2)}
+  .tbDropItem svg{flex-shrink:0;color:var(--muted)}
+  .tbDropItem small{color:var(--muted);font-size:10px;margin-left:auto;padding-left:12px}
+  .tbDropSep{height:1px;background:var(--border);margin:4px 0}
   .filterPanel{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:14px;margin-bottom:16px}
   .filterRow{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
   .filterRow select,.filterRow input{width:auto;flex:0 1 auto}
@@ -396,6 +443,7 @@
   .codeOut{background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;font-family:var(--font-mono);font-size:11px;overflow:auto;max-height:320px}
   .alarmBanner{position:fixed;top:0;left:0;right:0;z-index:80;padding:10px 18px;font-size:13px;display:flex;gap:10px;align-items:center;justify-content:center;background:var(--danger-soft);border-bottom:1px solid var(--danger-line);color:var(--danger-text)}
   .updatedAgo{color:var(--muted);font-size:11px;font-family:var(--font-mono);white-space:nowrap}
+  .toolbar .updatedAgo{margin-left:4px}
 
   /* hierarki visual (anti-monoton, tetap flat) */
   .kicker{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-family:var(--font-mono);margin-bottom:4px}
@@ -881,22 +929,77 @@ window.topoPickGroup=function(name){
 function topoLayer(label,nodesHtml){ return `<div class="topoLayer"><div class="topoLabel">${label}</div><div class="topoNodes">${nodesHtml}</div></div>`; }
 function viewTopology(){
   const tops=state.topics||[]; const grps=state.groups||[];
+  /* Build subscription map: topic -> [group,...] */
+  const topicSubs={};
+  tops.forEach(t=>{topicSubs[t.name]=[];});
+  grps.forEach(g=>{
+    const subs=[...new Set(Object.keys(g.lag||{}).map(k=>k.split('-').slice(0,-1).join('-')))];
+    subs.forEach(s=>{if(topicSubs[s])topicSubs[s].push(g.name);});
+  });
+  /* Card view for mobile */
+  const brokerCard=`<div class="topoNode broker">
+    <b>broker-${esc(String(state.cluster?.brokerId??'-'))}</b>
+    <small>${esc(state.cluster?.security||'PLAINTEXT')} &middot; ${esc(state.cluster?.version||'-')}</small>
+    <small>${fmtBytes(state.cluster?.totalBytes||0)} on disk</small>
+  </div>`;
+  const topicCards=tops.length?tops.map(t=>{
+    const subs=topicSubs[t.name]||[];
+    const ps=t.partitions||[];
+    const bytes=fmtBytes(t.totalBytes||0);
+    return `<div class="topoNode" onclick="topoPickTopic('${esc(t.name)}')">
+      <b>${esc(t.name)}</b>
+      <small>${ps.length||t.partitionCount||'-'} parts &middot; ${bytes}</small>
+      ${subs.length?`<div class="chips">${subs.map(g=>`<span title="${esc(g)}">${esc(g)}</span>`).join('')}</div>`:''}
+    </div>`;
+  }).join(''):'<div class="muted" style="font-size:11px;padding:8px 0">No topics.</div>';
+  const groupCards=grps.length?grps.map(g=>{
+    const lagTotal=Object.values(g.lag||{}).reduce((a,b)=>a+b,0);
+    const subs=[...new Set(Object.keys(g.lag||{}).map(k=>k.split('-').slice(0,-1).join('-')))];
+    return `<div class="topoNode ${lagTotal>0?'topoNodeErr':''}" onclick="topoPickGroup('${esc(g.name)}')">
+      <b>${esc(g.name)}</b>
+      <small>lag ${lagTotal.toLocaleString()} &middot; ${esc(g.state||'-')}</small>
+      ${subs.length?`<div class="chips">${subs.map(s=>`<span title="${esc(s)}">${esc(s)}</span>`).join('')}</div>`:''}
+    </div>`;
+  }).join(''):'<div class="muted" style="font-size:11px;padding:8px 0">No consumer groups.</div>';
+  const cardView=`<div class="topoCardGrid">
+    <div class="topoCol topoColDiv">
+      <div class="topoColHead">Cluster</div>
+      ${brokerCard}
+    </div>
+    <div class="topoCol topoColDiv">
+      <div class="topoColHead">Topics (${tops.length})</div>
+      ${topicCards}
+    </div>
+    <div class="topoCol">
+      <div class="topoColHead">Consumer Groups (${grps.length})</div>
+      ${groupCards}
+    </div>
+  </div>`;
   return `<div>${pageHeader('Topology','Map broker topics and consumer group subscriptions.')}<div class="card" style="padding:0">
     <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap">
       <h3>Stream Topology</h3>
-      <span class="muted" style="font-size:11px;font-family:var(--font-mono)">broker &rarr; topics &rarr; groups &middot; klik node untuk detail</span>
+      <span class="muted" style="font-size:11px;font-family:var(--font-mono)">broker &rarr; topics &rarr; groups &middot; click node for detail</span>
       <span style="flex:1"></span>
-      <span class="chip2"><i style="width:14px;height:2px;border-radius:0;background:var(--border);display:inline-block"></i>produce path</span>
-      <span class="chip2"><i style="width:14px;height:2px;border-radius:0;background:var(--primary);display:inline-block"></i>subscription (selected)</span>
+      <span class="chip2" style="display:none" id="svgLegend1"><i style="width:14px;height:2px;border-radius:0;background:var(--border);display:inline-block"></i>produce path</span>
+      <span class="chip2" style="display:none" id="svgLegend2"><i style="width:14px;height:2px;border-radius:0;background:var(--primary);display:inline-block"></i>subscription (selected)</span>
       <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="render()">Refresh</button>
     </div>
-    <div style="padding:8px 10px 10px">
+    <div class="topoWrap topoSvgWrap" style="padding:8px 10px 10px" id="topoSvgSection">
       <svg id="topoSvg" class="topoSvg" viewBox="0 0 1100 300" preserveAspectRatio="xMidYMin meet" style="min-height:${Math.max(240,(tops.length||1)*70+40)}px"></svg>
       ${!tops.length?'<div class="muted" style="padding:14px 8px;font-size:12px">No topics yet. Create a topic or produce a message first.</div>':''}
     </div>
+    <div class="topoCardView" style="padding:0">${cardView}</div>
   </div></div>`;
 }
 window.refreshTopo=function(){renderTopoSvg();render();};
+/* Show SVG legend only when SVG wrap is visible */
+(function(){const obs=typeof ResizeObserver!=='undefined'?new ResizeObserver(()=>{
+  const wrap=document.getElementById('topoSvgSection');
+  const show=wrap&&getComputedStyle(wrap).display!=='none';
+  ['svgLegend1','svgLegend2'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=show?'':'none';});
+}):null;
+if(obs){const t=document.getElementById('topoSvgSection');if(t)obs.observe(t);}
+})();
 
 /* Fitur 13: hash router */
 function currentHash(){
@@ -1132,13 +1235,13 @@ function viewDataBrowser(){
   const readOnly=isKafkaTarget(),readOnlyNote='Kafka targets are read-only; import and replay are disabled.';
   const opts=(state.topics||[]).map(t=>`<option value="${esc(t.name)}" ${state.topic===t.name?'selected':''}>${esc(t.name)}</option>`).join('');
   const parts=state.topic?state.topics.find(t=>t.name===state.topic)?.partitions||[]:[];
-  const act=(on)=>on?'background:var(--primary-soft);color:var(--primary-text);border-color:var(--primary)':'';
+  const act=(on)=>on?'background:var(--primary-soft);color:var(--primary-text)':'';
   const pills='<button class="pill'+(state.partition==='all'?' active':'')+'" onclick="setPart(\'all\')">All</button>'
     +parts.map(p=>`<button class="pill part" style="${act(state.partition===p.partition)}" onclick="setPart('${p.partition}')">P-${p.partition}</button>`).join('');
   return `${pageHeader('Data Browser','Inspect, filter, and tail topic messages.')}
     ${readOnly?`<p class="muted" style="font-size:11px;margin:0 0 8px">${readOnlyNote}</p>`:''}
     <div class="toolbar">
-      <select id="topicSel" onchange="state.topic=this.value;state.partition='all';state.filters=[];loadMsgs()" style="width:180px"><option value="" ${state.topic?'':'selected'}>Select topic</option>${opts}</select>
+      <select id="topicSel" onchange="state.filters=[];pickTopicNav(this.value)" style="width:180px"><option value="" ${state.topic?'':'selected'}>Select topic</option>${opts}</select>
       <div class="group">${pills}</div>
       <select id="decoder" onchange="state.decoder=this.value;renderMsgRows()" style="width:140px">
         <option value="auto" ${state.decoder==='auto'?'selected':''}>Auto-Detect</option>
@@ -1148,20 +1251,76 @@ function viewDataBrowser(){
       </select>
       <span style="flex:1"></span>
       <div class="group"><button class="pill ${state.tail?'active':''}" id="liveBtn" onclick="toggleTail()">${state.tail?'<span class="live-dot"></span> Pause':'Live Tail'}</button></div>
-      <div class="group"><button class="pill" onclick="seek('begin')">Beginning</button><button class="pill" onclick="seek('latest')">Latest</button><input id="offInput" class="mono" placeholder="offset" style="width:80px;padding:4px 8px" onkeydown="if(event.key==='Enter')seekOffsetGo()"><button class="pill" onclick="seekOffsetGo()">Go</button></div>
+      <div class="group"><button class="pill" onclick="seek('begin')">Beginning</button><button class="pill" onclick="seek('latest')">Latest</button><input id="offInput" class="mono" placeholder="offset" style="width:76px" onkeydown="if(event.key==='Enter')seekOffsetGo()"><button class="pill" onclick="seekOffsetGo()">Go</button></div>
       <span class="updatedAgo" id="posInfo"></span>
     </div>
-    <div class="toolbar">
-      <input id="searchBox" placeholder="Search key/value..." value="${esc(state.search)}" style="max-width:160px" oninput="state.search=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
-      <input id="fromTs" placeholder="From (ms)" value="${esc(state.fromTs)}" style="max-width:100px" oninput="state.fromTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
-      <input id="toTs" placeholder="To (ms)" value="${esc(state.toTs)}" style="max-width:100px" oninput="state.toTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
-      <button class="btn" style="padding:5px 14px;font-size:12px" onclick="loadMsgs()">Apply</button>
-      <div class="group"><button class="pill ${state.filterPanel?'active':''}" onclick="toggleFilterPanel()">Filter${state.filters.length?' ('+state.filters.length+')':''}</button><button class="pill ${state.projCols.length?'active':''}" onclick="openProj()">Columns${state.projCols.length?' ('+state.projCols.length+')':''}</button></div>
-      <div class="group"><button class="pill" title="Export JSON Lines" onclick="exportMsgs('jsonl')">.jsonl</button><button class="pill" title="Export CSV" onclick="exportMsgs('csv')">.csv</button></div>
-      <div class="group"><button class="pill ${state.diffSel.length>=2?'active':''}" onclick="runDiff()">Diff</button></div>
-      <div class="group"><button class="pill" onclick="prevPage()">Prev</button><button class="pill" onclick="nextPage()">Next</button><span class="muted" id="pageInfo" style="padding:0 6px;font-size:11px"></span></div>
-      <div class="group"><button class="pill" title="Copy curl command" onclick="copyCurl(state.topic)">curl</button><button class="pill" title="Copy Go consumer snippet" onclick="copyConsumer(state.topic)">consumer.go</button></div>
-      ${readOnly?`<button class="btn ghost" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')" style="font-size:11px">Import</button>`:`<label class="btn ghost" style="padding:5px 11px;font-size:11px" title="Import .jsonl to this topic">Import<input type="file" accept=".jsonl,.ndjson" style="display:none" onchange="doImportFile(this)"></label>`}
+    <div class="toolbar" style="flex-wrap:wrap;gap:6px">
+      <input id="searchBox" placeholder="Search key/value…" value="${esc(state.search)}" style="max-width:160px" oninput="state.search=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
+      <input id="fromTs" placeholder="From (ms)" value="${esc(state.fromTs)}" style="max-width:90px" oninput="state.fromTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
+      <input id="toTs" placeholder="To (ms)" value="${esc(state.toTs)}" style="max-width:90px" oninput="state.toTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
+      <button class="btn" onclick="loadMsgs()">Apply</button>
+      <span style="flex:1;min-width:4px"></span>
+      <div class="group">
+        <button class="pill ${state.filterPanel?'active':''}" onclick="toggleFilterPanel()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M3 6h18M7 12h10M11 18h2"/></svg>
+          Filter${state.filters.length?' ('+state.filters.length+')':''}
+        </button>
+        <button class="pill ${state.projCols.length?'active':''}" onclick="openProj()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M3 6h18M3 12h18M3 18h18"/><rect x="9" y="4" width="6" height="4" rx="1" fill="currentColor" stroke="none" opacity=".3"/></svg>
+          Columns${state.projCols.length?' ('+state.projCols.length+')':''}
+        </button>
+        <button class="pill ${state.diffSel.length>=2?'active':''}" onclick="runDiff()" title="Diff two selected messages">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M5 8h6M5 12h4M5 16h5M13 8l2 2-2 2M17 12l2-2-2-2M13 16l4 0"/></svg>
+          Diff
+        </button>
+      </div>
+      <div class="group"><button class="pill" onclick="prevPage()" title="Previous page">‹ Prev</button><button class="pill" onclick="nextPage()" title="Next page">Next ›</button><span class="muted" id="pageInfo" style="padding:0 6px;font-size:11px"></span></div>
+      <!-- Export dropdown -->
+      <div class="tbDrop">
+        <button class="tbDropBtn" tabindex="0">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13M7 11l5 5 5-5M5 20h14"/></svg>
+          Export <span class="caret">▾</span>
+        </button>
+        <div class="tbDropMenu right">
+          <button class="tbDropItem" onclick="exportMsgs('jsonl')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13M7 11l5 5 5-5M5 20h14"/></svg>
+            Download .jsonl <small>JSON Lines</small>
+          </button>
+          <button class="tbDropItem" onclick="exportMsgs('csv')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13M7 11l5 5 5-5M5 20h14"/></svg>
+            Download .csv <small>Spreadsheet</small>
+          </button>
+          <div class="tbDropSep"></div>
+          ${readOnly
+            ? `<button class="tbDropItem" style="opacity:.45" onclick="toast('${readOnlyNote}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16v-13M7 8l5-5 5 5M5 20h14"/></svg>
+                Import .jsonl <small>Read-only</small>
+              </button>`
+            : `<label class="tbDropItem" title="Import .jsonl messages into this topic">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16v-13M7 8l5-5 5 5M5 20h14"/></svg>
+                Import .jsonl <small>Upload file</small>
+                <input type="file" accept=".jsonl,.ndjson" style="display:none" onchange="doImportFile(this)">
+              </label>`
+          }
+        </div>
+      </div>
+      <!-- Snippets dropdown -->
+      <div class="tbDrop">
+        <button class="tbDropBtn" tabindex="0">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          Snippets <span class="caret">▾</span>
+        </button>
+        <div class="tbDropMenu right">
+          <button class="tbDropItem" onclick="copyCurl(state.topic)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy curl command <small>REST API</small>
+          </button>
+          <button class="tbDropItem" onclick="copyConsumer(state.topic)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy consumer.go <small>Go snippet</small>
+          </button>
+        </div>
+      </div>
     </div>
     <div id="tailBar"></div>
     ${state.filterPanel?filterPanelHtml():''}
@@ -1378,7 +1537,28 @@ function evalFilter(f,v){
 
 /* Fitur 3.3: Column Projection */
 function projBarHtml(){ return `<div class="projBar"><span class="muted" style="font-size:11px">Projected columns:</span>${state.projCols.map(c=>`<span class="projTag">${esc(c)}<button title="remove" onclick="removeProj('${esc(c)}')">&times;</button></span>`).join('')}<button class="btn ghost" style="padding:2px 9px;font-size:11px" onclick="openProj()">+ Add</button></div>`; }
-window.openProj=function(){ const opts=state.fieldHint.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join(''); if(!opts){toast('Load messages first to see available fields');return;} const $sel=document.createElement('div'); $sel.innerHTML=`<div class="overlay"><div class="modal"><h3>Add Column (JSON field)</h3><select id="projPick">${opts}</select><div style="margin-top:14px;display:flex;gap:8px"><button class="btn" onclick="projPickAdd()">Add column</button><button class="btn ghost" onclick="closeOverlay()">Cancel</button></div></div></div>`; document.body.appendChild($sel); refreshFieldHints(); };
+window.openProj=function(){
+  const opts=state.fieldHint.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join('');
+  if(!opts){toast('Load messages first to see available fields');return;}
+  const current=state.projCols.length?`<div style="margin-bottom:12px"><div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em">Current columns</div><div style="display:flex;flex-wrap:wrap;gap:5px">${state.projCols.map(c=>`<span class="projTag">${esc(c)}<button title="remove" onclick="removeProj('${esc(c)}');document.querySelector('.overlay .modal').querySelector('#projPick').dispatchEvent(new Event('change'))">&#215;</button></span>`).join('')}</div></div>`:'';
+  const $sel=document.createElement('div');
+  $sel.innerHTML=`<div class="overlay"><div class="modal" style="min-width:320px;max-width:440px">
+    <h3 style="margin-bottom:4px">Column Projection</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Extract JSON fields as separate table columns for quicker scanning.</p>
+    ${current}
+    <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">Add field</label>
+    <select id="projPick" style="width:100%">${opts}</select>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn ghost" onclick="closeOverlay()">Close</button>
+      <button class="btn" onclick="projPickAdd()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-2px"><path d="M12 5v14M5 12h14"/></svg>
+        Add column
+      </button>
+    </div>
+  </div></div>`;
+  document.body.appendChild($sel);
+  refreshFieldHints();
+};
 window.projPickAdd=function(){ const v=document.getElementById('projPick').value; if(v&&!state.projCols.includes(v)){state.projCols.push(v);localStorage.setItem('pk_proj',JSON.stringify(state.projCols));} closeOverlay(); render(); };
 window.removeProj=function(c){state.projCols=state.projCols.filter(x=>x!==c);localStorage.setItem('pk_proj',JSON.stringify(state.projCols));render();};
 
@@ -2101,6 +2281,8 @@ function patchConnections(){
 
 /* Health view: broker health overview (GET /api/v1/health/overview) */
 let healthTimer=null,healthData=null,healthErr=null,healthWindow=60,healthOpenTopics=new Set();
+let healthTopicSearch='',healthTopicPage=0,healthGroupSearch='',healthGroupPage=0;
+const HEALTH_PAGE_SIZE=10;
 function hStatusBadge(s){return s==='healthy'?'<span class="badge b-green">healthy</span>':s==='degraded'?'<span class="badge b-amber">degraded</span>':s==='critical'?'<span class="badge b-red">critical</span>':s==='idle'?'<span class="badge muted">idle</span>':'<span class="badge muted">'+esc(s||'-')+'</span>';}
 function hTrend(t){return t==='rising'?'^ rising':t==='falling'?'v falling':'- flat';}
 /* aturan kejujuran rate: rateReliable===false -> n/a, bukan 0 */
@@ -2196,20 +2378,35 @@ function viewHealth(){
   const rateSpark=rateVals.length>1?`<div class="spark" title="Messages per second, last ${samp.windowSeconds||healthWindow}s">${rateVals.map(v=>`<span style="height:${Math.max(3,v/rMax*100)}%"></span>`).join('')}</div>`:'<div class="muted" style="font-size:11px">Not enough history yet.</div>';
   const lagSpark=lagVals.length>1?`<div class="spark" title="Total consumer lag, last ${samp.windowSeconds||healthWindow}s">${lagVals.map(v=>`<span style="height:${Math.max(3,v/lMax*100)}%"></span>`).join('')}</div>`:'<div class="muted" style="font-size:11px">Not enough history yet.</div>';
   const attList=attention.length?attention.map(t=>`<div class="row" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="mono">${esc(t.name)}</span>${hStatusBadge(t.status)}<span class="muted" style="font-size:11px">${esc((t.reasons||[]).map(r=>r.message).join('; ')||'no reason given')}</span></div>`).join(''):'<div class="muted" style="padding:6px 0">No topic needs attention: all topics are currently within thresholds. This list refreshes on the next poll.</div>';
-  const topicRows=topics.map(t=>{
+  /* --- Topics with search + pagination --- */
+  const tq=healthTopicSearch.toLowerCase();
+  const filteredTopics=tq?topics.filter(t=>(t.name||'').toLowerCase().includes(tq)):topics;
+  const tTotalPages=Math.max(1,Math.ceil(filteredTopics.length/HEALTH_PAGE_SIZE));
+  const tPage=Math.min(healthTopicPage,tTotalPages-1);
+  const pagedTopics=filteredTopics.slice(tPage*HEALTH_PAGE_SIZE,(tPage+1)*HEALTH_PAGE_SIZE);
+  const topicRows=pagedTopics.map(t=>{
     const open=healthOpenTopics.has(t.name);
     const spk=t.sparkline||[],smax=Math.max(1,...spk);
     const mini=spk.length>1?`<div class="spark" style="height:20px">${spk.map(v=>`<span style="height:${Math.max(3,v/smax*100)}%"></span>`).join('')}</div>`:'<span class="muted">-</span>';
     const row=`<tr class="rowclick" tabindex="0" role="button" aria-expanded="${open}" onclick="toggleHealthTopic('${esc(t.name)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleHealthTopic('${esc(t.name)}')}"><td>${hStatusBadge(t.status)}</td><td class="mono">${esc(t.name)}</td><td>${t.partitions??'-'}</td><td>${hRate(t.rateReliable,t.messagesPerSec)}</td><td>${t.rateReliable===false?'n/a':fmtRateOpt(t.bytesPerSec)}</td><td>${(t.messages||0).toLocaleString()}</td><td>${fmtBytesOpt(t.bytes)}</td><td>${t.lag??0}</td><td>${hRate(t.rateReliable,t.lagPerSec)}</td><td>${hTrend(t.trend)}</td><td>${t.lastAppendAgeMs==null?'-':rel(Date.now()-t.lastAppendAgeMs)}</td><td>${mini}</td></tr>`;
     const detail=open?`<tr><td colspan="12" style="background:var(--bg-canvas)"><div style="padding:10px 4px">
       <div class="muted" style="font-size:11px;margin-bottom:8px">Replication factor ${t.replicationFactor??'-'} &middot; skew ratio ${(t.skewRatio||0).toFixed(2)}</div>
-      ${(t.reasons||[]).length?(t.reasons.map(r=>`<div class="row" style="gap:8px"><span class="chip">${esc(r.code)}</span><span class="muted" style="font-size:11px">${esc(r.severity)}: ${esc(r.message)}</span></div>`).join('')):''}
+      ${(t.reasons||[]).length?(t.reasons.map(r=>`<div class="row" style="gap:8px"><span class="chip">${esc(r.code)}</span><span class="muted" style="font-size:11px">${esc(r.severity)}: ${esc(r.message)}</span></div>`).join('')):''
+      }
       <div class="tableScroll"><table><thead><tr><th>Partition</th><th>Leader</th><th>LEO</th><th>Earliest</th><th>Messages</th><th>Bytes</th><th>Lag</th><th>Msgs/s</th><th>Bytes/s</th><th>Skew</th></tr></thead><tbody>
       ${(t.partitionsDetail||[]).map(p=>`<tr><td>${p.partition}</td><td>${p.leader}</td><td>${p.logEndOffset}</td><td>${p.earliestOffset}</td><td>${p.messages}</td><td>${fmtBytesOpt(p.bytes)}</td><td>${p.lag}</td><td>${(p.messagesPerSec||0).toFixed(1)}</td><td>${fmtRateOpt(p.bytesPerSec)}</td><td>${p.skewRatio??0}</td></tr>`).join('')||'<tr><td colspan="10" class="muted">No partition detail.</td></tr>'}
       </tbody></table></div></div></td></tr>`:'';
     return row+detail;
-  }).join('')||'<tr><td colspan="12" class="muted" style="padding:20px">No topics reported by the broker yet. Create a topic, or wait for the next health poll.</td></tr>';
-  const groupRows=groups.map(g=>`<tr><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span>${g.stalled?' <span class="badge muted">stalled</span>':''}</td><td>${g.members??0}</td><td class="mono">${(g.topics||[]).join(', ')||'-'}</td><td>${g.lag??0}</td><td>${hRate(samp.rateReliable,g.lagPerSec)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted" style="padding:20px">No consumer groups active right now. Consume from a topic to create one.</td></tr>';
+  }).join('')||(tq?`<tr><td colspan="12" class="muted" style="padding:20px">No topics match "${esc(healthTopicSearch)}".</td></tr>`:'<tr><td colspan="12" class="muted" style="padding:20px">No topics reported by the broker yet. Create a topic, or wait for the next health poll.</td></tr>');
+  const tPaginator=tTotalPages>1?`<div class="row" style="justify-content:space-between;margin-top:10px;flex-wrap:wrap;gap:6px"><span class="muted" style="font-size:11px">Showing ${tPage*HEALTH_PAGE_SIZE+1}–${Math.min((tPage+1)*HEALTH_PAGE_SIZE,filteredTopics.length)} of ${filteredTopics.length}</span><div class="row" style="gap:4px"><button class="btn ghost" style="padding:3px 10px;font-size:11px" onclick="hTopicPage(${tPage-1})" ${tPage===0?'disabled':''}>&#8249; Prev</button><button class="btn ghost" style="padding:3px 10px;font-size:11px" onclick="hTopicPage(${tPage+1})" ${tPage>=tTotalPages-1?'disabled':''}>Next &#8250;</button></div></div>`:'';
+  /* --- Consumer Groups with search + pagination --- */
+  const gq=healthGroupSearch.toLowerCase();
+  const filteredGroups=gq?groups.filter(g=>(g.name||'').toLowerCase().includes(gq)):groups;
+  const gTotalPages=Math.max(1,Math.ceil(filteredGroups.length/HEALTH_PAGE_SIZE));
+  const gPage=Math.min(healthGroupPage,gTotalPages-1);
+  const pagedGroups=filteredGroups.slice(gPage*HEALTH_PAGE_SIZE,(gPage+1)*HEALTH_PAGE_SIZE);
+  const groupRows=pagedGroups.map(g=>`<tr><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span>${g.stalled?' <span class="badge muted">stalled</span>':''}</td><td>${g.members??0}</td><td class="mono">${(g.topics||[]).join(', ')||'-'}</td><td>${g.lag??0}</td><td>${hRate(samp.rateReliable,g.lagPerSec)}</td></tr>`).join('')||(gq?`<tr><td colspan="6" class="muted" style="padding:20px">No groups match "${esc(healthGroupSearch)}".</td></tr>`:'<tr><td colspan="6" class="muted" style="padding:20px">No consumer groups active right now. Consume from a topic to create one.</td></tr>');
+  const gPaginator=gTotalPages>1?`<div class="row" style="justify-content:space-between;margin-top:10px;flex-wrap:wrap;gap:6px"><span class="muted" style="font-size:11px">Showing ${gPage*HEALTH_PAGE_SIZE+1}–${Math.min((gPage+1)*HEALTH_PAGE_SIZE,filteredGroups.length)} of ${filteredGroups.length}</span><div class="row" style="gap:4px"><button class="btn ghost" style="padding:3px 10px;font-size:11px" onclick="hGroupPage(${gPage-1})" ${gPage===0?'disabled':''}>&#8249; Prev</button><button class="btn ghost" style="padding:3px 10px;font-size:11px" onclick="hGroupPage(${gPage+1})" ${gPage>=gTotalPages-1?'disabled':''}>Next &#8250;</button></div></div>`:'';
   const warmupNote=samp.warmup?`<div class="muted" style="font-size:11px;margin-top:6px">Warmup: still collecting samples (started ${samp.ageSeconds??0}s ago). Numbers below may still change.</div>`:'';
   const rateNote=!rateOk?`<div class="muted" style="font-size:11px;margin-top:6px">Rate not reliable yet over the ${samp.windowSeconds??healthWindow}s window: the baseline may include traffic from before monitoring started, so n/a is shown instead of 0.</div>`:'';
   const extNote=c.source==='external'?`<div class="muted" style="font-size:11px;margin-top:6px">Read-only client view of an external cluster: on-disk size, byte rates, and the broker's own durability and retention state have no equivalent in the Kafka protocol, so they read n/a. Topic and group figures come from the cluster's own metadata and committed offsets.</div>`:'';
@@ -2233,21 +2430,35 @@ function viewHealth(){
     </div>
   </div>
   <div class="card"><h3 style="margin-bottom:10px">Attention</h3><span id="hAttList">${attList}</span></div>
-  <div class="card"><h3 style="margin-bottom:10px">Topics</h3><div class="tableScroll"><table><thead><tr>
-    <th>Status</th>
-    <th class="sortable" onclick="sortRows('health','name')">Topic<span class="sortInd">${sortInd('health','name')}</span></th>
-    <th class="sortable" onclick="sortRows('health','partitions')">Partitions<span class="sortInd">${sortInd('health','partitions')}</span></th>
-    <th class="sortable" onclick="sortRows('health','msgs')">Msgs/s<span class="sortInd">${sortInd('health','msgs')}</span></th>
-    <th class="sortable" onclick="sortRows('health','bytes')">Bytes/s<span class="sortInd">${sortInd('health','bytes')}</span></th>
-    <th class="sortable" onclick="sortRows('health','messages')">Messages<span class="sortInd">${sortInd('health','messages')}</span></th>
-    <th class="sortable" onclick="sortRows('health','size')">Size<span class="sortInd">${sortInd('health','size')}</span></th>
-    <th class="sortable" onclick="sortRows('health','lag')">Lag<span class="sortInd">${sortInd('health','lag')}</span></th>
-    <th class="sortable" onclick="sortRows('health','lagps')">Lag/s<span class="sortInd">${sortInd('health','lagps')}</span></th>
-    <th>Trend</th>
-    <th class="sortable" onclick="sortRows('health','age')">Last msg<span class="sortInd">${sortInd('health','age')}</span></th>
-    <th>Series</th>
-  </tr></thead><tbody id="hTopicsBody">${topicRows}</tbody></table></div></div>
-  <div class="card"><h3 style="margin-bottom:10px">Consumer Groups</h3><div class="tableScroll"><table><thead><tr><th>Group</th><th>State</th><th>Members</th><th>Topics</th><th>Lag</th><th>Lag/s</th></tr></thead><tbody id="hGroupsBody">${groupRows}</tbody></table></div></div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <h3>Topics <span class="muted" style="font-size:12px;font-weight:400">(${filteredTopics.length}${tq?' matched':''})</span></h3>
+      <input id="hTopicSearch" type="search" placeholder="Search topics…" value="${esc(healthTopicSearch)}" oninput="hTopicSearch(this.value)" style="width:200px;padding:5px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:12px;font-family:var(--font-mono)">
+    </div>
+    <div class="tableScroll"><table><thead><tr>
+      <th>Status</th>
+      <th class="sortable" onclick="sortRows('health','name')">Topic<span class="sortInd">${sortInd('health','name')}</span></th>
+      <th class="sortable" onclick="sortRows('health','partitions')">Partitions<span class="sortInd">${sortInd('health','partitions')}</span></th>
+      <th class="sortable" onclick="sortRows('health','msgs')">Msgs/s<span class="sortInd">${sortInd('health','msgs')}</span></th>
+      <th class="sortable" onclick="sortRows('health','bytes')">Bytes/s<span class="sortInd">${sortInd('health','bytes')}</span></th>
+      <th class="sortable" onclick="sortRows('health','messages')">Messages<span class="sortInd">${sortInd('health','messages')}</span></th>
+      <th class="sortable" onclick="sortRows('health','size')">Size<span class="sortInd">${sortInd('health','size')}</span></th>
+      <th class="sortable" onclick="sortRows('health','lag')">Lag<span class="sortInd">${sortInd('health','lag')}</span></th>
+      <th class="sortable" onclick="sortRows('health','lagps')">Lag/s<span class="sortInd">${sortInd('health','lagps')}</span></th>
+      <th>Trend</th>
+      <th class="sortable" onclick="sortRows('health','age')">Last msg<span class="sortInd">${sortInd('health','age')}</span></th>
+      <th>Series</th>
+    </tr></thead><tbody id="hTopicsBody">${topicRows}</tbody></table></div>
+    <span id="hTopicPager">${tPaginator}</span>
+  </div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <h3>Consumer Groups <span class="muted" style="font-size:12px;font-weight:400">(${filteredGroups.length}${gq?' matched':''})</span></h3>
+      <input id="hGroupSearch" type="search" placeholder="Search groups…" value="${esc(healthGroupSearch)}" oninput="hGroupSearch(this.value)" style="width:200px;padding:5px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:12px;font-family:var(--font-mono)">
+    </div>
+    <div class="tableScroll"><table><thead><tr><th>Group</th><th>State</th><th>Members</th><th>Topics</th><th>Lag</th><th>Lag/s</th></tr></thead><tbody id="hGroupsBody">${groupRows}</tbody></table></div>
+    <span id="hGroupPager">${gPaginator}</span>
+  </div>
 </div>`;
 }
 /* Refresh TANPA membangun ulang view. Sebelumnya setiap poll memanggil render()
@@ -2256,7 +2467,7 @@ function viewHealth(){
    terlepas (tidak di-paint) lalu hanya bagian yang benar-benar berubah disalin
    ke DOM hidup, sehingga tabel, kontrol, dan posisi scroll tetap utuh. */
 const HEALTH_PATCH=[['hMsgsRate','text'],['hLag','text'],['hDisk','text'],['hSubTop','text'],['hSubLag','text'],['hSubDisk','text'],
-  ['hClusterStatus','html'],['hNotes','html'],['hRateSpark','html'],['hLagSpark','html'],['hAttList','html'],['hTopicsBody','html'],['hGroupsBody','html']];
+  ['hClusterStatus','html'],['hNotes','html'],['hRateSpark','html'],['hLagSpark','html'],['hAttList','html'],['hTopicsBody','html'],['hGroupsBody','html'],['hTopicPager','html'],['hGroupPager','html']];
 function patchHealth(){
   if(!document.getElementById('hTopicsBody'))return false;   // view belum tampil (atau sedang error/loading)
   const tmp=document.createElement('div'); tmp.innerHTML=viewHealth();
@@ -2275,6 +2486,10 @@ async function loadHealth(){
   if(generation!==state.targetGeneration||state.view!=='health')return;
   if(!patchHealth())render();
 }
+window.hTopicSearch=function(v){healthTopicSearch=v;healthTopicPage=0;if(!patchHealth())render();};
+window.hGroupSearch=function(v){healthGroupSearch=v;healthGroupPage=0;if(!patchHealth())render();};
+window.hTopicPage=function(p){healthTopicPage=Math.max(0,p);if(!patchHealth())render();};
+window.hGroupPage=function(p){healthGroupPage=Math.max(0,p);if(!patchHealth())render();};
 window.loadHealth=loadHealth;
 window.setHealthWindow=function(v){healthWindow=parseInt(v,10)||60;loadHealth();};
 window.toggleHealthTopic=function(n){if(healthOpenTopics.has(n))healthOpenTopics.delete(n);else healthOpenTopics.add(n);render();};
