@@ -790,9 +790,6 @@ func (cc *ClusterClient) topicInfo(topic string) (TopicInfo, bool) {
 	return TopicInfo{}, false
 }
 
-// ProduceRecord publishes one record to topic and partition. If partition < 0,
-// a partition is chosen automatically (keyed hash or round-robin). It routes
-// the request to the partition leader, refreshing topology if the leader moved.
 func (cc *ClusterClient) ProduceRecord(topic string, partition int32, key, value []byte, headers []protocol.RecordHeader) (int64, int32, error) {
 	targetPart := partition
 	if targetPart < 0 {
@@ -810,7 +807,7 @@ func (cc *ClusterClient) ProduceRecord(topic string, partition int32, key, value
 		if n == 1 {
 			targetPart = info.Partitions[0].ID
 		} else if len(key) > 0 {
-			var h uint64 = 14695981039346656037 // FNV-1a 64 offset basis
+			var h uint64 = 14695981039346656037
 			for i := 0; i < len(key); i++ {
 				h ^= uint64(key[i])
 				h *= 1099511628211
@@ -845,7 +842,6 @@ func (cc *ClusterClient) ProduceRecord(topic string, partition int32, key, value
 		return offset, targetPart, nil
 	}
 
-	// Retry once on leader error / failure
 	if rerr := cc.Refresh(); rerr != nil {
 		return -1, targetPart, err
 	}

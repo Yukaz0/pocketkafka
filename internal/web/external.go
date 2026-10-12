@@ -104,7 +104,6 @@ type externalCluster struct {
 	// that looks hung. Never held together with clientMu.
 	readMu sync.Mutex
 	ic     *client.ClusterClient
-	// writeMu guards wc, the interactive produce connection.
 	writeMu sync.Mutex
 	wc      externalClusterClient
 	// listMu guards listCache, the short-lived copy of the topic and group list
@@ -467,8 +466,6 @@ func (e *externalCluster) withReadClient(read func(externalClusterClient) error)
 	return nil
 }
 
-// withWriteClient runs one interactive produce operation on a client with write
-// permissions (ReadOnly: false).
 func (e *externalCluster) withWriteClient(write func(externalClusterClient) error) error {
 	e.writeMu.Lock()
 	defer e.writeMu.Unlock()
