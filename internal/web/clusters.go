@@ -785,7 +785,7 @@ func (s *Server) handleClustersOverview(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, payload)
 }
 
-var externalKafkaCapabilities = []string{"cluster", "topics.read", "topic.partitions.read", "topic.messages.read", "topic.tail", "groups.read", "group.detail.read", "health.read"}
+var externalKafkaCapabilities = []string{"cluster", "topics.read", "topic.partitions.read", "topic.messages.read", "topic.messages.write", "topic.tail", "groups.read", "group.detail.read", "health.read"}
 
 var peerTargetCapabilities = []string{
 	"cluster", "topics.read", "topics.write", "topics.delete", "topic.messages.read", "topic.messages.write",

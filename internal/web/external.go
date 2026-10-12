@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Yukaz0/pocketkafka/pkg/client"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
 const (
@@ -48,8 +49,7 @@ type externalGroupData struct {
 	offsets map[string]map[int32]int64
 }
 
-// externalClusterClient is deliberately read-only; the same client backs the
-// sampler and the registered target API adapter.
+// externalClusterClient backs the sampler, the Data Browser, and the producer adapter.
 type externalClusterClient interface {
 	Close() error
 	Topics() []client.TopicInfo
@@ -61,6 +61,7 @@ type externalClusterClient interface {
 	DescribeGroup(string) (client.GroupState, error)
 	GroupOffsets(string) (map[string]map[int32]int64, error)
 	FetchRecords(string, int32, int64, int) ([]client.FetchedRecord, int64, error)
+	ProduceRecord(string, int32, []byte, []byte, []protocol.RecordHeader) (int64, int32, error)
 	ClusterID() string
 	Controller() int32
 	Brokers() []client.Broker
@@ -103,6 +104,9 @@ type externalCluster struct {
 	// that looks hung. Never held together with clientMu.
 	readMu sync.Mutex
 	ic     *client.ClusterClient
+	// writeMu guards wc, the interactive produce connection.
+	writeMu sync.Mutex
+	wc      externalClusterClient
 	// listMu guards listCache, the short-lived copy of the topic and group list
 	// answers. Never held with clientMu or readMu.
 	listMu    sync.Mutex
@@ -183,6 +187,13 @@ func (e *externalCluster) Close() {
 	e.readMu.Unlock()
 	if ic != nil {
 		ic.Close()
+	}
+	e.writeMu.Lock()
+	wc := e.wc
+	e.wc = nil
+	e.writeMu.Unlock()
+	if wc != nil {
+		wc.Close()
 	}
 }
 
@@ -451,6 +462,32 @@ func (e *externalCluster) withReadClient(read func(externalClusterClient) error)
 	if err := read(e.ic); err != nil {
 		e.ic.Close()
 		e.ic = nil
+		return err
+	}
+	return nil
+}
+
+// withWriteClient runs one interactive produce operation on a client with write
+// permissions (ReadOnly: false).
+func (e *externalCluster) withWriteClient(write func(externalClusterClient) error) error {
+	e.writeMu.Lock()
+	defer e.writeMu.Unlock()
+	e.clientMu.Lock()
+	closed := e.closed
+	e.clientMu.Unlock()
+	if closed {
+		return errExternalClientClosed
+	}
+	if e.wc == nil {
+		cc, err := client.NewClusterClient(e.seeds, e.clientID, client.Options{SASL: e.sasl, ReadOnly: false})
+		if err != nil {
+			return err
+		}
+		e.wc = cc
+	}
+	if err := write(e.wc); err != nil {
+		e.wc.Close()
+		e.wc = nil
 		return err
 	}
 	return nil

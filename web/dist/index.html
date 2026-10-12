@@ -593,12 +593,12 @@ function initTheme(){
   try{state.navGroupsCollapsed=Object.assign({operations:false,developer:false},JSON.parse(localStorage.getItem('pk_nav_groups')||'{}'));}catch(e){state.navGroupsCollapsed={operations:false,developer:false};}
 }
 
-const KAFKA_UNSUPPORTED_VIEWS={producer:'Producing messages is disabled for read-only Kafka targets.',devstudio:'Developer Studio writes are not supported for Kafka targets.',schemas:'Schema Registry APIs are not supported for Kafka targets.',topology:'Topology is not available for Kafka targets.',storage:'Storage inspection is not available for Kafka targets.',logs:'Broker logs are not available for Kafka targets.',metrics:'Broker metrics are not available for Kafka targets.',integrations:'Integrations is not available for Kafka targets.'};
+const KAFKA_UNSUPPORTED_VIEWS={devstudio:'Developer Studio writes are not supported for Kafka targets.',schemas:'Schema Registry APIs are not supported for Kafka targets.',topology:'Topology is not available for Kafka targets.',storage:'Storage inspection is not available for Kafka targets.',logs:'Broker logs are not available for Kafka targets.',metrics:'Broker metrics are not available for Kafka targets.',integrations:'Integrations is not available for Kafka targets.'};
 function navUnavailableReason(view){
   if(isTargetUnavailable()&&!['clusters','settings','security'].includes(view))return targetUnavailableMessage();
   if(!isKafkaTarget())return '';
   if(KAFKA_UNSUPPORTED_VIEWS[view])return KAFKA_UNSUPPORTED_VIEWS[view];
-  const needed={overview:'health.read',health:'health.read',connections:'cluster',topics:'topics.read',groups:'groups.read',databrowser:'topic.messages.read',integrations:'integrations.read'}[view];
+  const needed={overview:'health.read',health:'health.read',connections:'cluster',topics:'topics.read',groups:'groups.read',databrowser:'topic.messages.read',producer:'topic.messages.write',integrations:'integrations.read'}[view];
   if(needed&&!hasTargetCapability(needed))return `Selected Kafka target does not provide ${needed}.`;
   if(view==='topics'&&state.topicDetail&&!hasTargetCapability('topic.partitions.read'))return 'Topic partition details are not supported by this Kafka target.';
   if(view==='groups'&&state.group&&!hasTargetCapability('group.detail.read'))return 'Consumer group details are not supported by this Kafka target.';
@@ -619,6 +619,7 @@ function kafkaCapabilityFor(path,method){
   if(p==='/api/v1/topics'&&m==='GET')return 'topics.read';
   if(/^\/api\/v1\/topics\/[^/]+\/partitions$/.test(p)&&m==='GET')return 'topic.partitions.read';
   if(/^\/api\/v1\/topics\/[^/]+\/messages$/.test(p)&&m==='GET')return 'topic.messages.read';
+  if(/^\/api\/v1\/topics\/[^/]+\/messages$/.test(p)&&m==='POST')return 'topic.messages.write';
   if(p==='/api/v1/groups'&&m==='GET')return 'groups.read';
   if(/^\/api\/v1\/groups\/[^/]+$/.test(p)&&m==='GET')return 'group.detail.read';
   if(p==='/api/v1/health/overview'&&m==='GET')return 'health.read';
@@ -1799,15 +1800,36 @@ window.delGroup=async function(g){
 
 /* Producer Studio */
 function viewProducer(){ const opts=(state.topics||[]).map(t=>`<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
+  const curT=(state.topics||[]).find(t=>t.name===(state.topic||''));
+  let partOpts='<option value="-1">Auto</option>';
+  if(curT&&curT.partitions&&curT.partitions.length){
+    partOpts+=curT.partitions.map(p=>`<option value="${p.partition??p.id??p}">${p.partition??p.id??p}</option>`).join('');
+  } else {
+    partOpts+='<option value="0">0</option>';
+  }
   return `<div>${pageHeader('Producer Studio','Compose and publish a message to a topic.')}<div class="card">
     <h3 style="margin-bottom:12px">Producer Studio</h3>
-    <label>Topic</label><input list="tl" id="pTopic" placeholder="my-topic (auto-created)" value="${esc(state.topic||'')}"><datalist id="tl">${opts}</datalist>
-    <label>Partition</label><select id="pPart" style="width:auto"><option value="-1">Auto</option><option value="0">0</option></select>
+    <label>Topic</label><input list="tl" id="pTopic" placeholder="my-topic (auto-created)" value="${esc(state.topic||'')}" onchange="updateProducerPartitions()"><datalist id="tl">${opts}</datalist>
+    <label>Partition</label><select id="pPart" style="width:auto">${partOpts}</select>
     <label>Key</label><input id="pKey" placeholder="optional key">
     <label>Headers (key=value, one per line)</label><textarea id="pHeaders" rows="2" placeholder="traceId=abc"></textarea>
     <label>Payload (JSON / text)</label><textarea id="pValue" rows="8">{"event":"hello","ts":1700000000}</textarea>
     <div style="margin-top:12px"><button class="btn" onclick="sendMsg()">Send Message</button></div>
   </div></div>`; }
+function updateProducerPartitions(){
+  const val=$('#pTopic')?.value;
+  const curT=(state.topics||[]).find(t=>t.name===val);
+  const sel=$('#pPart');
+  if(!sel)return;
+  let partOpts='<option value="-1">Auto</option>';
+  if(curT&&curT.partitions&&curT.partitions.length){
+    partOpts+=curT.partitions.map(p=>`<option value="${p.partition??p.id??p}">${p.partition??p.id??p}</option>`).join('');
+  } else {
+    partOpts+='<option value="0">0</option>';
+  }
+  sel.innerHTML=partOpts;
+}
+window.updateProducerPartitions=updateProducerPartitions;
 async function sendMsg(){ const body={value:$('#pValue').value,key:$('#pKey').value}; const pv=$('#pPart')?$('#pPart').value:'-1';
   if(pv&&pv!=='-1')body.partition=parseInt(pv,10);
   const h={}; $('#pHeaders').value.split('\n').forEach(l=>{const i=l.indexOf('=');if(i>0)h[l.slice(0,i).trim()]=l.slice(i+1).trim();}); if(Object.keys(h).length)body.headers=h;

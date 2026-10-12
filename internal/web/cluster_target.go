@@ -16,8 +16,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Yukaz0/pocketkafka/internal/authz"
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 	"github.com/Yukaz0/pocketkafka/pkg/client"
+	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
 const (
@@ -231,6 +233,12 @@ func (s *Server) handleKafkaClusterTarget(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusNotImplemented, "operation is not supported for external Kafka targets")
 		return
 	}
+	topic, isProduce := isKafkaTopicMessagesPath(path)
+	if isProduce && r.Method == http.MethodPost {
+		ec := s.externalFor(entry)
+		s.handleKafkaProduce(w, r, ec, topic)
+		return
+	}
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed, "external Kafka target endpoint is read-only")
 		return
@@ -347,6 +355,58 @@ func (s *Server) refreshKafkaList(entry ClusterEntry, path string) {
 	if captured.code == http.StatusOK {
 		ec.storeList(path, captured.buf.Bytes())
 	}
+}
+
+func isKafkaTopicMessagesPath(path string) (string, bool) {
+	parts := strings.Split(path, "/")
+	if len(parts) == 6 && parts[1] == "api" && parts[2] == "v1" && parts[3] == "topics" && parts[5] == "messages" && storage.ValidateTopicName(parts[4]) == nil {
+		return parts[4], true
+	}
+	return "", false
+}
+
+func (s *Server) handleKafkaProduce(w http.ResponseWriter, r *http.Request, ec *externalCluster, topic string) {
+	if s.authorize {
+		principal := s.requestPrincipal(r)
+		if !s.can(principal, authz.OpWrite, authz.Resource{Type: authz.ResourceTopic, Name: topic}) {
+			s.auditDeny(w, r, principal, "topic.produce", "write permission denied for topic "+topic)
+			return
+		}
+	}
+	var req struct {
+		Key       string            `json:"key"`
+		Value     string            `json:"value"`
+		Partition *int32            `json:"partition"`
+		Headers   map[string]string `json:"headers"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	want := int32(-1)
+	if req.Partition != nil {
+		want = *req.Partition
+	}
+	var headers []protocol.RecordHeader
+	for k, v := range req.Headers {
+		headers = append(headers, protocol.RecordHeader{Key: k, Value: []byte(v)})
+	}
+	var offset int64
+	var assignedPartition int32
+	err := ec.withWriteClient(func(cc externalClusterClient) error {
+		var perr error
+		offset, assignedPartition, perr = cc.ProduceRecord(topic, want, []byte(req.Key), []byte(req.Value), headers)
+		return perr
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "unable to produce to external Kafka target: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"topic":     topic,
+		"partition": assignedPartition,
+		"offset":    offset,
+	})
 }
 
 func kafkaReadEndpoint(path string) bool {

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
@@ -61,6 +62,7 @@ type ClusterClient struct {
 	brokers    map[int32]Broker
 	topics     []TopicInfo
 	conns      map[int32]*KafkaClient
+	rrCounter  map[string]uint64
 }
 
 // NewClusterClient connects to a seed, authenticates, and reads the topology.
@@ -69,11 +71,12 @@ func NewClusterClient(seeds []string, clientID string, opts Options) (*ClusterCl
 		return nil, fmt.Errorf("no brokers given")
 	}
 	cc := &ClusterClient{
-		clientID: clientID,
-		opts:     opts,
-		seeds:    seeds,
-		brokers:  make(map[int32]Broker),
-		conns:    make(map[int32]*KafkaClient),
+		clientID:  clientID,
+		opts:      opts,
+		seeds:     seeds,
+		brokers:   make(map[int32]Broker),
+		conns:     make(map[int32]*KafkaClient),
+		rrCounter: make(map[string]uint64),
 	}
 	if err := cc.Refresh(); err != nil {
 		cc.Close()
@@ -786,3 +789,132 @@ func (cc *ClusterClient) topicInfo(topic string) (TopicInfo, bool) {
 	}
 	return TopicInfo{}, false
 }
+
+// ProduceRecord publishes one record to topic and partition. If partition < 0,
+// a partition is chosen automatically (keyed hash or round-robin). It routes
+// the request to the partition leader, refreshing topology if the leader moved.
+func (cc *ClusterClient) ProduceRecord(topic string, partition int32, key, value []byte, headers []protocol.RecordHeader) (int64, int32, error) {
+	targetPart := partition
+	if targetPart < 0 {
+		info, ok := cc.topicInfo(topic)
+		if !ok || len(info.Partitions) == 0 {
+			if err := cc.Refresh(); err != nil {
+				return -1, -1, err
+			}
+			info, ok = cc.topicInfo(topic)
+			if !ok || len(info.Partitions) == 0 {
+				return -1, -1, fmt.Errorf("unknown topic %q or no partitions available", topic)
+			}
+		}
+		n := len(info.Partitions)
+		if n == 1 {
+			targetPart = info.Partitions[0].ID
+		} else if len(key) > 0 {
+			var h uint64 = 14695981039346656037 // FNV-1a 64 offset basis
+			for i := 0; i < len(key); i++ {
+				h ^= uint64(key[i])
+				h *= 1099511628211
+			}
+			idx := int(h % uint64(n))
+			targetPart = info.Partitions[idx].ID
+		} else {
+			cc.mu.Lock()
+			if cc.rrCounter == nil {
+				cc.rrCounter = make(map[string]uint64)
+			}
+			cc.rrCounter[topic]++
+			idx := int(cc.rrCounter[topic] % uint64(n))
+			cc.mu.Unlock()
+			targetPart = info.Partitions[idx].ID
+		}
+	}
+
+	leader, ok := cc.leaderFor(topic, targetPart)
+	if !ok || leader < 0 {
+		if err := cc.Refresh(); err != nil {
+			return -1, targetPart, err
+		}
+		leader, ok = cc.leaderFor(topic, targetPart)
+		if !ok || leader < 0 {
+			return -1, targetPart, fmt.Errorf("no leader for %s/%d", topic, targetPart)
+		}
+	}
+
+	offset, err := cc.produceTo(leader, topic, targetPart, key, value, headers)
+	if err == nil {
+		return offset, targetPart, nil
+	}
+
+	// Retry once on leader error / failure
+	if rerr := cc.Refresh(); rerr != nil {
+		return -1, targetPart, err
+	}
+	moved, ok := cc.leaderFor(topic, targetPart)
+	if !ok || moved < 0 {
+		return -1, targetPart, err
+	}
+	offset, err = cc.produceTo(moved, topic, targetPart, key, value, headers)
+	if err != nil {
+		return -1, targetPart, err
+	}
+	return offset, targetPart, nil
+}
+
+func (cc *ClusterClient) produceTo(brokerID int32, topic string, partition int32, key, value []byte, headers []protocol.RecordHeader) (int64, error) {
+	cl, err := cc.brokerFor(brokerID)
+	if err != nil {
+		return -1, err
+	}
+	now := time.Now().UnixMilli()
+	batch := &protocol.RecordBatch{
+		BaseOffset:    0,
+		BaseTimestamp: now,
+		MaxTimestamp:  now,
+		ProducerID:    -1,
+		ProducerEpoch: -1,
+		BaseSequence:  -1,
+		Records: []protocol.Record{{
+			OffsetDelta: 0,
+			Key:         key,
+			Value:       value,
+			Headers:     headers,
+		}},
+	}
+	rawBatch, err := protocol.EncodeRecordBatch(batch)
+	if err != nil {
+		return -1, err
+	}
+	req := &protocol.ProduceRequest{
+		Version: cl.version(protocol.APKProduce),
+		Acks:    1,
+		Timeout: 5000,
+		Topics: []protocol.ProduceRequestTopic{{
+			Topic: topic,
+			Partitions: []protocol.ProduceRequestPartition{{
+				Partition: partition,
+				Records:   rawBatch,
+			}},
+		}},
+	}
+	body, err := protocol.EncodeProduceRequest(req)
+	if err != nil {
+		return -1, err
+	}
+	respBody, err := cl.RoundTrip(protocol.APKProduce, req.Version, body)
+	if err != nil {
+		return -1, err
+	}
+	resp, err := protocol.DecodeProduceResponse(req.Version, respBody)
+	if err != nil {
+		return -1, err
+	}
+	if len(resp.Topics) == 0 || len(resp.Topics[0].Partitions) == 0 {
+		return -1, errNoResponse
+	}
+	partResp := resp.Topics[0].Partitions[0]
+	if partResp.ErrorCode != protocol.ErrNone {
+		return -1, fmt.Errorf("produce %s/%d on broker %d: kafka error code %d", topic, partition, brokerID, partResp.ErrorCode)
+	}
+	return partResp.BaseOffset, nil
+}
+
