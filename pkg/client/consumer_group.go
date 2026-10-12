@@ -7,7 +7,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// ConsumedMessage is a single record received by a consumer.
 type ConsumedMessage struct {
 	Topic     string
 	Partition int32
@@ -17,11 +16,8 @@ type ConsumedMessage struct {
 	Headers   map[string][]byte
 }
 
-// MessageHandler processes one consumed message.
 type MessageHandler func(msg *ConsumedMessage) error
 
-// ConsumerGroup is a high-level group consumer with automatic rebalance and
-// optional offset auto-commit.
 type ConsumerGroup struct {
 	client     *KafkaClient
 	cfg        ConsumerGroupConfig
@@ -30,22 +26,19 @@ type ConsumerGroup struct {
 	topics     []string
 	handler    MessageHandler
 
-	assignment map[string][]int32         // topic -> assigned partitions
-	positions  map[string]map[int32]int64 // topic -> partition -> next offset to fetch
-	committed  map[string]map[int32]int64 // topic -> partition -> committed offset
+	assignment map[string][]int32
+	positions  map[string]map[int32]int64
+	committed  map[string]map[int32]int64
 
-	subTopics []string // explicit subscription, overrides metadata topics
+	subTopics []string
 
 	stopChan chan struct{}
 }
 
-// SetGroupID overrides the group ID.
 func (cg *ConsumerGroup) SetGroupID(id string) { cg.cfg.GroupID = id }
 
-// SetTopics sets the explicit topic subscription.
 func (cg *ConsumerGroup) SetTopics(topics []string) { cg.subTopics = topics }
 
-// NewConsumerGroup builds a consumer group that subscribes to the given topics.
 func NewConsumerGroup(client *KafkaClient, cfg ConsumerGroupConfig, handler MessageHandler) *ConsumerGroup {
 	if cfg.SessionTimeout == 0 {
 		cfg.SessionTimeout = 30 * time.Second
@@ -67,7 +60,6 @@ func NewConsumerGroup(client *KafkaClient, cfg ConsumerGroupConfig, handler Mess
 	}
 }
 
-// Start runs the group consume loop until ctx is cancelled.
 func (cg *ConsumerGroup) Start(ctx context.Context) error {
 	if err := cg.findCoordinator(ctx); err != nil {
 		return err
@@ -83,7 +75,6 @@ func (cg *ConsumerGroup) Start(ctx context.Context) error {
 	go cg.autoCommitLoop(ctx)
 
 	err := cg.consumeLoop(ctx)
-	// Best effort final commit.
 	cg.commit(ctx)
 	return err
 }
@@ -112,12 +103,9 @@ func (cg *ConsumerGroup) findCoordinator(ctx context.Context) error {
 	return nil
 }
 
-// joinAndSync performs the join -> (leader assign) -> sync handshake.
 func (cg *ConsumerGroup) joinAndSync(ctx context.Context) error {
-	// Ensure the topic/partition metadata is fresh before computing assignments.
 	cg.client.RefreshMetadata()
 
-	// Determine the topic subscription: explicit if set, else all known topics.
 	var topics []string
 	if len(cg.subTopics) > 0 {
 		topics = cg.subTopics
@@ -199,10 +187,8 @@ func (cg *ConsumerGroup) joinAndSync(ctx context.Context) error {
 	return nil
 }
 
-// computeAssignment round-robins all partitions of all subscribed topics across
-// the group members.
 func (cg *ConsumerGroup) computeAssignment(topics []string, members []protocol.JoinGroupResponseMember) []memberAssignment {
-	all := make([]string, 0) // "topic:partition"
+	all := make([]string, 0)
 	for _, t := range topics {
 		for _, pm := range cg.client.Partitions(t) {
 			all = append(all, topicPartition(t, pm.PartitionID))
@@ -239,7 +225,6 @@ func toMap(tps []string) map[string][]int32 {
 	return out
 }
 
-// initPositions determines the start offset for each assigned partition.
 func (cg *ConsumerGroup) initPositions(ctx context.Context) error {
 	var topics []protocol.ListOffsetsRequestTopic
 	for t, parts := range cg.assignment {
@@ -281,7 +266,6 @@ func (cg *ConsumerGroup) setPosition(topic string, partition int32, offset int64
 	cg.positions[topic][partition] = offset
 }
 
-// consumeLoop fetches and processes records for all assigned partitions.
 func (cg *ConsumerGroup) consumeLoop(ctx context.Context) error {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
@@ -430,7 +414,6 @@ func (cg *ConsumerGroup) heartbeatLoop(ctx context.Context) {
 	}
 }
 
-// Close stops the consumer group.
 func (cg *ConsumerGroup) Close() {
 	select {
 	case <-cg.stopChan:
@@ -439,15 +422,13 @@ func (cg *ConsumerGroup) Close() {
 	}
 }
 
-// ConsumerProtocol subscription / assignment codecs (classic encoding).
-
 func encodeSubscription(topics []string) []byte {
 	w := protocol.NewWriter(32)
 	w.WriteArrayLen(len(topics))
 	for _, t := range topics {
 		w.WriteString(t)
 	}
-	w.WriteBytes(nil) // user_data
+	w.WriteBytes(nil)
 	return w.Bytes()
 }
 
@@ -461,7 +442,7 @@ func encodeAssignment(assign map[string][]int32) []byte {
 			w.WriteInt32(p)
 		}
 	}
-	w.WriteBytes(nil) // user_data
+	w.WriteBytes(nil)
 	return w.Bytes()
 }
 

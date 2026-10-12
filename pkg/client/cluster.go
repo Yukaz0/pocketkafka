@@ -11,24 +11,20 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// Kafka error codes this file routes around.
 const (
 	errNotLeaderOrFollower int16 = 6
 	errNotCoordinator      int16 = 16
 	errFencedLeaderEpoch   int16 = 74
 )
 
-// Broker is one node of a cluster, as advertised in metadata.
 type Broker struct {
 	ID   int32
 	Host string
 	Port int32
 }
 
-// Addr is the dialable address of the broker.
 func (b Broker) Addr() string { return net.JoinHostPort(b.Host, strconv.Itoa(int(b.Port))) }
 
-// PartitionInfo is one partition's topology and whether its replicas are in sync.
 type PartitionInfo struct {
 	ID          int32
 	Leader      int32
@@ -39,18 +35,12 @@ type PartitionInfo struct {
 	Error       int16
 }
 
-// TopicInfo is one topic as the cluster reports it.
 type TopicInfo struct {
 	Name       string
 	Internal   bool
 	Partitions []PartitionInfo
 }
 
-// ClusterClient talks to every broker of a cluster. Authentication is per
-// connection: a SASL cluster has no session spanning brokers, so a connection
-// pool without credentials only works for the one broker it was opened to, and
-// every request routed by leader or coordinator needs its own authenticated
-// connection.
 type ClusterClient struct {
 	clientID string
 	opts     Options
@@ -65,7 +55,6 @@ type ClusterClient struct {
 	rrCounter  map[string]uint64
 }
 
-// NewClusterClient connects to a seed, authenticates, and reads the topology.
 func NewClusterClient(seeds []string, clientID string, opts Options) (*ClusterClient, error) {
 	if len(seeds) == 0 {
 		return nil, fmt.Errorf("no brokers given")
@@ -85,7 +74,6 @@ func NewClusterClient(seeds []string, clientID string, opts Options) (*ClusterCl
 	return cc, nil
 }
 
-// Refresh re-reads the cluster topology.
 func (cc *ClusterClient) Refresh() error {
 	cl, err := cc.any()
 	if err != nil {
@@ -126,7 +114,6 @@ func (cc *ClusterClient) Refresh() error {
 	return nil
 }
 
-// ClusterID returns the cluster's id, if the brokers report one.
 func (cc *ClusterClient) ClusterID() string {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
@@ -136,14 +123,12 @@ func (cc *ClusterClient) ClusterID() string {
 	return *cc.clusterID
 }
 
-// Controller returns the controller broker id, or -1.
 func (cc *ClusterClient) Controller() int32 {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 	return cc.controller
 }
 
-// Brokers returns the known brokers, sorted by id.
 func (cc *ClusterClient) Brokers() []Broker {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
@@ -155,14 +140,12 @@ func (cc *ClusterClient) Brokers() []Broker {
 	return out
 }
 
-// Topics returns the topology read by the last Refresh.
 func (cc *ClusterClient) Topics() []TopicInfo {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 	return append([]TopicInfo(nil), cc.topics...)
 }
 
-// Close closes every connection this client opened.
 func (cc *ClusterClient) Close() error {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
@@ -176,11 +159,8 @@ func (cc *ClusterClient) Close() error {
 	return firstErr
 }
 
-// seedConnID keys the connection opened from the configured seed list, so it is
-// reused and closed with the rest instead of leaking one per call.
 const seedConnID int32 = -1
 
-// any returns a connection to any broker, opening one to a seed if needed.
 func (cc *ClusterClient) any() (*KafkaClient, error) {
 	cc.mu.Lock()
 	if cl, ok := cc.conns[seedConnID]; ok {
@@ -189,7 +169,7 @@ func (cc *ClusterClient) any() (*KafkaClient, error) {
 	}
 	for _, cl := range cc.conns {
 		cc.mu.Unlock()
-		return cl, nil // any live connection serves a cluster-wide request
+		return cl, nil
 	}
 	seeds := append([]string(nil), cc.seeds...)
 	cc.mu.Unlock()
@@ -204,7 +184,6 @@ func (cc *ClusterClient) any() (*KafkaClient, error) {
 	return cl, nil
 }
 
-// connFor returns the cached client of a broker, connecting when needed.
 func (cc *ClusterClient) connFor(id int32, cached *KafkaClient) (*KafkaClient, error) {
 	if cached != nil {
 		return cached, nil
@@ -230,7 +209,6 @@ func (cc *ClusterClient) connFor(id int32, cached *KafkaClient) (*KafkaClient, e
 	return cl, nil
 }
 
-// brokerFor returns the authenticated client of one broker.
 func (cc *ClusterClient) brokerFor(id int32) (*KafkaClient, error) {
 	cc.mu.Lock()
 	cached := cc.conns[id]
@@ -238,18 +216,14 @@ func (cc *ClusterClient) brokerFor(id int32) (*KafkaClient, error) {
 	return cc.connFor(id, cached)
 }
 
-// ListEndOffsets returns each partition's log end offset, batched per leader.
 func (cc *ClusterClient) ListEndOffsets(topic string) (map[int32]int64, error) {
 	return cc.listOffsets(topic, -1)
 }
 
-// ListStartOffsets returns each partition's earliest retained offset.
 func (cc *ClusterClient) ListStartOffsets(topic string) (map[int32]int64, error) {
 	return cc.listOffsets(topic, -2)
 }
 
-// FetchedRecord is one record read from a partition, with the timestamp and
-// headers the record batch carries.
 type FetchedRecord struct {
 	Offset    int64
 	Timestamp int64
@@ -258,11 +232,6 @@ type FetchedRecord struct {
 	Headers   []protocol.RecordHeader
 }
 
-// FetchRecords reads from topic/partition starting at offset, bounded by
-// maxBytes, and returns the records plus the offset to fetch next. A short read
-// means the log end was reached when the broker answered. The request goes to
-// the partition leader: a broker that does not lead the partition answers
-// NOT_LEADER, it does not proxy.
 func (cc *ClusterClient) FetchRecords(topic string, partition int32, offset int64, maxBytes int) ([]FetchedRecord, int64, error) {
 	leader, ok := cc.leaderFor(topic, partition)
 	if !ok {
@@ -275,8 +244,6 @@ func (cc *ClusterClient) FetchRecords(topic string, partition int32, offset int6
 	if err == nil {
 		return records, next, nil
 	}
-	// One refresh lets a moved leadership take effect; a second failure is the
-	// broker's answer and ends the read.
 	if rerr := cc.Refresh(); rerr != nil {
 		return nil, offset, err
 	}
@@ -291,7 +258,6 @@ func (cc *ClusterClient) FetchRecords(topic string, partition int32, offset int6
 	return records, next, nil
 }
 
-// leaderFor resolves the current leader of one partition from cached metadata.
 func (cc *ClusterClient) leaderFor(topic string, partition int32) (int32, bool) {
 	info, ok := cc.topicInfo(topic)
 	if !ok {
@@ -373,11 +339,6 @@ func (cc *ClusterClient) fetchFrom(brokerID int32, topic string, partition int32
 	return out, next, nil
 }
 
-// listOffsets reads one timestamp position (-1 latest, -2 earliest) for every
-// partition of a topic, sending each request to the partition's leader: a broker
-// that does not lead the partition answers NOT_LEADER, it does not proxy. The
-// request carries the leader epoch from metadata, or -1 for unknown: sending 0
-// claims a specific epoch and a real broker answers FENCED_LEADER_EPOCH.
 func (cc *ClusterClient) listOffsets(topic string, ts int64) (map[int32]int64, error) {
 	info, ok := cc.topicInfo(topic)
 	if !ok {
@@ -392,8 +353,6 @@ func (cc *ClusterClient) listOffsets(topic string, ts int64) (map[int32]int64, e
 	for leader, parts := range byLeader {
 		offs, err := cc.listOffsetsFrom(leader, topic, parts, ts)
 		if err != nil {
-			// One refresh makes a moved leadership take effect, the second
-			// failure is the broker's answer.
 			if rerr := cc.Refresh(); rerr != nil {
 				return nil, err
 			}
@@ -421,7 +380,6 @@ func (cc *ClusterClient) listOffsets(topic string, ts int64) (map[int32]int64, e
 	return out, nil
 }
 
-// listOffsetPart is one partition with the leader epoch the request must declare.
 type listOffsetPart struct {
 	id    int32
 	epoch int32
@@ -472,11 +430,6 @@ func (cc *ClusterClient) listOffsetsFrom(brokerID int32, topic string, partition
 	return out, nil
 }
 
-// ListOffsetsBulk reads one timestamp position (-1 latest, -2 earliest) for
-// every partition of every topic in a single request per broker. One request per
-// topic per leader is what makes a 75-topic cluster take minutes instead of a
-// second: leadership is spread over the brokers, so batching by broker is the
-// difference between a pass that finishes and one that never does.
 func (cc *ClusterClient) ListOffsetsBulk(ts int64) (map[string]map[int32]int64, error) {
 	topics := cc.Topics()
 	byLeader := make(map[int32]map[string][]listOffsetPart)
@@ -496,8 +449,6 @@ func (cc *ClusterClient) ListOffsetsBulk(ts int64) (map[string]map[int32]int64, 
 	for leader, perTopic := range byLeader {
 		res, err := cc.listOffsetsBulkFrom(leader, perTopic, ts)
 		if err != nil {
-			// One refresh lets a moved leadership take effect; a second failure
-			// is the broker's answer and ends the pass.
 			if rerr := cc.Refresh(); rerr != nil {
 				return nil, err
 			}
@@ -519,8 +470,6 @@ func (cc *ClusterClient) ListOffsetsBulk(ts int64) (map[string]map[int32]int64, 
 	return out, nil
 }
 
-// reEpoch rebuilds a per-topic request plan with the epochs from a fresh
-// metadata read, which is what a FENCED_LEADER_EPOCH answer asks for.
 func (cc *ClusterClient) reEpoch(perTopic map[string][]listOffsetPart) map[string][]listOffsetPart {
 	out := make(map[string][]listOffsetPart, len(perTopic))
 	for topic, parts := range perTopic {
@@ -545,7 +494,6 @@ func (cc *ClusterClient) reEpoch(perTopic map[string][]listOffsetPart) map[strin
 	return out
 }
 
-// listOffsetsBulkFrom sends one request carrying every topic this broker leads.
 func (cc *ClusterClient) listOffsetsBulkFrom(brokerID int32, perTopic map[string][]listOffsetPart, ts int64) (map[string]map[int32]int64, error) {
 	cl, err := cc.brokerFor(brokerID)
 	if err != nil {
@@ -600,10 +548,6 @@ func (cc *ClusterClient) listOffsetsBulkFrom(brokerID int32, perTopic map[string
 	return out, nil
 }
 
-// DescribeGroupsAll asks every broker for the given groups in one request each
-// and merges what came back. A broker answers NOT_COORDINATOR for groups it does
-// not coordinate, which is the filter, so this needs no FindCoordinator per
-// group.
 func (cc *ClusterClient) DescribeGroupsAll(groups []string) (map[string]GroupState, error) {
 	out := make(map[string]GroupState, len(groups))
 	for _, b := range cc.Brokers() {
@@ -642,8 +586,6 @@ func (cc *ClusterClient) DescribeGroupsAll(groups []string) (map[string]GroupSta
 	return out, nil
 }
 
-// ListGroups returns every group the cluster knows, merged over all brokers:
-// each broker answers only for the groups it coordinates.
 func (cc *ClusterClient) ListGroups() ([]string, error) {
 	seen := make(map[string]bool)
 	for _, b := range cc.Brokers() {
@@ -667,7 +609,6 @@ func (cc *ClusterClient) ListGroups() ([]string, error) {
 	return out, nil
 }
 
-// GroupState is a group's coordinator-reported state.
 type GroupState struct {
 	Group        string
 	State        string
@@ -675,7 +616,6 @@ type GroupState struct {
 	Members      int
 }
 
-// DescribeGroup returns one group's state, asked of its coordinator.
 func (cc *ClusterClient) DescribeGroup(group string) (GroupState, error) {
 	cl, err := cc.coordinator(group)
 	if err != nil {
@@ -712,8 +652,6 @@ func (cc *ClusterClient) DescribeGroup(group string) (GroupState, error) {
 	}, nil
 }
 
-// GroupOffsets returns a group's committed offsets for every topic it holds
-// offsets on, asked of its coordinator.
 func (cc *ClusterClient) GroupOffsets(group string) (map[string]map[int32]int64, error) {
 	cl, err := cc.coordinator(group)
 	if err != nil {
@@ -722,7 +660,7 @@ func (cc *ClusterClient) GroupOffsets(group string) (map[string]map[int32]int64,
 	req := &protocol.OffsetFetchRequest{
 		Version: cl.version(protocol.APKOffsetFetch),
 		Group:   group,
-		Topics:  nil, // every topic the group has offsets for
+		Topics:  nil,
 	}
 	body, err := protocol.EncodeOffsetFetchRequest(req)
 	if err != nil {
@@ -751,7 +689,6 @@ func (cc *ClusterClient) GroupOffsets(group string) (map[string]map[int32]int64,
 	return out, nil
 }
 
-// coordinator resolves the broker that coordinates a group's offsets.
 func (cc *ClusterClient) coordinator(group string) (*KafkaClient, error) {
 	cl, err := cc.any()
 	if err != nil {
@@ -913,4 +850,3 @@ func (cc *ClusterClient) produceTo(brokerID int32, topic string, partition int32
 	}
 	return partResp.BaseOffset, nil
 }
-

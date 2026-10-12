@@ -13,10 +13,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 )
 
-// Health endpoints (Fitur 10)
-
-// isReady reports whether storage is usable and listeners are up. The web
-// server is embedded in the broker, so readiness is derived from the store.
 func (s *Server) isReady() bool {
 	if s.store == nil {
 		return false
@@ -43,8 +39,6 @@ func (s *Server) handleLivez(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
 }
-
-// Group detail & reset offset (Fitur 8)
 
 type groupDetailMember struct {
 	MemberID   string             `json:"member_id"`
@@ -83,8 +77,6 @@ func (s *Server) handleGroupDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	principal := s.requestPrincipal(r)
 	for _, m := range s.gm.MembersDetail(groupID) {
-		// A member's assignment names the topics it consumes, so it is subject
-		// to the same per-topic rule as the offset rows below.
 		assigned := make(map[string][]int32, len(m.Assigned))
 		for topic, parts := range m.Assigned {
 			if s.can(principal, authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: topic}) {
@@ -102,9 +94,6 @@ func (s *Server) handleGroupDetail(w http.ResponseWriter, r *http.Request) {
 		out.Members = append(out.Members, member)
 	}
 	for topic, parts := range info.Offsets {
-		// A group grant is not a topic grant: the rows below name topics and
-		// carry their live offsets, so a principal that may describe the group
-		// but not the topic sees nothing about that topic.
 		if !s.can(principal, authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: topic}) {
 			continue
 		}
@@ -129,13 +118,12 @@ func (s *Server) handleGroupDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-// handleResetGroupOffset resets a group's committed offset for one partition.
 func (s *Server) handleResetGroupOffset(w http.ResponseWriter, r *http.Request) {
 	groupID := r.PathValue("group")
 	var req struct {
 		Topic        string `json:"topic"`
 		Partition    int32  `json:"partition"`
-		Strategy     string `json:"strategy"` // to_earliest | to_latest | to_offset
+		Strategy     string `json:"strategy"`
 		TargetOffset int64  `json:"target_offset"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -146,8 +134,6 @@ func (s *Server) handleResetGroupOffset(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, 400, "topic required")
 		return
 	}
-	// Rejecting an invisible topic with the same answer as a missing one keeps
-	// this endpoint from confirming that a topic exists.
 	if !s.can(s.requestPrincipal(r), authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: req.Topic}) {
 		writeErr(w, 404, "unknown topic or partition")
 		return
@@ -184,7 +170,6 @@ func (s *Server) handleResetGroupOffset(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleDeleteGroup deletes an empty group from the web UI.
 func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	groupID := r.PathValue("group")
 	if err := s.gm.DeleteGroup(groupID); err != nil {
@@ -195,8 +180,6 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	s.auditRequest(r, "group.delete", groupID, "deleted group")
 	writeJSON(w, 200, map[string]string{"deleted": groupID})
 }
-
-// Topic detail / truncate / compact (Fitur 9)
 
 type partitionDetail struct {
 	Partition     int32                 `json:"partition"`
@@ -229,7 +212,6 @@ func (s *Server) handleTopicPartitions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-// handleTruncateTopic truncates a partition's log to a target offset.
 func (s *Server) handleTruncateTopic(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
 	var req struct {
@@ -257,7 +239,6 @@ func (s *Server) handleTruncateTopic(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCompactTopic triggers an immediate compaction of a compacted topic.
 func (s *Server) handleCompactTopic(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
 	if s.store.GetTopic(topic) == nil {
@@ -277,25 +258,16 @@ func (s *Server) handleCompactTopic(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"compacted": topic})
 }
 
-// Data browser search & pagination (Fitur 14)
-
-// Anggaran pemindaian: `limit` membatasi HASIL, bukan pekerjaan. Tanpa anggaran
-// byte dan waktu, predikat tak selektif menelusuri seluruh log tanpa cara berhenti.
 const (
-	searchDefaultByteBudget = 8 << 20  // 8 MiB
-	searchMaxByteBudget     = 64 << 20 // batas atas yang boleh diminta klien
+	searchDefaultByteBudget = 8 << 20
+	searchMaxByteBudget     = 64 << 20
 	searchDefaultTimeBudget = 3 * time.Second
 	searchMaxTimeBudget     = 15 * time.Second
 	searchMaxConcurrent     = 4
 )
 
-// searchSem membatasi pemindaian aktif di seluruh broker: pemindaian menahan I/O
-// disk dan kunci partisi bergantian dengan penulis, jadi N tab yang menekan
-// Search tidak boleh berarti N pemindaian penuh paralel.
 var searchSem = make(chan struct{}, searchMaxConcurrent)
 
-// budgetInt64 membaca anggaran dari query string dan menjepitnya: nilai tak sah
-// jatuh ke default, nilai berlebihan ke batas atas.
 func budgetInt64(raw string, def, max int64) int64 {
 	v, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || v <= 0 {
@@ -307,8 +279,6 @@ func budgetInt64(raw string, def, max int64) int64 {
 	return v
 }
 
-// handleGetMessages supports offset+limit pagination plus search/filtering on
-// key/value and a timestamp window.
 func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	topic := r.PathValue("topic")
@@ -334,14 +304,12 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !hasOffset && search == "" && fromTS == 0 && toTS == 0 {
-		// Tanpa offset dan filter: buka jendela pesan terbaru secara instan
 		offset = p.LogEndOffset() - int64(limit)
 		if offset < p.EarliestOffset() {
 			offset = p.EarliestOffset()
 		}
 	}
 
-	// Kendali penerimaan: menolak lebih jujur daripada menumpuk pemindaian.
 	select {
 	case searchSem <- struct{}{}:
 		defer func() { <-searchSem }()
@@ -357,9 +325,6 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	deadline := time.Now().Add(timeBudget)
 	ctx := r.Context()
 
-	// Scan forward from the requested offset until `limit` matches or the high
-	// watermark is reached. The slice starts non-nil so an empty result serialises
-	// as [] rather than null, which would break the next consumer of that list.
 	matches := []messageRecord{}
 	next := offset
 	if next < p.EarliestOffset() {
@@ -379,8 +344,6 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 	searchLower := strings.ToLower(search)
 
 	for len(matches) < limit && next < p.LogEndOffset() {
-		// Klien pergi: hentikan pemindaian di server, jangan menunggu sampai
-		// kebetulan selesai.
 		if err := ctx.Err(); err != nil {
 			truncated, stopReason = true, "client_gone"
 			break
@@ -393,9 +356,6 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 			truncated, stopReason = true, "time_budget"
 			break
 		}
-		// Satu halaman terakhir boleh melewati anggaran (maksimal satu halaman,
-		// <= ~2 MB): memotong batch di tengah lebih buruk daripada melewati
-		// anggaran sedikit, dan angka yang dilaporkan tetap apa adanya.
 		raw, _, err := p.Read(next, pageBytes)
 		if err != nil {
 			truncated, stopReason = true, "read_error"
@@ -430,13 +390,11 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if len(matches) == before {
-			// No matches in this window; advance by the records scanned.
 			last := int64(0)
 			if len(records) > 0 {
 				last = records[len(records)-1].Offset
 			}
 			if last <= next {
-				// Tidak ada kemajuan: berhenti, dan katakan alasannya.
 				stopReason = "no_progress"
 				truncated = next < p.LogEndOffset()
 				break
@@ -455,10 +413,6 @@ func (s *Server) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// truncated dan stopReason menjawab "apakah ini seluruh jawabannya": pemindaian
-	// yang berhenti karena anggaran tidak boleh tampak seperti sudah sampai ujung
-	// log. bytesRead melaporkan byte yang dibaca; byte yang menuntut restore segmen
-	// remote tidak masuk hitungan ini.
 	writeJSON(w, 200, map[string]any{
 		"records":        matches,
 		"offset":         offset,

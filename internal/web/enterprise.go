@@ -11,17 +11,12 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/authz"
 )
 
-// actorFrom returns the verified authenticated user for an audit entry, or
-// "anonymous".
 func (s *Server) actorFrom(r *http.Request) string {
 	if u := s.requestPrincipal(r); u != "" {
 		return u
 	}
 	return "anonymous"
 }
-
-// Fitur 4.4: Schema Registry Studio - expose per-subject schema versions so the
-// web UI can run compatibility checks and show a visual diff.
 
 func (s *Server) handleSchemaDetail(w http.ResponseWriter, r *http.Request) {
 	if s.sr == nil {
@@ -37,17 +32,13 @@ func (s *Server) handleSchemaDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, versions)
 }
 
-// Fitur 4.5: Visual ACL Manager + Audit Trail (in-memory).
-
-// ACLRule grants a set of operations on a resource to a principal.
 type ACLRule struct {
 	Principal    string   `json:"principal"`
-	ResourceType string   `json:"resourceType"` // "topic" | "group"
+	ResourceType string   `json:"resourceType"`
 	ResourceName string   `json:"resourceName"`
-	Operations   []string `json:"operations"` // "Read","Write","Admin"
+	Operations   []string `json:"operations"`
 }
 
-// AuditEntry is one recorded admin action for the audit trail viewer.
 type AuditEntry struct {
 	Time     int64  `json:"time"`
 	Actor    string `json:"actor"`
@@ -56,18 +47,12 @@ type AuditEntry struct {
 	Detail   string `json:"detail"`
 }
 
-// auditRingSize bounds the in-memory view the dashboard renders. It is only a
-// view: the durable record is the audit package's trail, which this ring
-// cannot erase by filling up.
 const auditRingSize = 500
 
-// recordAudit appends an audit entry to the in-memory ring and to the
-// persistent trail.
 func (s *Server) recordAudit(actor, action, resource, detail string) {
 	s.recordAuditEvent(audit.Event{Actor: actor, Action: action, Resource: resource, Detail: detail, Result: audit.ResultOK})
 }
 
-// recordAuditEvent records one event with an explicit result.
 func (s *Server) recordAuditEvent(e audit.Event) {
 	if e.Time == 0 {
 		e.Time = time.Now().UnixMilli()
@@ -83,8 +68,6 @@ func (s *Server) recordAuditEvent(e audit.Event) {
 	audit.Log(e)
 }
 
-// auditRequest records a state-changing action together with where it came
-// from, which is what makes the trail usable after an incident.
 func (s *Server) auditRequest(r *http.Request, action, resource, detail string) {
 	s.recordAuditEvent(audit.Event{
 		Actor:      s.actorFrom(r),
@@ -96,7 +79,6 @@ func (s *Server) auditRequest(r *http.Request, action, resource, detail string) 
 	})
 }
 
-// auditFailure records a refused or failed action.
 func (s *Server) auditFailure(r *http.Request, action, resource, detail string) {
 	s.recordAuditEvent(audit.Event{
 		Actor:      s.actorFrom(r),
@@ -134,8 +116,6 @@ func (s *Server) handleUpsertACL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.aclStore.Upsert(ruleFromWire(rule)); err != nil {
-		// A rejected rule (unknown operation or resource type) is a bad request,
-		// not a server failure, and the message names the offending field.
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -157,7 +137,6 @@ func (s *Server) handleDeleteACL(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"deleted": fmt.Sprintf("%s|%s|%s", rule.Principal, rule.ResourceType, rule.ResourceName)})
 }
 
-// ruleFromWire converts the web API representation into an authz rule.
 func ruleFromWire(r ACLRule) authz.Rule {
 	return authz.Rule{
 		Principal:    r.Principal,
@@ -167,7 +146,6 @@ func ruleFromWire(r ACLRule) authz.Rule {
 	}
 }
 
-// ruleToWire converts an authz rule into the web API representation.
 func ruleToWire(r authz.Rule) ACLRule {
 	return ACLRule{
 		Principal:    r.Principal,
@@ -182,7 +160,6 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 	out := make([]AuditEntry, len(s.auditLog))
 	copy(out, s.auditLog)
 	s.auditMu.Unlock()
-	// Newest first.
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
 	}

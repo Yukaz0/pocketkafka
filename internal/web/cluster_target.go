@@ -243,8 +243,6 @@ func (s *Server) handleKafkaClusterTarget(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusMethodNotAllowed, "external Kafka target endpoint is read-only")
 		return
 	}
-	// The live tail is long-lived: it dials its own client so the stream never
-	// holds the sampler's clientMu.
 	if strings.HasSuffix(path, "/tail") {
 		if !isWebSocketUpgrade(r) {
 			writeErr(w, http.StatusBadRequest, "live tail requires a websocket upgrade")
@@ -275,11 +273,6 @@ func (s *Server) handleKafkaClusterTarget(w http.ResponseWriter, r *http.Request
 	}
 
 	ec := s.externalFor(entry)
-	// The dashboard polls the topic and group lists every few seconds, and one
-	// live read of a remote cluster costs tens of round trips (34 groups = 34
-	// OffsetFetch calls). The cache answers a poll or a page reload from the last
-	// read, so a reload never waits for the scan again and one tab cannot keep
-	// re-reading production brokers on every tick.
 	cacheable := path == "/api/v1/topics" || path == "/api/v1/groups"
 	if cacheable {
 		if body, ok := ec.cachedList(path, func() { s.refreshKafkaList(entry, path) }); ok {
@@ -298,8 +291,6 @@ func (s *Server) handleKafkaClusterTarget(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
-	// Cold cache: the first request after a restart reads the cluster inline and
-	// leaves the answer for every request after it.
 	captured := &captureResponse{header: make(http.Header)}
 	err := ec.withReadClient(func(cc externalClusterClient) error {
 		s.dispatchKafkaTarget(captured, cc, path, r.URL.Query())
@@ -321,7 +312,6 @@ func (s *Server) handleKafkaClusterTarget(w http.ResponseWriter, r *http.Request
 	w.Write(captured.buf.Bytes())
 }
 
-// dispatchKafkaTarget routes one read to the external cluster's handler.
 func (s *Server) dispatchKafkaTarget(w http.ResponseWriter, cc externalClusterClient, path string, q url.Values) {
 	switch {
 	case path == "/api/v1/topics":
@@ -342,7 +332,6 @@ func (s *Server) dispatchKafkaTarget(w http.ResponseWriter, cc externalClusterCl
 	}
 }
 
-// refreshKafkaList re-reads one cached target list in the background.
 func (s *Server) refreshKafkaList(entry ClusterEntry, path string) {
 	ec := s.externalFor(entry)
 	captured := &captureResponse{header: make(http.Header)}
@@ -426,12 +415,6 @@ func kafkaReadEndpoint(path string) bool {
 	return false
 }
 
-// kafkaTopicOffsets reads one timestamp position (-1 latest, -2 earliest) for
-// every partition of every topic. One bulk request per broker replaces two round
-// trips per topic, which is what makes a 49-topic cluster answer in a second
-// instead of twelve over a remote link. Internal topics are not part of the bulk
-// pass, so they are read individually. If the bulk request fails outright the
-// slower per-topic path still answers.
 func kafkaTopicOffsets(cc externalClusterClient, topics []client.TopicInfo, ts int64) (map[string]map[int32]int64, error) {
 	bulk, err := cc.ListOffsetsBulk(ts)
 	if err != nil {
@@ -532,9 +515,6 @@ func (s *Server) handleKafkaTopicPartitions(w http.ResponseWriter, cc externalCl
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleKafkaMessages serves a bounded page of records read straight from the
-// external cluster's log. It mirrors the local Data Browser response shape so
-// the SPA renders both targets with the same code.
 func (s *Server) handleKafkaMessages(w http.ResponseWriter, cc externalClusterClient, topic string, q url.Values) {
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit <= 0 || limit > 500 {
@@ -553,11 +533,6 @@ func (s *Server) handleKafkaMessages(w http.ResponseWriter, cc externalClusterCl
 	fromTS, _ := strconv.ParseInt(q.Get("from_ts"), 10, 64)
 	toTS, _ := strconv.ParseInt(q.Get("to_ts"), 10, 64)
 
-	// No offset means "the newest page". A monitoring view opens on a live
-	// production topic, where the beginning of the log is both useless and
-	// expensive to reach: a compacted partition with hundreds of millions of
-	// offsets behind the request takes seconds to scan. An explicit offset
-	// (offset=0 from the Beginning button, or a number) is honoured as given.
 	var endOffset int64 = -1
 	if ends, err := cc.ListEndOffsets(topic); err == nil {
 		if end, ok := ends[partition]; ok {
@@ -580,8 +555,6 @@ func (s *Server) handleKafkaMessages(w http.ResponseWriter, cc externalClusterCl
 		offset = earliest
 	}
 
-	// Each fetch returns a whole record batch, so a filtered page costs a
-	// bounded number of round trips rather than one request per record.
 	const pageBytes = 1 << 20
 	matches := []messageRecord{}
 	next := offset
@@ -654,9 +627,6 @@ func kafkaMessageRecord(topic string, partition int32, rec client.FetchedRecord)
 	}
 }
 
-// handleKafkaTailWS streams records that arrive after the connection opens. It
-// starts each partition at its current end and forwards what it finds, exactly
-// like the local tail. It holds its own client, never the sampler's.
 func (s *Server) handleKafkaTailWS(w http.ResponseWriter, r *http.Request, entry ClusterEntry, path string) {
 	topic := strings.Split(path, "/")[4]
 	qp := r.URL.Query().Get("partition")
@@ -704,15 +674,9 @@ func (s *Server) handleKafkaTailWS(w http.ResponseWriter, r *http.Request, entry
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
-	// fetchPart reads one partition from its cursor and returns the records plus
-	// the cursor that follows them. Each partition is fetched on its own goroutine:
-	// a tick costs one round trip instead of one per partition, which is what the
-	// stream's smoothness depends on over a remote link.
 	fetchPart := func(tp *tailPart) []messageRecord {
 		records, after, err := cc.FetchRecords(topic, tp.id, tp.next, 1<<20)
 		if err != nil {
-			// A transient broker error must not tear the stream down; the next
-			// tick retries from the same offset.
 			return nil
 		}
 		if len(records) == 0 {
@@ -730,10 +694,6 @@ func (s *Server) handleKafkaTailWS(w http.ResponseWriter, r *http.Request, entry
 	}
 
 	for {
-		// Drain client frames without waiting for one. A blocking read here paces
-		// the whole tail at the read deadline, which delivers records in
-		// one-second bursts instead of as they land. A protocol violation ends
-		// the stream.
 		if err := wsDrain(conn); err != nil {
 			return
 		}
@@ -756,7 +716,6 @@ func (s *Server) handleKafkaTailWS(w http.ResponseWriter, r *http.Request, entry
 		}
 		wg.Wait()
 		if len(pending) > 1 {
-			// Two partitions answer out of order; the table reads oldest first.
 			sort.SliceStable(pending, func(i, j int) bool {
 				if pending[i].Partition != pending[j].Partition {
 					return pending[i].Partition < pending[j].Partition
@@ -790,9 +749,6 @@ func (s *Server) handleKafkaGroups(w http.ResponseWriter, cc externalClusterClie
 		return
 	}
 	sort.Strings(groups)
-	// One DescribeGroups request per broker covers every group, and one bulk
-	// offset pass covers every partition lag. Asking per group and per partition
-	// turned a page of 34 groups into hundreds of round trips.
 	states, err := cc.DescribeGroupsAll(groups)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "unable to describe external Kafka consumer groups")
@@ -870,9 +826,6 @@ func externalGroupOffsetRows(cc externalClusterClient, group string, ends map[st
 	sort.Strings(topics)
 	rows := make([]groupOffsetRow, 0)
 	lagByPartition := make(map[string]int64)
-	// ends (one bulk pass over every partition) is what turns lag into a single
-	// round trip per group; without it each committed topic costs one ListOffsets
-	// request per partition, which is hundreds of requests for a page of groups.
 	local := map[string]map[int32]int64{}
 	for _, topic := range topics {
 		topicEnds, ok := ends[topic]

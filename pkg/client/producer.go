@@ -8,36 +8,27 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// Message is a single record to publish.
 type Message struct {
 	Topic     string
 	Key       []byte
 	Value     []byte
 	Headers   map[string][]byte
-	Partition int32 // -1 for auto hash (partition 0 in this single-partition broker)
+	Partition int32
 	Callback  func(offset int64, err error)
 }
 
-// Producer publishes messages to the broker, batching them into RecordBatch v2
-// payloads. It supports synchronous (SendSync), buffered asynchronous (Send),
-// idempotent (sequence-numbered) and transactional publish.
 type Producer struct {
 	client *KafkaClient
 	cfg    ProducerConfig
 
 	accum *RecordAccumulator
 
-	// Idempotent producer state. Transactional state is deliberately absent:
-	// the broker does not implement transactions (see ErrTransactionsUnsupported).
 	producerID    int64
 	producerEpoch int16
-	sequence      int32 // per-partition base sequence (single-partition broker)
+	sequence      int32
 	mu            sync.Mutex
 }
 
-// NewProducer returns a Producer bound to the given client. When the config
-// enables idempotence or a transactional ID, the producer initializes itself
-// with the broker (InitProducerId, Key 22).
 func NewProducer(client *KafkaClient, cfg ProducerConfig) *Producer {
 	if cfg.Acks == 0 {
 		cfg.Acks = 1
@@ -52,14 +43,12 @@ func NewProducer(client *KafkaClient, cfg ProducerConfig) *Producer {
 	if cfg.Idempotent || cfg.TransactionalID != "" {
 		p.initProducerID()
 	}
-	// Buffered producer: a RecordAccumulator flushes on batch-size/linger.
 	if cfg.BatchSize > 1 || cfg.LingerMs > 0 {
 		p.accum = NewRecordAccumulator(cfg.BatchSize, cfg.LingerMs, p.flushBatch)
 	}
 	return p
 }
 
-// initProducerID requests a producer ID from the broker (Key 22).
 func (p *Producer) initProducerID() {
 	req := &protocol.InitProducerIdRequest{
 		Version:              p.client.version(protocol.APKInitProducerID),
@@ -84,8 +73,6 @@ func (p *Producer) initProducerID() {
 	p.producerEpoch = resp.ProducerEpoch
 }
 
-// SendSync publishes a single message and waits for the broker ack, returning
-// the assigned base offset.
 func (p *Producer) SendSync(ctx context.Context, msg *Message) (int64, error) {
 	req, err := p.buildProduceRequest([]*Message{msg})
 	if err != nil {
@@ -113,10 +100,6 @@ func (p *Producer) SendSync(ctx context.Context, msg *Message) (int64, error) {
 	return pr.BaseOffset, nil
 }
 
-// Send publishes a message asynchronously. When the producer is buffered
-// (BatchSize/LingerMs configured) the message is queued and flushed by the
-// accumulator; otherwise it is published immediately in a goroutine. The
-// optional callback fires on completion.
 func (p *Producer) Send(msg *Message) {
 	if p.accum != nil {
 		p.accum.Append(msg)
@@ -130,7 +113,6 @@ func (p *Producer) Send(msg *Message) {
 	}()
 }
 
-// Flush blocks until all buffered messages are sent and acknowledged.
 func (p *Producer) Flush(ctx context.Context) error {
 	if p.accum != nil {
 		p.accum.Flush(ctx)
@@ -138,7 +120,6 @@ func (p *Producer) Flush(ctx context.Context) error {
 	return nil
 }
 
-// flushBatch is the accumulator flush callback: one ProduceRequest per batch.
 func (p *Producer) flushBatch(msgs []*Message) error {
 	req, err := p.buildProduceRequest(msgs)
 	if err != nil {
@@ -152,8 +133,6 @@ func (p *Producer) flushBatch(msgs []*Message) error {
 	return err
 }
 
-// buildProduceRequest groups messages by topic and encodes them into a single
-// RecordBatch per topic (partition 0).
 func (p *Producer) buildProduceRequest(msgs []*Message) (*protocol.ProduceRequest, error) {
 	byTopic := make(map[string][]*Message)
 	for _, m := range msgs {
@@ -181,8 +160,6 @@ func (p *Producer) buildProduceRequest(msgs []*Message) (*protocol.ProduceReques
 	return req, nil
 }
 
-// encodeBatch serializes a list of messages into one RecordBatch, stamping the
-// producer ID/epoch/sequence when the producer is idempotent or transactional.
 func (p *Producer) encodeBatch(msgs []*Message) ([]byte, error) {
 	now := time.Now().UnixMilli()
 	b := &protocol.RecordBatch{
@@ -216,9 +193,6 @@ func (p *Producer) encodeBatch(msgs []*Message) ([]byte, error) {
 	return protocol.EncodeRecordBatch(b)
 }
 
-// BeginTransaction always fails with ErrTransactionsUnsupported. The broker
-// does not implement transactional semantics, so the producer must not pretend
-// a transaction started.
 func (p *Producer) BeginTransaction() error {
 	if p.cfg.TransactionalID == "" {
 		return errNoTransaction
@@ -226,14 +200,10 @@ func (p *Producer) BeginTransaction() error {
 	return ErrTransactionsUnsupported
 }
 
-// CommitTransaction always fails with ErrTransactionsUnsupported (see
-// BeginTransaction).
 func (p *Producer) CommitTransaction() error {
 	return p.endTransaction(true)
 }
 
-// AbortTransaction always fails with ErrTransactionsUnsupported (see
-// BeginTransaction).
 func (p *Producer) AbortTransaction() error {
 	return p.endTransaction(false)
 }
@@ -246,7 +216,6 @@ func (p *Producer) endTransaction(commit bool) error {
 	return ErrTransactionsUnsupported
 }
 
-// Close flushes pending batches and releases resources held by the producer.
 func (p *Producer) Close() error {
 	if p.accum != nil {
 		p.accum.Close()
@@ -254,6 +223,4 @@ func (p *Producer) Close() error {
 	return nil
 }
 
-// errNoTransaction is returned when a transactional API is used without a
-// transactional producer.
 var errNoTransaction = &KafkaError{Code: protocol.ErrInvalidTxnState}

@@ -2,7 +2,6 @@ package client
 
 import "errors"
 
-// KafkaError is an error carrying a Kafka protocol error code.
 type KafkaError struct {
 	Code int16
 }
@@ -13,10 +12,6 @@ func (e *KafkaError) Error() string {
 
 var errNoResponse = errors.New("empty produce response")
 
-// ErrTransactionsUnsupported is returned by the transactional producer API. The
-// broker does not implement transaction semantics (no transaction coordinator,
-// no atomic visibility), so starting, committing, or aborting a transaction
-// fails closed with a clear sentinel instead of silently succeeding.
 var ErrTransactionsUnsupported = errors.New("pocketkafka: transactions are not supported by this broker")
 
 func itoa(v int64) string {

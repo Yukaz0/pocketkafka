@@ -1,11 +1,5 @@
 package web
 
-// Dashboard sessions. A signed cookie alone was not enough: it carried no
-// expiry the server checked, so a leaked cookie stayed valid until the signing
-// secret changed, and logging out only deleted the cookie in the browser. A
-// session now has a server-side record with an absolute lifetime, an idle
-// timeout, and an id that logout revokes.
-
 import (
 	"crypto/rand"
 	"encoding/base64"
@@ -17,15 +11,12 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/config"
 )
 
-// session is one authenticated dashboard login.
 type session struct {
 	user    string
 	expires time.Time
 	idle    time.Time
 }
 
-// sessionStore keeps the live sessions of a single dashboard. It is in memory
-// on purpose: a restart ends every session, which is the safe direction.
 type sessionStore struct {
 	mu     sync.Mutex
 	byID   map[string]*session
@@ -53,7 +44,6 @@ func newSessionStore(ttl, idle time.Duration) *sessionStore {
 	}
 }
 
-// Create starts a session for user and returns its id and expiry.
 func (st *sessionStore) Create(user string) (string, time.Time, error) {
 	var raw [24]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -68,10 +58,6 @@ func (st *sessionStore) Create(user string) (string, time.Time, error) {
 	return id, now.Add(st.ttl), nil
 }
 
-// Validate reports whether a session is still usable for user, refreshing its
-// idle deadline. A session that has passed either deadline is dropped: an
-// absolute lifetime bounds a stolen cookie, the idle timeout bounds an
-// abandoned browser.
 func (st *sessionStore) Validate(id, user string) bool {
 	if id == "" || user == "" {
 		return false
@@ -91,7 +77,6 @@ func (st *sessionStore) Validate(id, user string) bool {
 	return true
 }
 
-// Revoke ends one session (logout).
 func (st *sessionStore) Revoke(id string) {
 	if id == "" {
 		return
@@ -101,8 +86,6 @@ func (st *sessionStore) Revoke(id string) {
 	delete(st.byID, id)
 }
 
-// RevokeUser ends every session of a user, which is what a credential change
-// (or an operator reaction to a leak) needs.
 func (st *sessionStore) RevokeUser(user string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -113,15 +96,12 @@ func (st *sessionStore) RevokeUser(user string) {
 	}
 }
 
-// Active reports the number of live sessions (for the metrics endpoint).
 func (st *sessionStore) Active() int {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	return len(st.byID)
 }
 
-// gcLocked drops expired sessions; it runs on every create so the map cannot
-// grow without bound from logins that are never used again.
 func (st *sessionStore) gcLocked(now time.Time) {
 	if !st.lastGC.IsZero() && now.Sub(st.lastGC) < time.Minute {
 		return
@@ -139,14 +119,10 @@ const (
 	defaultSessionIdleMinutes = 120
 )
 
-// sessionPayload renders the cookie payload "user|exp|sid".
 func sessionPayload(user string, exp time.Time, id string) string {
 	return user + "|" + strconv.FormatInt(exp.Unix(), 10) + "|" + id
 }
 
-// parseSessionPayload reads a "user|exp|sid" payload. It rejects the older
-// "user|timestamp" form: a cookie issued before sessions existed has no
-// revocable id, so it must not be accepted after the upgrade.
 func parseSessionPayload(payload string) (user, id string, exp time.Time, ok bool) {
 	parts := strings.Split(payload, "|")
 	if len(parts) != 3 || parts[0] == "" || parts[2] == "" {

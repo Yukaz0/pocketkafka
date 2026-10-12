@@ -6,36 +6,29 @@ import (
 	"time"
 )
 
-// TopicPartition identifies one partition for batching.
 type TopicPartition struct {
 	Topic     string
 	Partition int32
 }
 
-// BatchBuffer accumulates messages for one topic-partition until the batch size
-// or linger timeout triggers a flush.
 type BatchBuffer struct {
 	records   []*Message
 	byteSize  int
 	createdAt time.Time
 }
 
-// RecordAccumulator buffers messages per topic-partition and flushes batches
-// either when the batch fills or after the linger window elapses.
 type RecordAccumulator struct {
 	mu        sync.Mutex
 	buffers   map[TopicPartition]*BatchBuffer
-	batchSize int           // max records per batch
-	byteLimit int           // max payload bytes per batch
-	linger    time.Duration // flush timer per batch
+	batchSize int
+	byteLimit int
+	linger    time.Duration
 	flushFn   func([]*Message) error
 	flushCh   chan TopicPartition
 	doneCh    chan struct{}
 	wg        sync.WaitGroup
 }
 
-// NewRecordAccumulator builds an accumulator that flushes full or lingered
-// batches through flushFn (which must perform one ProduceRequest).
 func NewRecordAccumulator(batchSize int, linger time.Duration, flushFn func([]*Message) error) *RecordAccumulator {
 	if batchSize <= 0 {
 		batchSize = 1000
@@ -46,7 +39,7 @@ func NewRecordAccumulator(batchSize int, linger time.Duration, flushFn func([]*M
 	a := &RecordAccumulator{
 		buffers:   make(map[TopicPartition]*BatchBuffer),
 		batchSize: batchSize,
-		byteLimit: 16 * 1024, // 16KB default batch byte limit
+		byteLimit: 16 * 1024,
 		linger:    linger,
 		flushFn:   flushFn,
 		flushCh:   make(chan TopicPartition, 256),
@@ -57,8 +50,6 @@ func NewRecordAccumulator(batchSize int, linger time.Duration, flushFn func([]*M
 	return a
 }
 
-// Append buffers a message and returns true when the batch is full and should
-// be flushed immediately.
 func (a *RecordAccumulator) Append(msg *Message) bool {
 	a.mu.Lock()
 	tp := TopicPartition{Topic: msg.Topic, Partition: msg.Partition}
@@ -76,14 +67,12 @@ func (a *RecordAccumulator) Append(msg *Message) bool {
 		select {
 		case a.flushCh <- tp:
 		default:
-			// flusher is busy; it will pick this batch up on its next tick
 		}
 		return true
 	}
 	return false
 }
 
-// flusherLoop periodically flushes batches whose linger window elapsed.
 func (a *RecordAccumulator) flusherLoop() {
 	defer a.wg.Done()
 	ticker := time.NewTicker(a.linger / 2)
@@ -115,7 +104,6 @@ func (a *RecordAccumulator) flushLingered() {
 	}
 }
 
-// flush extracts and sends the batch for one topic-partition.
 func (a *RecordAccumulator) flush(tp TopicPartition) {
 	a.mu.Lock()
 	buf, ok := a.buffers[tp]
@@ -132,7 +120,6 @@ func (a *RecordAccumulator) flush(tp TopicPartition) {
 	}
 }
 
-// Close flushes any lingering batches and stops the flusher.
 func (a *RecordAccumulator) Close() {
 	select {
 	case <-a.doneCh:
@@ -143,7 +130,6 @@ func (a *RecordAccumulator) Close() {
 	a.flushAll()
 }
 
-// flushAll drains every pending buffer synchronously.
 func (a *RecordAccumulator) flushAll() {
 	a.mu.Lock()
 	var tps []TopicPartition
@@ -156,7 +142,6 @@ func (a *RecordAccumulator) flushAll() {
 	}
 }
 
-// Flush synchronously drains all pending batches (used by producer.Flush).
 func (a *RecordAccumulator) Flush(ctx context.Context) {
 	a.flushAll()
 }

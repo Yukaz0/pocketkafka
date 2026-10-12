@@ -1,5 +1,3 @@
-// Package web implements the embedded monitoring dashboard (REST + WebSocket
-// live tail) that ships inside the pocketkafka binary on port 8080.
 package web
 
 import (
@@ -18,26 +16,14 @@ import (
 	"time"
 )
 
-// wsGUID is the fixed GUID from RFC 6455 used to compute the accept key.
 const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 const (
-	// wsMaxControlPayload is the RFC 6455 limit for a control frame.
 	wsMaxControlPayload = 125
-	// wsMaxClientPayload bounds a data frame coming *from* the browser. The
-	// dashboard only ever sends pings, so anything larger is not a dashboard:
-	// the previous code allocated whatever length the client declared, up to
-	// 2^63 bytes.
-	wsMaxClientPayload = 64 << 10
-	// wsWriteTimeout bounds a write to a client that stopped reading.
-	wsWriteTimeout = 15 * time.Second
+	wsMaxClientPayload  = 64 << 10
+	wsWriteTimeout      = 15 * time.Second
 )
 
-// wsOriginAllowed reports whether a WebSocket handshake may be accepted. A
-// browser always sends Origin on a handshake, so a missing one is not from the
-// dashboard; a present one must name this exact host, which stops another site
-// (including another port on localhost) from opening a socket with the
-// operator's cookie.
 func (s *Server) wsOriginAllowed(r *http.Request) bool {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
@@ -50,10 +36,6 @@ func (s *Server) wsOriginAllowed(r *http.Request) bool {
 	return strings.EqualFold(u.Host, r.Host)
 }
 
-// wsHostAllowed reports whether the Host header may be served over WebSocket.
-// Requiring an IP literal or "localhost" by default defeats DNS rebinding: an
-// attacker's domain resolves to 127.0.0.1 but its Host is a name. A dashboard
-// reached under another name must list it in web.allowed_hosts.
 func (s *Server) wsHostAllowed(r *http.Request) bool {
 	host := r.Host
 	if h, _, err := net.SplitHostPort(host); err == nil {
@@ -74,8 +56,6 @@ func (s *Server) wsHostAllowed(r *http.Request) bool {
 	return net.ParseIP(host) != nil
 }
 
-// upgradeWebSocket performs the RFC 6455 opening handshake. It hijacks the
-// connection and returns the raw net.Conn for frame I/O.
 func (s *Server) upgradeWebSocket(w http.ResponseWriter, r *http.Request) (net.Conn, error) {
 	if !headerContains(r.Header.Get("Connection"), "upgrade") {
 		return nil, fmt.Errorf("missing Connection: Upgrade")
@@ -121,12 +101,10 @@ func (s *Server) upgradeWebSocket(w http.ResponseWriter, r *http.Request) (net.C
 	return conn, nil
 }
 
-// writeWSFrame writes a single unmasked text frame to the client. The write is
-// bounded so a client that stops reading cannot pin a goroutine forever.
 func writeWSFrame(conn net.Conn, payload []byte) error {
 	var hdr [14]byte
 	i := 0
-	hdr[i] = 0x81 // FIN + text opcode
+	hdr[i] = 0x81
 	i++
 	n := len(payload)
 	switch {
@@ -154,9 +132,6 @@ func writeWSFrame(conn net.Conn, payload []byte) error {
 	return err
 }
 
-// readWSPing reads one frame from the client: it answers a ping with a pong and
-// rejects anything a dashboard client should not send. A rejected frame is a
-// fatal error, so the caller closes the connection instead of reading further.
 func readWSPing(conn net.Conn) error {
 	var hdr [2]byte
 	if _, err := io.ReadFull(conn, hdr[:]); err != nil {
@@ -181,8 +156,6 @@ func readWSPing(conn net.Conn) error {
 		length = binary.BigEndian.Uint64(b[:])
 	}
 
-	// RFC 6455: a client frame must be masked, a control frame must not be
-	// fragmented and must fit in 125 bytes.
 	if !masked {
 		return errors.New("websocket: unmasked client frame")
 	}
@@ -210,9 +183,9 @@ func readWSPing(conn net.Conn) error {
 	}
 
 	switch opcode {
-	case 0x8: // close: end the stream cleanly
+	case 0x8:
 		return io.EOF
-	case 0x9: // ping: answer with a pong of the same payload
+	case 0x9:
 		pong := make([]byte, 0, len(buf)+2)
 		pong = append(pong, 0x8A, byte(len(buf)))
 		pong = append(pong, buf...)
@@ -221,18 +194,13 @@ func readWSPing(conn net.Conn) error {
 		}
 		_, err := conn.Write(pong)
 		return err
-	case 0xA: // pong: nothing to do
+	case 0xA:
 		return nil
 	default:
-		// Text/binary frames are not part of the tail protocol; accepting them
-		// only creates a channel nobody reads.
 		return fmt.Errorf("websocket: unexpected opcode 0x%x", opcode)
 	}
 }
 
-// wsDrain reads any frame the client has already sent without waiting for one.
-// A read deadline in the past makes the read return immediately; only a timeout
-// (nothing pending) is not an error.
 func wsDrain(conn net.Conn) error {
 	if err := conn.SetReadDeadline(time.Now()); err != nil {
 		return err
@@ -245,7 +213,6 @@ func wsDrain(conn net.Conn) error {
 }
 
 func headerContains(v, want string) bool {
-	// Basic substring check on the comma-separated header value (case-insensitive).
 	start := 0
 	for i := 0; i <= len(v); i++ {
 		if i == len(v) || v[i] == ',' {

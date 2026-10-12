@@ -1,9 +1,5 @@
 package web
 
-// Batches 2-3 backend features: broker log ring buffer, JSONL import,
-// group offset snapshot export/import, topic config (compaction toggle),
-// schema registration proxy, and MQTT bridge status.
-
 import (
 	"bufio"
 	"bytes"
@@ -23,9 +19,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// Broker log ring buffer + viewer
-
-// logRing keeps the most recent broker log lines in memory for the UI viewer.
 type logRing struct {
 	mu    sync.Mutex
 	lines []string
@@ -50,20 +43,14 @@ func (r *logRing) snapshot() []string {
 	return out
 }
 
-// brokerLogs is the process-wide log ring. main calls InstallLogSink after
-// logger.Init so slog lines and stdlib log lines both land in the ring.
 var brokerLogs = &logRing{}
 
-// LogRing implements io.Writer and captures broker log lines for the viewer.
 var LogRing ringWriter = ringWriter{brokerLogs}
 
-// InstallLogSink routes stdlib log output into the ring while still writing
-// to stderr. slog lines reach the ring via logger.InitWithSink from main.
 func (s *Server) InstallLogSink() {
 	log.SetOutput(io.MultiWriter(os.Stderr, LogRing))
 }
 
-// ringWriter adapts logRing to io.Writer, splitting on newlines.
 type ringWriter struct{ ring *logRing }
 
 func (w ringWriter) Write(p []byte) (int, error) {
@@ -75,19 +62,15 @@ func (w ringWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// handleBrokerLogs returns the recent broker log lines.
 func (s *Server) handleBrokerLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, brokerLogs.snapshot())
 }
-
-// JSONL batch import (kebalikan export .jsonl di Data Browser)
 
 func (s *Server) handleImportJSONL(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
 	sc := bufio.NewScanner(r.Body)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 
-	// Prepare (or auto-create) the target topic.
 	if s.store.GetTopic(topic) == nil {
 		if _, _, err := s.store.EnsureTopic(topic, 1); err != nil {
 			writeErr(w, 400, err.Error())
@@ -117,7 +100,6 @@ func (s *Server) handleImportJSONL(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, fmt.Sprintf("line %d: %v", count+1, err))
 			return
 		}
-		// value: raw JSON stays raw; a quoted string is unquoted.
 		var value []byte
 		if len(rec.Value) > 0 {
 			var sv string
@@ -158,9 +140,6 @@ func (s *Server) handleImportJSONL(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"topic": topic, "imported": count})
 }
 
-// Group offset snapshot export / import
-
-// offsetSnapshotRow is one committed offset in a group snapshot file.
 type offsetSnapshotRow struct {
 	Topic     string `json:"topic"`
 	Partition int32  `json:"partition"`
@@ -168,7 +147,6 @@ type offsetSnapshotRow struct {
 	Metadata  string `json:"metadata,omitempty"`
 }
 
-// handleExportGroupOffsets dumps a group's committed offsets as JSON.
 func (s *Server) handleExportGroupOffsets(w http.ResponseWriter, r *http.Request) {
 	group := r.PathValue("group")
 	if !s.gm.GroupExists(group) {
@@ -177,9 +155,6 @@ func (s *Server) handleExportGroupOffsets(w http.ResponseWriter, r *http.Request
 	}
 	principal := s.requestPrincipal(r)
 	offs := s.gm.GroupOffsetsSnapshot(group)
-	// A snapshot names every topic the group has committed offsets for; topics
-	// this principal may not describe are dropped here so the export cannot be
-	// used to enumerate them. The wire format is unchanged.
 	visible := make(map[string]map[int32]int64, len(offs))
 	for topic, parts := range offs {
 		if s.can(principal, authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: topic}) {
@@ -193,7 +168,6 @@ func (s *Server) handleExportGroupOffsets(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleImportGroupOffsets applies a snapshot exported by handleExportGroupOffsets.
 func (s *Server) handleImportGroupOffsets(w http.ResponseWriter, r *http.Request) {
 	group := r.PathValue("group")
 	var req struct {
@@ -208,9 +182,6 @@ func (s *Server) handleImportGroupOffsets(w http.ResponseWriter, r *http.Request
 		return
 	}
 	principal := s.requestPrincipal(r)
-	// Validate every row before applying any: the snapshot is applied as one
-	// request, so a row naming an invisible topic must leave the group's offsets
-	// untouched rather than half-applied.
 	for _, row := range req.Offsets {
 		if row.Topic == "" {
 			continue
@@ -226,7 +197,7 @@ func (s *Server) handleImportGroupOffsets(w http.ResponseWriter, r *http.Request
 			continue
 		}
 		if p := s.store.GetPartition(row.Topic, row.Partition); p == nil {
-			continue // skip unknown topic/partition
+			continue
 		}
 		if err := s.gm.ResetOffsets(group, row.Topic, row.Partition, row.Offset); err != nil {
 			writeErr(w, 500, err.Error())
@@ -236,8 +207,6 @@ func (s *Server) handleImportGroupOffsets(w http.ResponseWriter, r *http.Request
 	}
 	writeJSON(w, 200, map[string]any{"group": group, "applied": applied})
 }
-
-// Topic config: cleanup policy (compaction) editor
 
 func (s *Server) handleTopicConfig(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
@@ -249,7 +218,6 @@ func (s *Server) handleTopicConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"topic": topic, "compacted": s.store.IsCompacted(topic)})
 		return
 	}
-	// PUT: toggle compaction, persisted via the topic manifest.
 	var req struct {
 		Compacted bool `json:"compacted"`
 	}
@@ -268,8 +236,6 @@ func (s *Server) handleTopicConfig(w http.ResponseWriter, r *http.Request) {
 	s.recordAudit(s.actorFrom(r), "topic.config", topic, fmt.Sprintf("cleanup.policy=%s", map[bool]string{true: "compact", false: "delete"}[req.Compacted]))
 	writeJSON(w, 200, map[string]any{"topic": topic, "compacted": req.Compacted})
 }
-
-// Schema registration proxy (uses the embedded registry's Confluent API)
 
 func (s *Server) handleRegisterSchema(w http.ResponseWriter, r *http.Request) {
 	if s.sr == nil {
@@ -292,8 +258,6 @@ func (s *Server) handleRegisterSchema(w http.ResponseWriter, r *http.Request) {
 	if req.SchemaType == "" {
 		req.SchemaType = "AVRO"
 	}
-	// Validate the schema parses as JSON; forward to the registry handler
-	// semantics by calling Register through its HTTP handler shape.
 	if !json.Valid([]byte(req.Schema)) {
 		writeErr(w, 400, "schema must be valid JSON")
 		return
@@ -311,7 +275,6 @@ func (s *Server) handleRegisterSchema(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, rec.code, json.RawMessage(rec.buf.Bytes()))
 }
 
-// captureResponse collects the downstream registry response.
 type captureResponse struct {
 	header http.Header
 	buf    bytes.Buffer
@@ -321,8 +284,6 @@ type captureResponse struct {
 func (c *captureResponse) Header() http.Header         { return c.header }
 func (c *captureResponse) Write(b []byte) (int, error) { return c.buf.Write(b) }
 func (c *captureResponse) WriteHeader(code int)        { c.code = code }
-
-// MQTT bridge status
 
 func (s *Server) handleMQTTStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]any{
@@ -339,12 +300,6 @@ func (s *Server) handleMQTTStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, status)
 }
 
-// Integrations
-
-// handleIntegrations aggregates the ingress surfaces this broker exposes —
-// MQTT, the REST proxy, the schema registry, and the Prometheus endpoint — so
-// the Integrations page renders from one fetch. Addresses come from config; no
-// credential is included.
 func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 	mqtt := map[string]any{
 		"enabled":           false,
@@ -389,24 +344,11 @@ func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ACL persistence now lives in internal/authz (shared across every ingress);
-// the web server only reads and writes through its *authz.Store.
-
-// Avro decode (minimal): parse the Confluent wire format and interpret the
-// schema to walk records without a full Avro codegen.
-
-// avroInfo reports whether a message value carries the Confluent Avro magic.
-
-// Throughput samples (Batch 2): the UI polls /api/v1/cluster every few
-// seconds; the server tracks message-count deltas here so the sparkline can
-// render messages/sec without any client-side history.
-
 var tpMu sync.Mutex
 var tpLastCount int64 = -1
 var tpLastTime time.Time
 var tpSamples []float64
 
-// NoteThroughput records the current total record count and derives msg/s.
 func NoteThroughput(s *storage.Store) {
 	var total int64
 	for _, t := range s.TopicsSnapshot() {
@@ -428,7 +370,6 @@ func NoteThroughput(s *storage.Store) {
 	tpLastTime = now
 }
 
-// ThroughputSamples returns the recent msg/s samples (oldest first).
 func ThroughputSamples() []float64 {
 	tpMu.Lock()
 	defer tpMu.Unlock()
@@ -437,7 +378,6 @@ func ThroughputSamples() []float64 {
 	return out
 }
 
-// handleThroughput exposes the samples plus totals for the UI sparkline.
 func (s *Server) handleThroughput(w http.ResponseWriter, r *http.Request) {
 	NoteThroughput(s.store)
 	var total int64

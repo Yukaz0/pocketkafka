@@ -6,7 +6,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// CreateTopic creates a topic with the given partition count.
 func (c *KafkaClient) CreateTopic(name string, partitions int) error {
 	req := &protocol.CreateTopicsRequest{
 		Version:   c.version(protocol.APKCreateTopics),
@@ -31,7 +30,6 @@ func (c *KafkaClient) CreateTopic(name string, partitions int) error {
 	return nil
 }
 
-// DeleteTopic deletes a topic and its data.
 func (c *KafkaClient) DeleteTopic(name string) error {
 	req := &protocol.DeleteTopicsRequest{
 		Version:    c.version(protocol.APKDeleteTopics),
@@ -56,7 +54,6 @@ func (c *KafkaClient) DeleteTopic(name string) error {
 	return nil
 }
 
-// ListTopics returns the names of all known topics.
 func (c *KafkaClient) ListTopics() []string {
 	if err := c.RefreshMetadata(); err != nil {
 		return nil
@@ -71,8 +68,6 @@ func (c *KafkaClient) ListTopics() []string {
 	return names
 }
 
-// QueryOffset returns the offset for a partition at the given timestamp
-// (-1 latest, -2 earliest).
 func (c *KafkaClient) QueryOffset(topic string, partition int32, ts int64) (int64, error) {
 	req := &protocol.ListOffsetsRequest{
 		Version:   c.version(protocol.APKListOffsets),
@@ -104,7 +99,6 @@ func (c *KafkaClient) QueryOffset(topic string, partition int32, ts int64) (int6
 	return p.Offset, nil
 }
 
-// GroupInfo is the client-side view of one consumer group.
 type GroupInfo struct {
 	GroupID      string
 	ProtocolType string
@@ -113,7 +107,6 @@ type GroupInfo struct {
 	Offsets      map[string]map[int32]int64
 }
 
-// ListGroups returns all consumer groups known to the broker (Key 16).
 func (c *KafkaClient) ListGroups() ([]string, error) {
 	req := &protocol.ListGroupsRequest{Version: c.version(protocol.APKListGroups)}
 	body, err := protocol.EncodeListGroupsRequest(req)
@@ -138,7 +131,6 @@ func (c *KafkaClient) ListGroups() ([]string, error) {
 	return names, nil
 }
 
-// DescribeGroup returns detailed state for one group (Key 15).
 func (c *KafkaClient) DescribeGroup(group string) (*GroupInfo, error) {
 	req := &protocol.DescribeGroupsRequest{
 		Version:  c.version(protocol.APKDescribeGroups),
@@ -173,7 +165,6 @@ func (c *KafkaClient) DescribeGroup(group string) (*GroupInfo, error) {
 	return info, nil
 }
 
-// DeleteGroup deletes a consumer group if it is empty (Key 42).
 func (c *KafkaClient) DeleteGroup(group string) error {
 	req := &protocol.DeleteGroupsRequest{
 		Version:  c.version(protocol.APKDeleteGroups),
@@ -197,14 +188,10 @@ func (c *KafkaClient) DeleteGroup(group string) error {
 	return nil
 }
 
-// ResetOffset commits a new offset for a group/topic/partition (Key 8). It is
-// the CLI/admin backend for `pkctl offset reset`.
 func (c *KafkaClient) ResetOffset(group, topic string, partition int32, offset int64) error {
 	req := &protocol.OffsetCommitRequest{
-		Version: c.version(protocol.APKOffsetCommit),
-		Group:   group,
-		// Generation -1 marks a simple, non-member commit (Kafka's contract for
-		// commits that do not carry a group membership).
+		Version:    c.version(protocol.APKOffsetCommit),
+		Group:      group,
 		Generation: -1,
 		Topics: []protocol.OffsetCommitRequestTopic{{
 			Topic: topic,
@@ -233,8 +220,6 @@ func (c *KafkaClient) ResetOffset(group, topic string, partition int32, offset i
 	return nil
 }
 
-// CommittedOffset fetches the committed offset for a group/topic/partition
-// (Key 9).
 func (c *KafkaClient) CommittedOffset(group, topic string, partition int32) (int64, error) {
 	req := &protocol.OffsetFetchRequest{
 		Version: c.version(protocol.APKOffsetFetch),

@@ -5,14 +5,6 @@ import (
 	"strings"
 )
 
-// handleConfig serves the effective broker configuration (defaults applied) for
-// the read-only "Broker configuration" card.
-//
-// The response is assembled field by field from an explicit allowlist instead
-// of serialising the config struct, so a secret added to config.Config later is
-// not exposed until someone lists it here. Names only, never passwords:
-// security.users is reduced to usernames, and the tiered endpoint keeps its
-// host while any embedded credentials are dropped.
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg
 	users := make([]string, 0, len(cfg.Security.Users))
@@ -100,7 +92,6 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// stringMapCopy copies a listener map so a response never aliases server state.
 func stringMapCopy(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
@@ -109,9 +100,6 @@ func stringMapCopy(in map[string]string) map[string]string {
 	return out
 }
 
-// hostOnly reduces a configured endpoint to host[:port], dropping credentials
-// a URL may embed. A bare "host:port" has no scheme, so url.Parse would read
-// the host as a scheme; strip the userinfo textually instead.
 func hostOnly(endpoint string) string {
 	host := endpoint
 	if i := strings.Index(host, "://"); i >= 0 {

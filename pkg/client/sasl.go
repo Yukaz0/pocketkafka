@@ -8,20 +8,14 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// MechanismPlain is the SASL mechanism this client implements. PLAIN is what the
-// SCADA clusters in this environment offer; SCRAM would need the client half of
-// RFC 5802 as well.
 const MechanismPlain = "PLAIN"
 
-// SASL carries client credentials. An empty Mechanism means no authentication,
-// which is correct for a broker that does not require it.
 type SASL struct {
 	Mechanism string
 	Username  string
 	Password  string
 }
 
-// plainToken is the SASL/PLAIN response: authzid NUL authcid NUL passwd.
 func plainToken(user, pass string) []byte {
 	token := make([]byte, 0, len(user)+len(pass)+2)
 	token = append(token, 0)
@@ -31,9 +25,6 @@ func plainToken(user, pass string) []byte {
 	return token
 }
 
-// readOnlyAPIKeys are the APIs a monitoring client may use: enough to describe a
-// cluster and read offsets, never enough to change anything. Enforcing it at the
-// request layer means a read-only client cannot write even if a caller tries.
 var readOnlyAPIKeys = map[int16]bool{
 	protocol.APKApiVersions:      true,
 	protocol.APKSaslHandshake:    true,
@@ -47,12 +38,8 @@ var readOnlyAPIKeys = map[int16]bool{
 	protocol.APKFindCoordinator:  true,
 }
 
-// ErrReadOnly is returned when a read-only client is asked for an API that can
-// change the cluster.
 var ErrReadOnly = errors.New("client is read-only: this API can change the cluster")
 
-// checkAPI refuses any API a read-only client must not use, before anything is
-// written to a broker.
 func (c *KafkaClient) checkAPI(apiKey int16) error {
 	if c.readOnly && !readOnlyAPIKeys[apiKey] {
 		return fmt.Errorf("%w (api key %d)", ErrReadOnly, apiKey)
@@ -60,9 +47,6 @@ func (c *KafkaClient) checkAPI(apiKey int16) error {
 	return nil
 }
 
-// authenticate runs the SASL exchange. ApiVersions is answered before
-// authentication by the brokers this targets, which is why negotiation happens
-// first; everything after it is refused until the exchange succeeds.
 func (c *KafkaClient) authenticate() error {
 	if c.sasl.Mechanism == "" {
 		return nil
@@ -106,8 +90,6 @@ func (c *KafkaClient) authenticate() error {
 		return fmt.Errorf("sasl authenticate: %w", err)
 	}
 	if authResp.ErrorCode != 0 {
-		// The broker's message is the only clue for a wrong password, and it
-		// never echoes the password back.
 		msg := "authentication failed"
 		if authResp.ErrorMessage != nil && *authResp.ErrorMessage != "" {
 			msg = *authResp.ErrorMessage

@@ -1,9 +1,5 @@
 package web
 
-// Health monitoring for the embedded dashboard. Rates come from log-end-offset
-// deltas, not producer counters, so they cover every ingress path and stay
-// accurate whichever client happens to be polling.
-
 import (
 	"context"
 	"fmt"
@@ -17,8 +13,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/storage"
 )
 
-// Topic/cluster verdicts. "idle" is not a fault: the topic is simply not
-// receiving data right now.
 const (
 	StatusCritical = "critical"
 	StatusDegraded = "degraded"
@@ -27,41 +21,24 @@ const (
 )
 
 const (
-	// monitorInterval is the minimum gap between two recorded samples. A
-	// client polling faster than this reuses the newest sample instead of
-	// diluting the history.
-	monitorInterval = 2 * time.Second
-	// historyRetention is how far back samples are kept. Every window the API
-	// accepts (up to 3600 s) must have history to measure against, or its rate
-	// is not reliable by construction.
-	historyRetention = time.Hour
-	// historyMaxSamples bounds memory if a client polls faster than the sampler.
+	monitorInterval   = 2 * time.Second
+	historyRetention  = time.Hour
 	historyMaxSamples = 3600
-	// historyPoints caps the series returned to the browser. The ring keeps more
-	// than it ships, and the span actually measured is reported separately.
-	historyPoints = 240
-	// defaultWindow is the rate window when the request does not ask for one.
-	defaultWindow = 60 * time.Second
-	// sparklinePoints caps the per-topic series returned to the UI.
-	sparklinePoints = 60
+	historyPoints     = 240
+	defaultWindow     = 60 * time.Second
+	sparklinePoints   = 60
 )
 
-// healthThresholds configures the verdict rules. Defaults target small
-// single-node deployments; every value can be overridden per request.
 type healthThresholds struct {
-	LagWarn     int64
-	LagCritical int64
-	LagRateWarn float64
-	LagRateCrit float64
-	SkewWarn    float64
-	IdleAfter   time.Duration
-	DiskWarnPct float64
-	DiskCritPct float64
-	// UnflushedWarnBytes is how many bytes may sit un-synced before the broker
-	// says so: a page-cache backlog is only a durability risk once it is large.
-	UnflushedWarnBytes int64
-	// RetentionWarnSeconds and RetentionCriticalSeconds bound how soon a lagging
-	// group is projected to lose offsets retention has not deleted yet.
+	LagWarn                  int64
+	LagCritical              int64
+	LagRateWarn              float64
+	LagRateCrit              float64
+	SkewWarn                 float64
+	IdleAfter                time.Duration
+	DiskWarnPct              float64
+	DiskCritPct              float64
+	UnflushedWarnBytes       int64
 	RetentionWarnSeconds     int64
 	RetentionCriticalSeconds int64
 }
@@ -82,8 +59,6 @@ func defaultThresholds() healthThresholds {
 	}
 }
 
-// retentionSummary condenses the projection: whether any group has already lost
-// unread data, and the soonest projected loss.
 func retentionSummary(risks []retentionRisk) (*int64, bool) {
 	var soonest *int64
 	for _, r := range risks {
@@ -97,7 +72,6 @@ func retentionSummary(risks []retentionRisk) (*int64, bool) {
 	return soonest, false
 }
 
-// retentionUrgency orders the projection list, most urgent first.
 func retentionUrgency(r retentionRisk) int64 {
 	if r.AlreadyLost {
 		return -1
@@ -108,20 +82,15 @@ func retentionUrgency(r retentionRisk) int64 {
 	return *r.SecondsUntilLoss
 }
 
-// Source values: where a health report's numbers came from.
 const (
 	sourceLocal    = "local"
 	sourcePeer     = "peer"
 	sourceExternal = "external"
 )
 
-// int64Ptr and f64Ptr mark a number that only some sources can produce. A nil
-// pointer serializes as null, which a renderer can show as "unknown" instead of
-// reading a zero as a real value.
 func int64Ptr(v int64) *int64   { return &v }
 func f64Ptr(v float64) *float64 { return &v }
 
-// shortDuration renders a span as the largest useful unit pair.
 func shortDuration(secs int64) string {
 	d := time.Duration(secs) * time.Second
 	switch {
@@ -134,14 +103,12 @@ func shortDuration(secs int64) string {
 	}
 }
 
-// Samples
-
 type partitionSample struct {
 	Partition int32
 	LogEnd    int64
 	Bytes     int64
-	Messages  int64 // logEnd - earliest
-	Lag       int64 // max over consumer groups
+	Messages  int64
+	Lag       int64
 }
 
 type topicSample struct {
@@ -151,38 +118,28 @@ type topicSample struct {
 	Bytes      int64
 	Lag        int64
 	MaxLag     int64
-	// Earliest is the lowest offset still retained on the topic (-1 unknown):
-	// paired with a group's next-needed offset it projects when retention will
-	// take data that group has not consumed yet.
-	Earliest int64
-	// GroupLag is the per-group total backlog on this topic at sample time, so
-	// a group's trend can be read from the same series as the topic.
-	GroupLag map[string]int64
+	Earliest   int64
+	GroupLag   map[string]int64
 }
 
 type clusterSample struct {
-	At       time.Time
-	Messages int64
-	Bytes    int64
-	Lag      int64
-	DiskPct  float64
-	// Earliest is the lowest offset still retained anywhere in the cluster, and
-	// Committed is each group's committed total: together they project when a
-	// lagging group loses the offsets it still needs to retention.
+	At        time.Time
+	Messages  int64
+	Bytes     int64
+	Lag       int64
+	DiskPct   float64
 	Earliest  int64
 	Committed map[string]int64
 }
 
-// sampleTime lets one trim helper serve both rings.
 func (t topicSample) sampleTime() time.Time   { return t.At }
 func (c clusterSample) sampleTime() time.Time { return c.At }
 
-// Monitor accumulates samples and answers "is this flowing?" questions.
 type Monitor struct {
 	mu         sync.Mutex
 	topics     map[string][]topicSample
 	cluster    []clusterSample
-	lastSeen   map[string]time.Time // topic -> last observed log growth
+	lastSeen   map[string]time.Time
 	lastAt     time.Time
 	started    time.Time
 	interval   time.Duration
@@ -190,7 +147,6 @@ type Monitor struct {
 	maxSamples int
 }
 
-// NewMonitor builds an empty monitor.
 func NewMonitor() *Monitor {
 	return &Monitor{
 		topics:     make(map[string][]topicSample),
@@ -202,16 +158,10 @@ func NewMonitor() *Monitor {
 	}
 }
 
-// Record takes one sample of the live store, or returns false when the previous
-// sample is younger than the monitor interval and force is false. The background
-// sampler sets force so its cadence stays exact regardless of client polling.
 func (m *Monitor) Record(store *storage.Store, gm *coordinator.GroupManager, now time.Time, force bool) bool {
 	if store == nil {
 		return false
 	}
-	// Cheap early exit: a non-forced sample inside the interval is never
-	// recorded, so skip the group merge and store scan entirely. The locked
-	// re-check below stays authoritative against racing callers.
 	if !force {
 		m.mu.Lock()
 		due := m.lastAt.IsZero() || now.Sub(m.lastAt) >= m.interval
@@ -280,14 +230,10 @@ func (m *Monitor) Record(store *storage.Store, gm *coordinator.GroupManager, now
 		case hadPrev && ts.Messages > prev.Messages:
 			m.lastSeen[name] = now
 		case !hadPrev && ts.Messages > 0:
-			// First sight of an already-populated topic: start the staleness
-			// clock now rather than leaving it unknown forever. This can only
-			// overstate activity right after startup; it never hides silence.
 			m.lastSeen[name] = now
 		}
 		m.topics[name] = trimSamples(append(m.topics[name], ts), now, m.retention, m.maxSamples)
 	}
-	// Drop series for topics that no longer exist.
 	for name := range m.topics {
 		if _, ok := topics[name]; !ok {
 			delete(m.topics, name)
@@ -306,8 +252,6 @@ func (m *Monitor) latest(topic string) (topicSample, bool) {
 	return s[len(s)-1], true
 }
 
-// StartSampler records a sample on every tick until ctx is done. Callers use
-// it from the broker so history exists even before the dashboard is opened.
 func (m *Monitor) StartSampler(ctx context.Context, store *storage.Store, gm *coordinator.GroupManager, interval time.Duration) {
 	if interval <= 0 {
 		interval = 5 * time.Second
@@ -330,11 +274,9 @@ func (m *Monitor) StartSampler(ctx context.Context, store *storage.Store, gm *co
 	}()
 }
 
-// Response model
-
 type healthReason struct {
 	Code     string `json:"code"`
-	Severity string `json:"severity"` // info | warn | critical
+	Severity string `json:"severity"`
 	Message  string `json:"message"`
 }
 
@@ -348,30 +290,21 @@ type groupLagRow struct {
 }
 
 type partitionHealth struct {
-	Partition int32 `json:"partition"`
-	Leader    int32 `json:"leader"`
-	LogEnd    int64 `json:"logEndOffset"`
-	Earliest  int64 `json:"earliestOffset"`
-	Messages  int64 `json:"messages"`
-	Lag       int64 `json:"lag"`
-	// Bytes and byte rates are null for a cluster we only observe as a client:
-	// the Kafka protocol has no API for on-disk size, and a zero here would be
-	// read as "empty" rather than "unknown".
-	Bytes          *int64   `json:"bytes"`
-	MessagesPerSec float64  `json:"messagesPerSec"`
-	BytesPerSec    *float64 `json:"bytesPerSec"`
-	SkewRatio      float64  `json:"skewRatio"`
-	// Broker holds facts only the process that owns the log can know. It is
-	// null for an external cluster.
-	Broker *partitionBrokerFacts `json:"broker"`
-	// ISR carries the replica topology a real multi-broker cluster has and a
-	// single-node broker cannot: null when the source is not a cluster report.
-	ISR      []int32 `json:"isr,omitempty"`
-	Replicas []int32 `json:"replicas,omitempty"`
+	Partition      int32                 `json:"partition"`
+	Leader         int32                 `json:"leader"`
+	LogEnd         int64                 `json:"logEndOffset"`
+	Earliest       int64                 `json:"earliestOffset"`
+	Messages       int64                 `json:"messages"`
+	Lag            int64                 `json:"lag"`
+	Bytes          *int64                `json:"bytes"`
+	MessagesPerSec float64               `json:"messagesPerSec"`
+	BytesPerSec    *float64              `json:"bytesPerSec"`
+	SkewRatio      float64               `json:"skewRatio"`
+	Broker         *partitionBrokerFacts `json:"broker"`
+	ISR            []int32               `json:"isr,omitempty"`
+	Replicas       []int32               `json:"replicas,omitempty"`
 }
 
-// partitionBrokerFacts is what the broker owning the log knows about durability
-// and policy debt.
 type partitionBrokerFacts struct {
 	DurableOffset      int64 `json:"durableOffset"`
 	OffsetsAtRisk      int64 `json:"offsetsAtRisk"`
@@ -379,7 +312,6 @@ type partitionBrokerFacts struct {
 	RetentionDebtBytes int64 `json:"retentionDebtBytes"`
 }
 
-// brokerFacts is the topic- and cluster-level half of the same thing.
 type brokerFacts struct {
 	BytesAtRisk         int64  `json:"bytesAtRisk"`
 	OffsetsAtRisk       int64  `json:"offsetsAtRisk"`
@@ -389,9 +321,6 @@ type brokerFacts struct {
 	LastCompactMs       int64  `json:"lastCompactMs,omitempty"`
 }
 
-// retentionRisk projects when a lagging group loses the offsets it still needs.
-// It is derived from the broker's own earliest offset advancing, which no client
-// can observe: a client only finds out by failing a read.
 type retentionRisk struct {
 	Group            string  `json:"group"`
 	NextNeeded       int64   `json:"nextNeeded"`
@@ -413,66 +342,51 @@ type topicHealth struct {
 	Lag               int64             `json:"lag"`
 	MaxPartitionLag   int64             `json:"maxPartitionLag"`
 	LagPerSec         float64           `json:"lagPerSec"`
-	Trend             string            `json:"trend"` // rising | falling | flat
+	Trend             string            `json:"trend"`
 	SkewRatio         float64           `json:"skewRatio"`
 	LastAppendAgeMs   *int64            `json:"lastAppendAgeMs"`
 	Groups            []groupLagRow     `json:"groups"`
 	Reasons           []healthReason    `json:"reasons"`
 	PartitionsDetail  []partitionHealth `json:"partitionsDetail"`
-	Sparkline         []float64         `json:"sparkline"` // msg/s, oldest first
-	// Source says where the numbers came from: "local" (this broker), "peer"
-	// (another PocketKafka over its API), or "external" (any Kafka cluster we
-	// observe as a client). Fields a client cannot know are null or listed in
-	// unavailable, never zero.
-	Source      string   `json:"source"`
-	Unavailable []string `json:"unavailable,omitempty"`
-	// Bytes and byte rates are null for an external cluster: the protocol has no
-	// size API, and a zero would read as "empty" rather than "unknown".
-	Bytes       *int64   `json:"bytes"`
-	BytesPerSec *float64 `json:"bytesPerSec"`
-	// Broker carries durability and policy debt, null when this process does not
-	// own the log.
-	Broker        *brokerFacts    `json:"broker"`
-	RetentionRisk []retentionRisk `json:"retentionRisk"`
+	Sparkline         []float64         `json:"sparkline"`
+	Source            string            `json:"source"`
+	Unavailable       []string          `json:"unavailable,omitempty"`
+	Bytes             *int64            `json:"bytes"`
+	BytesPerSec       *float64          `json:"bytesPerSec"`
+	Broker            *brokerFacts      `json:"broker"`
+	RetentionRisk     []retentionRisk   `json:"retentionRisk"`
 }
 
 type clusterHealth struct {
-	ClusterID     string  `json:"clusterId"`
-	BrokerID      int32   `json:"brokerId"`
-	Version       string  `json:"version"`
-	Status        string  `json:"status"`
-	UptimeSeconds float64 `json:"uptimeSeconds"`
-	Topics        int     `json:"topics"`
-	Partitions    int     `json:"partitions"`
-	Groups        int     `json:"groups"`
-	// TotalBytes and DiskUsagePct are null for an external cluster: no Kafka API
-	// reports on-disk size, and zero would read as an empty cluster.
-	TotalBytes      *int64 `json:"totalBytes"`
-	TotalMessages   int64  `json:"totalMessages"`
-	Lag             int64  `json:"lag"`
-	MaxPartitionLag int64  `json:"maxPartitionLag"`
-	// Source is "local", "peer", or "external".
-	Source string `json:"source"`
-	// Unavailable names the fields a client cannot observe for this source, so a
-	// renderer can hide them instead of showing a zero.
-	Unavailable     []string `json:"unavailable,omitempty"`
-	RetentionRisks  int      `json:"retentionRisks"`
-	MessagesPerSec  float64  `json:"messagesPerSec"`
-	BytesPerSec     *float64 `json:"bytesPerSec"`
-	ConsumedPerSec  float64  `json:"consumedPerSec"`
-	RateSpanSeconds float64  `json:"rateSpanSeconds"`
-	DiskUsagePct    *float64 `json:"diskUsagePct"`
-	Listeners       []string `json:"listeners"`
-	Advertised      string   `json:"advertised"`
-	Security        string   `json:"security"`
-	// Broker holds facts only the process owning the logs can know: null for an
-	// external cluster, summed over topics for a local one.
-	Broker  *brokerFacts   `json:"broker"`
-	Reasons []healthReason `json:"reasons"`
+	ClusterID       string         `json:"clusterId"`
+	BrokerID        int32          `json:"brokerId"`
+	Version         string         `json:"version"`
+	Status          string         `json:"status"`
+	UptimeSeconds   float64        `json:"uptimeSeconds"`
+	Topics          int            `json:"topics"`
+	Partitions      int            `json:"partitions"`
+	Groups          int            `json:"groups"`
+	TotalBytes      *int64         `json:"totalBytes"`
+	TotalMessages   int64          `json:"totalMessages"`
+	Lag             int64          `json:"lag"`
+	MaxPartitionLag int64          `json:"maxPartitionLag"`
+	Source          string         `json:"source"`
+	Unavailable     []string       `json:"unavailable,omitempty"`
+	RetentionRisks  int            `json:"retentionRisks"`
+	MessagesPerSec  float64        `json:"messagesPerSec"`
+	BytesPerSec     *float64       `json:"bytesPerSec"`
+	ConsumedPerSec  float64        `json:"consumedPerSec"`
+	RateSpanSeconds float64        `json:"rateSpanSeconds"`
+	DiskUsagePct    *float64       `json:"diskUsagePct"`
+	Listeners       []string       `json:"listeners"`
+	Advertised      string         `json:"advertised"`
+	Security        string         `json:"security"`
+	Broker          *brokerFacts   `json:"broker"`
+	Reasons         []healthReason `json:"reasons"`
 }
 
 type historyPoint struct {
-	T              int64   `json:"t"` // unix ms
+	T              int64   `json:"t"`
 	MessagesPerSec float64 `json:"messagesPerSec"`
 	BytesPerSec    float64 `json:"bytesPerSec"`
 	ConsumedPerSec float64 `json:"consumedPerSec"`
@@ -480,9 +394,6 @@ type historyPoint struct {
 	DiskUsagePct   float64 `json:"diskUsagePct"`
 }
 
-// committedTotals sums each group's committed offsets, per group, so a consumed
-// rate can be taken from forward progress only: a reset or a group that
-// disappeared must not read as negative consumption.
 func committedTotals(views []groupView) map[string]int64 {
 	out := make(map[string]int64, len(views))
 	for _, g := range views {
@@ -497,8 +408,6 @@ func committedTotals(views []groupView) map[string]int64 {
 	return out
 }
 
-// progressBetween counts committed offsets advancing from one sample to the
-// next, forward only: a reset must not read as negative consumption.
 func progressBetween(prev, cur clusterSample) int64 {
 	var progressed int64
 	for group, committed := range cur.Committed {
@@ -509,10 +418,6 @@ func progressBetween(prev, cur clusterSample) int64 {
 	return progressed
 }
 
-// consumedRate sums forward progress over the consecutive sample pairs inside
-// the window. Measuring it against the window baseline alone would read zero for
-// a group that only appeared after that baseline, and would hide the traffic of
-// a group whose first sample sits mid-window.
 func consumedRate(series []clusterSample, window time.Duration, now time.Time) float64 {
 	cut := now.Add(-window)
 	var progressed int64
@@ -535,8 +440,6 @@ func consumedRate(series []clusterSample, window time.Duration, now time.Time) f
 	return rate(float64(progressed), counted)
 }
 
-// thinPoints keeps at most max points, preserving both ends so a long window
-// still shows the whole span instead of only its newest tail.
 func thinPoints(points []historyPoint, max int) []historyPoint {
 	if max <= 2 || len(points) <= max {
 		return points
@@ -561,7 +464,6 @@ type samplingInfo struct {
 	AgeSeconds       float64 `json:"ageSeconds"`
 }
 
-// reportCtx carries the per-request settings the report builders need.
 type reportCtx struct {
 	th       healthThresholds
 	window   time.Duration
@@ -569,11 +471,6 @@ type reportCtx struct {
 	interval time.Duration
 }
 
-// rateReliable reports whether the series actually covers the requested window.
-// A shorter span means the baseline already holds traffic that arrived before
-// monitoring started (or before the window's edge), so the derived rate
-// understates reality and must not be presented as this window's rate. One
-// sample of slack is allowed, because the ring is trimmed by age.
 func (c reportCtx) rateReliable(first, last time.Time, n int) bool {
 	if n < 2 {
 		return false
@@ -581,7 +478,6 @@ func (c reportCtx) rateReliable(first, last time.Time, n int) bool {
 	return c.now.Sub(first) >= c.window-c.interval
 }
 
-// topicRateReliable adapts rateReliable to a topic series.
 func (c reportCtx) topicRateReliable(series []topicSample) bool {
 	if len(series) == 0 {
 		return false
@@ -589,7 +485,6 @@ func (c reportCtx) topicRateReliable(series []topicSample) bool {
 	return c.rateReliable(series[0].At, series[len(series)-1].At, len(series))
 }
 
-// clusterRateReliable adapts rateReliable to the cluster series.
 func (c reportCtx) clusterRateReliable(series []clusterSample) bool {
 	if len(series) == 0 {
 		return false
@@ -597,7 +492,6 @@ func (c reportCtx) clusterRateReliable(series []clusterSample) bool {
 	return c.rateReliable(series[0].At, series[len(series)-1].At, len(series))
 }
 
-// groupSummary is one consumer group as reported by the dashboard.
 type groupSummary struct {
 	Name      string   `json:"name"`
 	State     string   `json:"state"`
@@ -619,32 +513,21 @@ type overviewResponse struct {
 	History       []historyPoint `json:"history"`
 }
 
-// Verdict rules (pure, unit-tested)
-
-// topicMetrics is the numeric view of one topic that the verdict depends on.
 type topicMetrics struct {
-	Partitions     int
-	Messages       int64
-	MessagesPerSec float64
-	Lag            int64
-	LagPerSec      float64
-	SkewRatio      float64
-	LastAppendAge  time.Duration
-	HasActivity    bool
-	StalledGroups  []string
-	// RetentionLossSeconds is how soon a lagging group is projected to lose the
-	// offsets it still needs; nil means no projection (retention is not
-	// advancing), and RetentionLost means the data is already gone.
+	Partitions           int
+	Messages             int64
+	MessagesPerSec       float64
+	Lag                  int64
+	LagPerSec            float64
+	SkewRatio            float64
+	LastAppendAge        time.Duration
+	HasActivity          bool
+	StalledGroups        []string
 	RetentionLossSeconds *int64
 	RetentionLost        bool
 }
 
-// evaluateTopic turns metrics into a status plus the reasons behind it. The
-// rule order matters: the first matching rule sets the base status, then the
-// secondary warnings are appended.
 func evaluateTopic(th healthThresholds, m topicMetrics) (string, []healthReason) {
-	// Always non-nil: a healthy topic must serialize as [] rather than null so
-	// API consumers can iterate unconditionally.
 	reasons := []healthReason{}
 	status := StatusHealthy
 	rising := m.LagPerSec > 0.5
@@ -700,8 +583,6 @@ func evaluateTopic(th healthThresholds, m topicMetrics) (string, []healthReason)
 	if status == StatusHealthy && rising {
 		status = StatusDegraded
 	}
-	// Retention risk outranks the ordinary verdict: a client cannot see this
-	// coming, it only finds out when a read fails.
 	if m.RetentionLost {
 		status = worseStatus(status, StatusCritical)
 		reasons = append(reasons, healthReason{
@@ -814,10 +695,6 @@ func statusRank(s string) int {
 	}
 }
 
-// Report builder
-
-// buildOverview renders the current health report. It never mutates anything
-// except the sample ring.
 func (s *Server) buildOverview(th healthThresholds, window time.Duration, now time.Time) overviewResponse {
 	samples, clusterSeries, lastAt := s.monitor.snapshot()
 	interval, retention := s.monitor.limits()
@@ -846,8 +723,6 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 			"diskCritPct": th.DiskCritPct,
 		},
 	}
-	// Sampling info: the cluster series is the sampling heartbeat, so it tells
-	// us how much history the current window actually holds.
 	samplesInWindow := 0
 	for _, cs := range clusterSeries {
 		if !cs.At.Before(now.Add(-window)) {
@@ -871,7 +746,6 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 		AgeSeconds:       age,
 	}
 
-	// Cluster totals.
 	var totalMessages, totalBytes, maxLag int64
 	clusterPartitions := 0
 	for _, name := range names {
@@ -908,13 +782,11 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 	report.Groups = groupSummariesOf(topicReports, views)
 	status, reasons := clusterStatus(ctx.th, diskPct, topicReports)
 
-	// Durability and policy debt roll up from the topic reports, and an
-	// un-synced backlog big enough to matter becomes a cluster-level warning.
 	var broker brokerFacts
 	retentionRisks := 0
 	for _, tr := range topicReports {
 		if tr.Broker == nil {
-			continue // external cluster: this process owns none of the logs
+			continue
 		}
 		broker.BytesAtRisk += tr.Broker.BytesAtRisk
 		broker.OffsetsAtRisk += tr.Broker.OffsetsAtRisk
@@ -963,7 +835,6 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 	}
 	report.Topics = topicReports
 
-	// Attention list: worst first, then by name.
 	attention := make([]topicHealth, 0, len(topicReports))
 	for _, t := range topicReports {
 		if t.Status == StatusDegraded || t.Status == StatusCritical {
@@ -978,8 +849,6 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 	})
 	report.Attention = attention
 
-	// Cluster history: consumed/s rides along with the produced rate so the two
-	// can be compared, which is what makes a backlog visible as a shape.
 	history := make([]historyPoint, 0, len(clusterSeries))
 	for i := 1; i < len(clusterSeries); i++ {
 		prev, cur := clusterSeries[i-1], clusterSeries[i]
@@ -1001,7 +870,6 @@ func (s *Server) buildOverview(th healthThresholds, window time.Duration, now ti
 	return report
 }
 
-// buildTopicHealth derives one topic's row from its samples plus live state.
 func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, series []topicSample, lagByPart map[int32]int64, groups []groupView) topicHealth {
 	window, now := ctx.window, ctx.now
 	th := ctx.th
@@ -1017,7 +885,6 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		row.Partitions = len(t.Partitions)
 	}
 
-	// Parallel live snapshot (authoritative for offsets/bytes).
 	type live struct {
 		pid           int32
 		leo           int64
@@ -1059,8 +926,6 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 	row.Bytes = int64Ptr(bytes)
 	row.Source = sourceLocal
 
-	// Durability and policy debt, aggregated over the topic's partitions. A
-	// topic this process does not own reports null instead.
 	var oldestSync int64
 	var broker brokerFacts
 	for _, l := range lives {
@@ -1117,7 +982,6 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		row.Trend = "flat"
 	}
 
-	// Per-partition view with skew.
 	var maxBytes, sumBytes int64
 	for _, l := range lives {
 		if l.bytes > maxBytes {
@@ -1154,7 +1018,6 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		if mean > 0 {
 			ph.SkewRatio = round2(float64(l.bytes) / mean)
 		}
-		// Per-partition rates from the sample series.
 		if pcur, pok := lastPartition(series, l.pid); pok && dt > 0 {
 			if pbase, bok := partitionBaseline(series, l.pid, window, now); bok {
 				ph.MessagesPerSec = rate(float64(pcur.Messages-pbase.Messages), dt)
@@ -1164,10 +1027,6 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		row.PartitionsDetail = append(row.PartitionsDetail, ph)
 	}
 
-	// Retention projection: a group loses its unread offsets when the earliest
-	// retained offset catches up with the offset it needs next. The earliest
-	// offset advances only as retention deletes, so its observed rate is what
-	// projects the moment.
 	earliestNow := int64(-1)
 	for _, l := range lives {
 		if earliestNow < 0 || l.earliest < earliestNow {
@@ -1188,8 +1047,6 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 			if !ok || len(parts) == 0 {
 				continue
 			}
-			// Only a group that is behind a partition needs data that retention
-			// can still take: one that has caught up needs what comes next.
 			next := int64(-1)
 			for part, committed := range parts {
 				leo, known := leoByPart[part]
@@ -1211,7 +1068,7 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 				secs := int64(float64(next-earliestNow) / advance)
 				risk.SecondsUntilLoss = &secs
 			default:
-				continue // retention is not advancing: nothing to project
+				continue
 			}
 			row.RetentionRisk = append(row.RetentionRisk, risk)
 		}
@@ -1220,7 +1077,6 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		})
 	}
 
-	// Last observed append.
 	if seen, ok := s.monitor.lastSeenAt(name); ok {
 		ageMs := now.Sub(seen).Milliseconds()
 		if ageMs < 0 {
@@ -1229,9 +1085,6 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		row.LastAppendAgeMs = &ageMs
 	}
 
-	// Consumer groups on this topic, including groups that stopped consuming but
-	// still hold committed offsets. A group without offsets here is not a
-	// consumer of this topic and must not appear.
 	stalled := []string{}
 	for _, g := range groups {
 		parts, ok := g.Offsets[name]
@@ -1248,7 +1101,6 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 			}
 			gl.Lag += nonNegative(leo - committed)
 		}
-		// Per-group trend comes from the same sample series as the topic.
 		if dt > 0 && hasCur {
 			if curLag, ok := cur.GroupLag[g.Name]; ok {
 				gl.LagPerSec = rate(float64(curLag-base.GroupLag[g.Name]), dt)
@@ -1261,7 +1113,6 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		row.Groups = append(row.Groups, gl)
 	}
 
-	// Sparkline: msg/s per sample in the window, oldest first.
 	spark := make([]float64, 0, len(series))
 	for i := 1; i < len(series); i++ {
 		d := series[i].At.Sub(series[i-1].At)
@@ -1297,15 +1148,9 @@ func (s *Server) buildTopicHealth(ctx reportCtx, name string, t *storage.Topic, 
 		RetentionLossSeconds: lossSeconds,
 		RetentionLost:        lost,
 	})
-	// An empty topic with a consumer group that has nothing to read is still
-	// idle, never a fault.
 	return row
 }
 
-// HTTP
-
-// handleHealthOverview serves the monitoring report rendered by the dashboard
-// Health view.
 func (s *Server) handleHealthOverview(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
 		writeErr(w, http.StatusServiceUnavailable, "storage unavailable")
@@ -1349,9 +1194,6 @@ func (s *Server) handleHealthOverview(w http.ResponseWriter, r *http.Request) {
 			th.UnflushedWarnBytes = n
 		}
 	}
-	// A named cluster is served through the same response path as the local
-	// broker: proxied from a peer over its API, or built here from a read-only
-	// client session for a Kafka cluster we do not host.
 	if name := q.Get("cluster"); name != "" && name != "local" {
 		entry, ok := s.clusters.Get(name)
 		if !ok {
@@ -1359,9 +1201,6 @@ func (s *Server) handleHealthOverview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if normalizeKind(entry.Kind) == clusterKindKafka {
-			// The first request starts the sampler. A short grace lets a small
-			// cluster answer with real data straight away; a large one answers
-			// with "no sample yet" and fills in on the next poll.
 			ec := s.externalFor(entry)
 			ec.awaitFirstSample(r.Context(), 1500*time.Millisecond)
 			report, err := s.externalOverview(name, window, time.Now())
@@ -1392,16 +1231,12 @@ func (s *Server) handleHealthOverview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.buildOverview(th, window, now))
 }
 
-// StartSampler runs the background health sampler on this server's monitor, so
-// the report has history even when nothing is polling the API.
 func (s *Server) StartSampler(ctx context.Context, store *storage.Store, gm *coordinator.GroupManager, interval time.Duration) {
 	if s.monitor == nil {
 		return
 	}
 	s.monitor.StartSampler(ctx, store, gm, interval)
 }
-
-// Helpers
 
 func nonNegative(v int64) int64 {
 	if v < 0 {
@@ -1439,8 +1274,6 @@ func humanDuration(d time.Duration) string {
 	}
 }
 
-// trimSamples drops samples older than retention, then caps the slice so a
-// client polling faster than the sampler cannot grow it without bound.
 func trimSamples[T interface{ sampleTime() time.Time }](s []T, now time.Time, retention time.Duration, max int) []T {
 	cut := now.Add(-retention)
 	first := 0
@@ -1465,9 +1298,6 @@ func sortedPartitionIDs(t *storage.Topic) []int32 {
 	return ids
 }
 
-// groupView is the merged view of one consumer group: liveness comes from the
-// in-memory manager, backlog from the persistent offset store. Merging is what
-// makes a stopped consumer visible.
 type groupView struct {
 	Name    string
 	State   string
@@ -1475,9 +1305,6 @@ type groupView struct {
 	Offsets map[string]map[int32]int64
 }
 
-// mergedGroupViews unions the live groups with every group that holds a
-// committed offset, so a consumer that stopped (no members, backlog left
-// behind) still shows up in the dashboard.
 func mergedGroupViews(gm *coordinator.GroupManager) []groupView {
 	if gm == nil {
 		return nil
@@ -1498,8 +1325,6 @@ func mergedGroupViews(gm *coordinator.GroupManager) []groupView {
 	return out
 }
 
-// lagMaps derives in one pass: the worst per-partition lag per topic, and the
-// per-group backlog per topic so a sample can carry both.
 func lagMaps(views []groupView, store *storage.Store) (map[string]map[int32]int64, map[string]map[string]int64) {
 	byTopicPart := map[string]map[int32]int64{}
 	byTopicGroup := map[string]map[string]int64{}
@@ -1536,7 +1361,6 @@ func lagMaps(views []groupView, store *storage.Store) (map[string]map[int32]int6
 	return byTopicPart, byTopicGroup
 }
 
-// groupSummariesOf merges the per-topic group rows into one cluster-level list.
 func groupSummariesOf(topics []topicHealth, views []groupView) []groupSummary {
 	idx := map[string]*groupSummary{}
 	order := []string{}
@@ -1554,7 +1378,6 @@ func groupSummariesOf(topics []topicHealth, views []groupView) []groupSummary {
 			s.Stalled = s.Stalled || g.Stalled
 		}
 	}
-	// Live groups that have not committed anything yet also belong in the list.
 	for _, v := range views {
 		s := idx[v.Name]
 		if s == nil {
@@ -1581,7 +1404,6 @@ func groupSummariesOf(topics []topicHealth, views []groupView) []groupSummary {
 	return out
 }
 
-// totalLagWithTopics sums the backlog of every topic row.
 func totalLagWithTopics(topics []topicHealth) int64 {
 	var total int64
 	for _, t := range topics {
@@ -1590,7 +1412,6 @@ func totalLagWithTopics(topics []topicHealth) int64 {
 	return total
 }
 
-// lastTopic returns the newest sample of a topic series.
 func lastTopic(series []topicSample) (topicSample, bool) {
 	if len(series) == 0 {
 		return topicSample{}, false
@@ -1598,8 +1419,6 @@ func lastTopic(series []topicSample) (topicSample, bool) {
 	return series[len(series)-1], true
 }
 
-// topicBaseline returns the oldest sample inside the window (or the series
-// head when the window covers everything) and the elapsed time to now.
 func topicBaseline(series []topicSample, window time.Duration, now time.Time) (topicSample, time.Duration) {
 	if len(series) < 2 {
 		return topicSample{}, 0
@@ -1674,7 +1493,6 @@ func clusterBaseline(series []clusterSample, window time.Duration, now time.Time
 	return base, cur.At.Sub(base.At)
 }
 
-// snapshot copies the sample ring for lock-free rendering.
 func (m *Monitor) snapshot() (map[string][]topicSample, []clusterSample, time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1685,7 +1503,6 @@ func (m *Monitor) snapshot() (map[string][]topicSample, []clusterSample, time.Ti
 	return topics, append([]clusterSample(nil), m.cluster...), m.lastAt
 }
 
-// limits returns the sampling interval and how far back samples are kept.
 func (m *Monitor) limits() (time.Duration, time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

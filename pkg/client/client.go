@@ -13,7 +13,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// BrokerNode describes one broker and its cached connection.
 type BrokerNode struct {
 	NodeID int32
 	Host   string
@@ -21,14 +20,12 @@ type BrokerNode struct {
 	conn   net.Conn
 }
 
-// PartitionMeta describes one topic partition's leader.
 type PartitionMeta struct {
 	Topic       string
 	PartitionID int32
 	LeaderID    int32
 }
 
-// KafkaClient is a low-level client with a connection pool and metadata cache.
 type KafkaClient struct {
 	brokers     []string
 	clientID    string
@@ -37,27 +34,20 @@ type KafkaClient struct {
 	corrID      int32
 	metadata    map[string][]PartitionMeta
 	timeout     time.Duration
-	apiVersions map[int16]int16 // negotiated max version per key
+	apiVersions map[int16]int16
 	sasl        SASL
 	readOnly    bool
 }
 
-// Options configure a client beyond the broker list.
 type Options struct {
-	// SASL authenticates the connection. Empty Mechanism disables it.
-	SASL SASL
-	// ReadOnly refuses every API that can change the cluster, so a monitoring
-	// client cannot write by accident or by a bug in a caller.
+	SASL     SASL
 	ReadOnly bool
 }
 
-// NewClient connects to the given brokers and refreshes cluster metadata.
 func NewClient(brokers []string, clientID string) (*KafkaClient, error) {
 	return NewClientWithOptions(brokers, clientID, Options{})
 }
 
-// NewClientWithOptions connects, authenticates when configured, and refreshes
-// cluster metadata.
 func NewClientWithOptions(brokers []string, clientID string, opts Options) (*KafkaClient, error) {
 	c := &KafkaClient{
 		brokers:     brokers,
@@ -99,7 +89,6 @@ func defaultAPIVersions() map[int16]int16 {
 	return out
 }
 
-// version returns the negotiated version for an API key.
 func (c *KafkaClient) version(key int16) int16 {
 	if v, ok := c.apiVersions[key]; ok {
 		return v
@@ -113,8 +102,6 @@ func (c *KafkaClient) connect() error {
 		conn, err := dialAddr(addr, c.timeout)
 		if err == nil {
 			if tcp, ok := conn.(*net.TCPConn); ok {
-				// A request/response protocol gains nothing from coalescing, and
-				// Nagle's delay is paid on every round trip.
 				_ = tcp.SetNoDelay(true)
 			}
 			c.conn = conn
@@ -125,15 +112,10 @@ func (c *KafkaClient) connect() error {
 	return fmt.Errorf("connect to brokers %v: %w", c.brokers, lastErr)
 }
 
-// dialAddr connects to a broker through the shared address guard, which refuses
-// link-local, metadata, unspecified and multicast destinations. The check runs
-// on the resolved address, so a hostname that resolves into a blocked range is
-// refused too.
 func dialAddr(addr string, timeout time.Duration) (net.Conn, error) {
 	return netguard.Dialer(timeout).Dial("tcp", addr)
 }
 
-// negotiate requests ApiVersions to cap versions to what the broker supports.
 func (c *KafkaClient) negotiate() error {
 	respBody, err := c.roundTrip(protocol.APKApiVersions, 0, nil)
 	if err != nil {
@@ -151,8 +133,6 @@ func (c *KafkaClient) negotiate() error {
 	return nil
 }
 
-// roundTrip sends a request body and returns the response body (excluding the
-// correlation ID). Requests on one client are serialized.
 func (c *KafkaClient) roundTrip(apiKey, version int16, reqBody []byte) ([]byte, error) {
 	if err := c.checkAPI(apiKey); err != nil {
 		return nil, err
@@ -197,9 +177,6 @@ func (c *KafkaClient) roundTrip(apiKey, version int16, reqBody []byte) ([]byte, 
 	return body[4:], nil
 }
 
-// fetchMetadata requests and decodes the cluster metadata. A read-only client
-// never asks the broker to create a topic: metadata for a named topic that does
-// not exist must fail, not create it on someone's production cluster.
 func (c *KafkaClient) fetchMetadata() (*protocol.MetadataResponse, error) {
 	req := &protocol.MetadataRequest{
 		Version:                c.version(protocol.APKMetadata),
@@ -217,7 +194,6 @@ func (c *KafkaClient) fetchMetadata() (*protocol.MetadataResponse, error) {
 	return protocol.DecodeMetadataResponse(req.Version, respBody)
 }
 
-// RefreshMetadata updates the topic -> partition leader cache.
 func (c *KafkaClient) RefreshMetadata() error {
 	resp, err := c.fetchMetadata()
 	if err != nil {
@@ -236,14 +212,12 @@ func (c *KafkaClient) RefreshMetadata() error {
 	return nil
 }
 
-// Partitions returns the cached partition metadata for a topic.
 func (c *KafkaClient) Partitions(topic string) []PartitionMeta {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.metadata[topic]
 }
 
-// Close closes the underlying connection.
 func (c *KafkaClient) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -253,9 +227,6 @@ func (c *KafkaClient) Close() error {
 	return nil
 }
 
-// RoundTrip sends a raw request body for an API key/version and returns the
-// raw response body (excluding the correlation ID). It is used by tests and
-// advanced tooling that need direct protocol access.
 func (c *KafkaClient) RoundTrip(apiKey, version int16, reqBody []byte) ([]byte, error) {
 	return c.roundTrip(apiKey, version, reqBody)
 }
