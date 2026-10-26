@@ -3440,7 +3440,7 @@ function viewFleetSettings(){
     </p>
     <div style="font-size:11px;font-family:var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;line-height:1.7">
       <div style="color:var(--muted)"># 1. Issue token above, then run on the target host:</div>
-      <div>fleet-agent --token &lt;token&gt; --server &lt;server-id&gt;</div>
+      <div>fleet-agent --token &lt;token&gt; --server ${window.location.origin}</div>
     </div>
   </div>`;
 
@@ -3492,7 +3492,7 @@ window.doCreateEnrollment=async function(){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ server_id: srvId, duration: dur })
     });
-    const cmd = `fleet-agent --token ${res.token} --server ${res.server_id}`;
+    const cmd = `fleet-agent --token ${res.token} --server ${window.location.origin}`;
     const cmdInput = document.getElementById('enrollCmd');
     if(cmdInput) cmdInput.value = cmd;
     const resDiv = document.getElementById('enrollResult');

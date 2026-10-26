@@ -77,6 +77,7 @@ services:
       - "8081:8081"   # Embedded Schema Registry
       - "8082:8082"   # HTTP REST Proxy Gateway
       - "1883:1883"   # MQTT Bridge (IoT)
+      - "18090:18090" # Fleet listener (agent langsung; UI pakai proxy 8080)
     environment:
       - KAFKA_BROKER_ID=0
       - KAFKA_LISTENERS=plain://0.0.0.0:9092,internal://0.0.0.0:29092
@@ -96,6 +97,10 @@ services:
       - KAFKA_GATEWAY_LISTEN=0.0.0.0:8082
       - KAFKA_MQTT_LISTEN=0.0.0.0:1883
       - KAFKA_ALLOW_INSECURE_PUBLIC=true
+      # Fleet: kontrol Docker multi-server di dalam Control Center.
+      # Secret wajib (≥16 char); tanpa ini broker crash-loop saat fleet aktif.
+      - KAFKA_FLEET_ENABLED=true
+      - KAFKA_FLEET_SECRET_KEY=${KAFKA_FLEET_SECRET_KEY:-fleet-dev-secret-key-0123456789abcdef}
     volumes:
       - kafka_data:/var/lib/pocketkafka/data
     healthcheck:
