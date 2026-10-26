@@ -103,6 +103,20 @@ func (j *Jobs) SubmitForce(serverID, action, target, actor, idempotencyKey strin
 	return id, nil
 }
 
+// SubmitWithTail is Submit that also records the requested log tail lines.
+func (j *Jobs) SubmitWithTail(serverID, action, target, actor, idempotencyKey string, tail int) (string, error) {
+	id, err := j.Submit(serverID, action, target, actor, idempotencyKey)
+	if err != nil {
+		return "", err
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if job, ok := j.jobs[id]; ok {
+		job.TailLines = tail
+	}
+	return id, nil
+}
+
 func (j *Jobs) Submit(serverID, action, target, actor, idempotencyKey string) (string, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -223,6 +237,19 @@ func (j *Jobs) Complete(id string, status JobStatus, errMsg ...string) error {
 		return err
 	}
 	return nil
+}
+
+// SetResult stores an output payload on a job without changing its status.
+// Used for action results (e.g. container logs) retrieved after completion.
+func (j *Jobs) SetResult(id, result string) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	job, ok := j.jobs[id]
+	if !ok {
+		return ErrJobNotFound
+	}
+	job.Result = result
+	return j.appendLocked(job)
 }
 
 // Fail is a convenience helper for completing a job with failed status.

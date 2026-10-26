@@ -58,6 +58,8 @@ type Job struct {
 	Actor          string    `json:"actor,omitempty"`
 	IdempotencyKey string    `json:"idempotency_key,omitempty"`
 	Force          bool      `json:"force,omitempty"`
+	Result         string    `json:"result,omitempty"`
+	TailLines      int       `json:"tail_lines,omitempty"`
 	Status         JobStatus `json:"status"`
 	Error          string    `json:"error,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
