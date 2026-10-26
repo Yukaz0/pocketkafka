@@ -494,7 +494,9 @@ func (s *FleetServer) handleCreateEnrollment(w http.ResponseWriter, r *http.Requ
 	}
 
 	dur := 15 * time.Minute
-	if req.Duration != "" {
+	if req.Duration == "never" || req.Duration == "unlimited" || req.Duration == "0" {
+		dur = 0
+	} else if req.Duration != "" {
 		if parsed, err := time.ParseDuration(req.Duration); err == nil && parsed > 0 {
 			dur = parsed
 		}

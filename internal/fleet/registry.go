@@ -182,8 +182,10 @@ func (r *Registry) enrollWithExpiry(serverID string, duration time.Duration) (st
 		Token:     token,
 		ServerID:  serverID,
 		CreatedAt: now,
-		ExpiresAt: now.Add(duration),
 		Used:      false,
+	}
+	if duration != 0 {
+		e.ExpiresAt = now.Add(duration)
 	}
 
 	r.mu.Lock()
@@ -219,7 +221,7 @@ func (r *Registry) ConsumeToken(token string) (*Agent, error) {
 	if e.Used {
 		return nil, ErrTokenUsed
 	}
-	if time.Now().After(e.ExpiresAt) {
+	if !e.ExpiresAt.IsZero() && time.Now().After(e.ExpiresAt) {
 		return nil, ErrTokenExpired
 	}
 	if r.maxAgents > 0 {
@@ -375,10 +377,23 @@ func (r *Registry) GetServer(serverID string) (*Server, bool) {
 	return &cp, true
 }
 
-// ListEnrollments returns copies of all enrollment tokens.
+// ListEnrollments returns copies of pending enrollment tokens, pruning used
+// and expired ones first so the list never accumulates dead entries.
 func (r *Registry) ListEnrollments() []*Enrollment {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now()
+	pruned := false
+	for tok, e := range r.enrollments {
+		if e.Used || (!e.ExpiresAt.IsZero() && now.After(e.ExpiresAt)) {
+			delete(r.enrollments, tok)
+			pruned = true
+		}
+	}
+	if pruned {
+		_ = r.persistLocked()
+	}
 
 	out := make([]*Enrollment, 0, len(r.enrollments))
 	for _, e := range r.enrollments {
