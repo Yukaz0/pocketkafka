@@ -3684,13 +3684,34 @@ window.viewContainerLogs=async function(id, name, serverId){
   try{
     const q = serverId ? '?server_id=' + encodeURIComponent(serverId) + '&tail=100' : '?tail=100';
     const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(id) + '/logs' + q);
-    const lines = (res.lines || []).join('\n') || '(no log output captured)';
-    const body = `<div style="font-family:var(--font-mono);font-size:11.5px;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;max-height:450px;overflow:auto;white-space:pre-wrap;word-break:break-all">${esc(lines)}</div>`;
-    nodeDrw('Logs: ' + (name || id), 'Last 100 lines', body, []);
+    const lines = res.lines || [];
+    const body = lines.length ? renderLogLines(lines) : '<div class="muted" style="padding:12px">(no log output captured)</div>';
+    const wrap = `<div style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:10px 0;max-height:480px;overflow:auto">${body}</div>`;
+    nodeDrw('Logs: ' + (name || id), 'Last ' + lines.length + ' lines', wrap, []);
   }catch(e){
     toast('Failed to load logs: ' + e.message);
   }
 };
+function renderLogLines(lines){
+  return lines.map((raw, i) => {
+    const line = String(raw || '');
+    const m = line.match(/^(time=(\S+)\s+)?(level=([A-Za-z]+)\s+)?(.*)$/);
+    const ts = m && m[2] ? m[2] : '';
+    const lvl = (m && m[4] ? m[4] : '').toUpperCase();
+    const msg = m ? m[5] : line;
+    const badge = lvl === 'ERROR' ? '<span class="badge b-red">ERROR</span>'
+      : lvl === 'WARN' || lvl === 'WARNING' ? '<span class="badge b-amber">WARN</span>'
+      : lvl === 'INFO' ? '<span class="badge b-green">INFO</span>'
+      : lvl === 'DEBUG' ? '<span class="badge muted">DEBUG</span>'
+      : lvl ? '<span class="badge muted">' + esc(lvl) + '</span>' : '';
+    const shortTs = ts.length > 19 ? ts.slice(11, 19) : ts;
+    return '<div style="display:flex;gap:8px;padding:2px 12px;overflow-wrap:anywhere;word-break:normal;white-space:pre-wrap">'
+      + '<span class="muted" style="flex:0 0 28px;text-align:right;user-select:none">' + (i + 1) + '</span>'
+      + (shortTs ? '<span class="muted" style="flex:0 0 auto">' + esc(shortTs) + '</span>' : '')
+      + (badge ? '<span style="flex:0 0 auto">' + badge + '</span>' : '')
+      + '<span style="flex:1 1 auto;min-width:0">' + esc(msg) + '</span></div>';
+  }).join('');
+}
 
 window.goFleetContainers=function(serverId){
   state.fleetServerFilter=serverId||'';
