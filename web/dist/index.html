@@ -936,6 +936,11 @@ function openDrw(title,innerHtml,keepMaximized){
   d.classList.add('open');
 }
 function closeDrw(){
+  if(state._fleetLogsState && state._fleetLogsState.autoTimer){
+    clearInterval(state._fleetLogsState.autoTimer);
+    state._fleetLogsState.autoTimer = null;
+    state._fleetLogsState.autoRefresh = false;
+  }
   const d=document.getElementById('drw');
   if(d){d.classList.remove('open');d.classList.remove('maximized');}
   const act=document.getElementById('drwActions');
@@ -1334,6 +1339,11 @@ async function waitFleetContainerGone(cid, serverId, timeoutMs){
 }
 window.goView=async function(v,sub){
   try{ closeDrw(); }catch(e){}
+  if(state._brokerLogsState && state._brokerLogsState.timer){
+    clearInterval(state._brokerLogsState.timer);
+    state._brokerLogsState.timer = null;
+    state._brokerLogsState.auto = false;
+  }
   if(v.startsWith('fleet-')){
     const subName=v.replace(/^fleet-/,'');
     state.zone='fleet';
@@ -3262,12 +3272,18 @@ function viewFleetServers(){
     const revokeBtn = isRevoked
       ? `<span class="badge muted">Revoked</span>`
       : `<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="revokeServer('${esc(s.id)}')">Revoke</button>`;
+    const hostCnts = (state.fleetContainers || []).filter(c => c.server_id === s.id);
+    const runCnt = hostCnts.filter(c => (c.state || '').toLowerCase() === 'running').length;
+    const cntBadge = hostCnts.length
+      ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" onclick="state.fleetServerFilter='${esc(s.id)}';goView('fleet-containers')" title="View containers on this host"><b>${runCnt}</b> run / ${hostCnts.length}</button>`
+      : `<span class="muted" style="font-size:11px">0</span>`;
     const containerLink = `<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="goFleetContainers('${esc(s.id)}')">Containers</button>`;
 
     return `<tr>
       <td class="mono" style="font-weight:600">${esc(s.name || s.id)}</td>
       <td>${badge}</td>
       <td class="mono">${esc(s.host || 'local-socket')}</td>
+      <td>${cntBadge}</td>
       <td class="mono" style="font-size:11px;color:var(--muted)">${esc(s.agent_id ? s.agent_id.slice(0,12)+'...' : '-')}</td>
       <td title="${esc(hbFull)}">${esc(hbText)}</td>
       <td class="muted" style="font-size:11px">${esc(enrolled)}</td>
@@ -3276,9 +3292,9 @@ function viewFleetServers(){
   }).join('');
 
   const table = tableScroll(`<table><thead><tr>
-    <th>Server Host / ID</th><th>Status</th><th>Endpoint</th><th>Agent ID</th><th>Last Heartbeat</th><th>Enrolled</th><th>Actions</th>
+    <th>Server Host / ID</th><th>Status</th><th>Endpoint</th><th>Containers</th><th>Agent ID</th><th>Last Heartbeat</th><th>Enrolled</th><th>Actions</th>
   </tr></thead><tbody>
-    ${rows || '<tr><td colspan="7" class="muted" style="padding:28px;text-align:center">No servers match filter. Enroll a server to manage host containers.</td></tr>'}
+    ${rows || '<tr><td colspan="8" class="muted" style="padding:28px;text-align:center">No servers match filter. Enroll a server to manage host containers.</td></tr>'}
   </tbody></table>`);
 
   return `<div>${pageHeader('Fleet Servers', 'Managed host nodes with fleet-agent and Docker Engine daemon.')}
@@ -3363,10 +3379,12 @@ function viewFleetContainers(){
 
     return `<tr>
       <td class="mono">
-        <div style="font-weight:600">${esc(rawName)}</div>
+        <a href="javascript:void(0)" onclick="viewContainerInspect('${esc(c.id)}')" style="font-weight:600;color:var(--text);text-decoration:none;border-bottom:1px dashed var(--border)" title="Inspect container details">${esc(rawName)}</a>
         <div class="muted" style="font-size:10px">${esc(shortId)}</div>
       </td>
-      <td class="mono" style="font-size:11px;color:var(--muted)">${esc(srvLabel)}</td>
+      <td class="mono" style="font-size:11px">
+        ${srvId ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" onclick="state.fleetServerFilter='${esc(srvId)}';render()" title="Filter containers on ${esc(srvLabel)}">${esc(srvLabel)}</button>` : `<span class="muted">${esc(srvLabel)}</span>`}
+      </td>
       <td class="mono" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.image||'')}">${esc(c.image || '-')}</td>
       <td>${badge}</td>
       <td class="mono" style="font-size:10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.command||'')}">${esc(c.command || '-')}</td>
@@ -3452,7 +3470,7 @@ function viewFleetJobs(){
     return `<tr>
       <td class="mono" title="${esc(j.id)}"><strong>${esc(shortId)}</strong></td>
       <td><span class="chip mono">${esc(j.action || '-')}</span></td>
-      <td class="mono" style="font-size:11px">${esc(j.target || '-')}</td>
+      <td class="mono" style="font-size:11px">${j.target ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" onclick="viewContainerLogs('${esc(j.target)}','${esc(j.target)}','${esc(j.server_id||'')}')" title="View logs for ${esc(j.target)}">${esc(j.target)}</button>` : '-'}</td>
       <td class="mono" style="font-size:11px;color:var(--muted)">${esc(j.server_id || '-')}</td>
       <td>${badge}${err}</td>
       <td class="mono" style="font-size:11px">${esc(j.actor || '-')}</td>
@@ -3509,7 +3527,7 @@ function viewFleetAudit(){
       <td><span class="chip mono">${esc(e.action || '-')}</span></td>
       <td class="mono" style="font-size:11px">${esc(e.target || '-')}</td>
       <td>${badge}</td>
-      <td class="mono" style="font-size:11px;color:var(--muted)">${esc(e.correlation_id ? e.correlation_id.slice(0,8)+'...' : '-')}</td>
+      <td class="mono" style="font-size:11px">${e.correlation_id ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" onclick="state.fleetAuditSearch='${esc(e.correlation_id)}';render()" title="Filter audit events by correlation ID ${esc(e.correlation_id)}">${esc(e.correlation_id.slice(0,8))}...</button>` : '-'}</td>
       <td style="font-size:11px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.detail||'')}">${esc(e.detail || '-')}</td>
     </tr>`;
   }).join('');
@@ -3789,6 +3807,77 @@ window.removeContainer=async function(id, name, serverId, isRunning){
     toast('Remove container failed: ' + e.message);
   }
 };
+window.viewContainerInspect = function(id){
+  const cnts = state.fleetContainers || [];
+  const c = cnts.find(item => item.id === id || (item.id||'').startsWith(id));
+  if(!c) return;
+  const rawName = (c.names && c.names[0]) ? c.names[0].replace(/^\//, '') : c.id;
+  const isRunning = (c.state || '').toLowerCase() === 'running';
+  const badge = fleetStatusBadge(c.state, c.status || c.state);
+  const createdDate = c.created ? new Date(c.created * 1000).toLocaleString() : '-';
+  const labels = Object.entries(c.labels || {});
+
+  const labelsHtml = labels.length
+    ? `<div style="display:flex;flex-wrap:wrap;gap:5px">${labels.map(([k, v]) => `<span class="chip mono" style="font-size:10px" title="${esc(k)}=${esc(v)}"><strong>${esc(k)}</strong>: ${esc(v)}</span>`).join('')}</div>`
+    : '<span class="muted" style="font-size:11px">No labels defined</span>';
+
+  const body = `<div style="display:grid;gap:14px;font-family:var(--font-mono);font-size:12px">
+    <div class="row" style="gap:16px;flex-wrap:wrap;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px">
+      <div style="flex:1 1 180px">
+        <div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:2px">Container Name</div>
+        <div style="font-weight:600;font-size:13px">${esc(rawName)}</div>
+      </div>
+      <div style="flex:1 1 180px">
+        <div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:2px">Status</div>
+        <div>${badge}</div>
+      </div>
+      <div style="flex:1 1 180px">
+        <div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:2px">Host Server</div>
+        <button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" onclick="state.fleetServerFilter='${esc(c.server_id||'')}';closeDrw();goView('fleet-containers')">${esc(c.server_id || 'local-host')}</button>
+      </div>
+    </div>
+
+    <div style="background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;display:grid;gap:10px">
+      <div>
+        <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:2px">Full Container ID</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <code style="font-size:11px;word-break:break-all">${esc(c.id)}</code>
+          <button class="cbtn" onclick="copyText2('${esc(c.id)}', this)">Copy</button>
+        </div>
+      </div>
+      <div>
+        <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:2px">Image</span>
+        <code style="font-size:11px">${esc(c.image || '-')}</code>
+      </div>
+      <div>
+        <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:2px">Command</span>
+        <code style="font-size:11px">${esc(c.command || '-')}</code>
+      </div>
+      <div>
+        <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:4px">Ports & Network Bindings</span>
+        <div>${renderPortBadges(c.ports)}</div>
+      </div>
+      <div>
+        <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:2px">Created At</span>
+        <span style="font-size:11px">${esc(createdDate)}</span>
+      </div>
+    </div>
+
+    <div style="background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px">
+      <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:6px">Docker Labels (${labels.length})</span>
+      ${labelsHtml}
+    </div>
+  </div>`;
+
+  const actions = [
+    { label: 'View Logs', fn: `viewContainerLogs('${esc(c.id)}','${esc(rawName)}','${esc(c.server_id||'')}')` },
+    isRunning
+      ? { label: 'Restart', fn: `restartContainer('${esc(c.id)}','${esc(rawName)}','${esc(c.server_id||'')}')` }
+      : { label: 'Start', fn: `startContainer('${esc(c.id)}','${esc(c.server_id||'')}')` }
+  ];
+
+  nodeDrw('Inspect: ' + rawName, '', body, actions);
+};
 
 window.viewContainerLogs=async function(id, name, serverId){
   const prevLevel = state._fleetLogsState ? state._fleetLogsState.level : 'all';
@@ -3834,9 +3923,32 @@ function renderFleetLogsActions(){
     + `<option value="debug" ${s.level==='debug'?'selected':''}>DEBUG</option>`
     + `</select>`
     + `<input id="drwLogQ" placeholder="Filter..." value="${esc(s.filter||'')}" oninput="filterFleetLogs(this.value)" style="height:22px;padding:2px 8px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);flex:1 1 80px;max-width:110px;min-width:60px" aria-label="Filter container logs">`
+    + `<button id="drwLogAutoBtn" class="cbtn ${s.autoRefresh?'ok':''}" onclick="toggleFleetLogsAuto()" title="${s.autoRefresh?'Pause live auto-refresh (3s)':'Start live auto-refresh every 3s'}">${s.autoRefresh?'⏸ Auto':'▶ Auto'}</button>`
     + `<button class="cbtn" onclick="copyFleetLogs(this)">Copy</button>`
     + `<button class="cbtn" onclick="refreshFleetLogs()">Refresh</button>`;
 }
+
+window.toggleFleetLogsAuto = function(){
+  const s = state._fleetLogsState;
+  if(!s) return;
+  s.autoRefresh = !s.autoRefresh;
+  if(s.autoTimer){ clearInterval(s.autoTimer); s.autoTimer = null; }
+  if(s.autoRefresh){
+    s.autoTimer = setInterval(async () => {
+      if(!state._fleetLogsState || !state._fleetLogsState.autoRefresh){
+        if(s.autoTimer) clearInterval(s.autoTimer);
+        return;
+      }
+      await refreshFleetLogs(true);
+    }, 3000);
+  }
+  const btn = document.getElementById('drwLogAutoBtn');
+  if(btn){
+    btn.textContent = s.autoRefresh ? '⏸ Auto' : '▶ Auto';
+    btn.classList.toggle('ok', !!s.autoRefresh);
+    btn.title = s.autoRefresh ? 'Pause live auto-refresh (3s)' : 'Start live auto-refresh every 3s';
+  }
+};
 
 window.switchFleetLogContainer = async function(val){
   if(val === 'all'){
@@ -3960,9 +4072,12 @@ function updateFleetLogsBody(keepScroll){
   if(metaEl) metaEl.textContent = countLabel;
   wrapEl.innerHTML = filtered.length ? renderLogLines(filtered) : `<div class="muted" style="padding:14px;text-align:center">${(q || targetLevel !== 'all') ? 'No log lines match filter criteria.' : '(no log output captured)'}</div>`;
 
-  if(!keepScroll){
-    const drwB = document.getElementById('drwBody');
-    if(drwB) drwB.scrollTop = drwB.scrollHeight;
+  const drwB = document.getElementById('drwBody');
+  if(drwB){
+    const isAtBottom = (drwB.scrollHeight - drwB.scrollTop - drwB.clientHeight) < 60;
+    if(!keepScroll || isAtBottom){
+      drwB.scrollTop = drwB.scrollHeight;
+    }
   }
 }
 
@@ -4043,17 +4158,125 @@ window.goFleetContainers=function(serverId){
 };
 
 /* Broker logs viewer */
-function viewLogs(){ return `<div>${pageHeader('Broker Logs','Review recent broker log entries by severity.')}<div class="card"><div class="kicker">Diagnostics</div><h3 style="margin-bottom:10px">Broker Logs</h3>
-  <div class="row" style="margin-bottom:10px"><select id="logLvl" style="width:auto" onchange="loadLogs()"><option value="">Semua level</option><option value="warn">Warn ke atas</option><option value="err">Error saja</option></select><button class="btn ghost" onclick="loadLogs()">Refresh</button><span class="updatedAgo">ring 500 baris terakhir</span></div>
-  <div class="logView" id="logOut">${skel(120)}</div></div></div>`; }
-async function loadLogs(){ const out=document.getElementById('logOut'); if(!out)return;
-  try{ const lines=await api('/api/v1/logs'); const lvl=document.getElementById('logLvl')?.value||'';
-    const filt=(lines||[]).filter(l=>lvl==='err'?/error|fatal|panic/i.test(l):lvl==='warn'?/warn|error|fatal|panic/i.test(l):true);
-    out.innerHTML=filt.slice(-300).map(l=>{const cls=/error|fatal|panic/i.test(l)?'lerr':/warn/i.test(l)?'lwarn':'';return `<div class="${cls}">${esc(l)}</div>`;}).join('')||'<span class="muted">Log kosong.</span>';
-    out.scrollTop=out.scrollHeight;
-  }catch(e){ out.textContent='error: '+e.message; } }
-window.loadLogs=loadLogs;
+function viewLogs(){
+  const s = state._brokerLogsState = state._brokerLogsState || { filter: '', level: 'all', auto: false, rawLines: [] };
+  return `<div>${pageHeader('Broker Logs','Review recent PocketKafka broker log entries with level filtering.')}
+    <div class="card" style="margin-bottom:14px;padding:12px">
+      <div class="row" style="gap:10px;justify-content:space-between;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label for="brokerLogLvl" class="muted" style="font-size:11px">Level</label>
+          <select id="brokerLogLvl" style="width:auto" onchange="filterBrokerLogLevel(this.value)">
+            <option value="all" ${s.level==='all'?'selected':''}>All Levels</option>
+            <option value="error" ${s.level==='error'?'selected':''}>ERROR</option>
+            <option value="warn" ${s.level==='warn'?'selected':''}>WARN</option>
+            <option value="info" ${s.level==='info'?'selected':''}>INFO</option>
+            <option value="debug" ${s.level==='debug'?'selected':''}>DEBUG</option>
+          </select>
+          <input id="brokerLogQ" placeholder="Filter logs..." value="${esc(s.filter||'')}" oninput="filterBrokerLogs(this.value)" style="max-width:240px" aria-label="Search broker logs">
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="brokerLogAutoBtn" class="btn ghost ${s.auto?'ok':''}" onclick="toggleBrokerLogsAuto()" title="${s.auto?'Pause live auto-refresh (3s)':'Start live auto-refresh every 3s'}">${s.auto?'⏸ Auto (3s)':'▶ Auto (3s)'}</button>
+          <button class="btn ghost" onclick="copyBrokerLogs(this)">Copy</button>
+          <button class="btn ghost" onclick="loadLogs()">Refresh</button>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="padding:0">
+      <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font:11px/1.8 var(--font-mono);color:var(--muted)">
+        <span id="brokerLogMeta">Loading recent entries...</span>
+        <span>Ring buffer: last 500 lines</span>
+      </div>
+      <div id="logOut" style="max-height:65vh;overflow:auto;padding:8px 0;background:var(--bg-canvas)">${skel(120)}</div>
+    </div>
+  </div>`;
+}
 
+async function loadLogs(silent){
+  const out = document.getElementById('logOut');
+  if(!out) return;
+  const s = state._brokerLogsState = state._brokerLogsState || { filter: '', level: 'all', auto: false, rawLines: [] };
+  try{
+    const lines = await api('/api/v1/logs');
+    s.rawLines = lines || [];
+    renderBrokerLogsBody(silent);
+  }catch(e){
+    if(!silent) out.innerHTML = `<div class="muted" style="padding:16px;color:var(--danger)">Failed to fetch broker logs: ${esc(e.message)}</div>`;
+  }
+}
+window.loadLogs = loadLogs;
+
+function filterBrokerLogLevel(lvl){
+  if(!state._brokerLogsState) return;
+  state._brokerLogsState.level = lvl || 'all';
+  renderBrokerLogsBody(true);
+}
+window.filterBrokerLogLevel = filterBrokerLogLevel;
+
+function filterBrokerLogs(val){
+  if(!state._brokerLogsState) return;
+  state._brokerLogsState.filter = String(val || '');
+  renderBrokerLogsBody(true);
+}
+window.filterBrokerLogs = filterBrokerLogs;
+
+function copyBrokerLogs(btn){
+  const s = state._brokerLogsState;
+  if(!s) return;
+  const text = (s.rawLines || []).join('\n');
+  copyText2(text, btn);
+}
+window.copyBrokerLogs = copyBrokerLogs;
+
+function toggleBrokerLogsAuto(){
+  const s = state._brokerLogsState = state._brokerLogsState || { filter: '', level: 'all', auto: false, rawLines: [] };
+  s.auto = !s.auto;
+  if(s.timer){ clearInterval(s.timer); s.timer = null; }
+  if(s.auto){
+    s.timer = setInterval(async () => {
+      if(state.view !== 'logs' || !state._brokerLogsState || !state._brokerLogsState.auto){
+        if(s.timer) clearInterval(s.timer);
+        return;
+      }
+      await loadLogs(true);
+    }, 3000);
+  }
+  const btn = document.getElementById('brokerLogAutoBtn');
+  if(btn){
+    btn.textContent = s.auto ? '⏸ Auto (3s)' : '▶ Auto (3s)';
+    btn.classList.toggle('ok', !!s.auto);
+  }
+}
+window.toggleBrokerLogsAuto = toggleBrokerLogsAuto;
+
+function renderBrokerLogsBody(keepScroll){
+  const s = state._brokerLogsState;
+  if(!s) return;
+  const out = document.getElementById('logOut');
+  const meta = document.getElementById('brokerLogMeta');
+  if(!out) return;
+
+  const rawEntries = s.rawLines || [];
+  const q = (s.filter || '').toLowerCase();
+  const targetLevel = s.level || 'all';
+
+  const filtered = rawEntries.filter(raw => {
+    const parsed = parseLogLine(raw);
+    if(!matchLogLevel(parsed, raw, targetLevel)) return false;
+    if(q && !String(raw).toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  const levelTag = targetLevel !== 'all' ? ` [${targetLevel.toUpperCase()}]` : '';
+  const countLabel = (q || targetLevel !== 'all') ? `${filtered.length} of ${rawEntries.length} lines${levelTag}` : `Last ${rawEntries.length} lines`;
+
+  if(meta) meta.textContent = countLabel;
+  out.innerHTML = filtered.length ? renderLogLines(filtered) : `<div class="muted" style="padding:16px;text-align:center">${(q || targetLevel !== 'all') ? 'No broker logs match filter criteria.' : 'Log buffer is empty.'}</div>`;
+
+  const isAtBottom = (out.scrollHeight - out.scrollTop - out.clientHeight) < 60;
+  if(!keepScroll || isAtBottom){
+    out.scrollTop = out.scrollHeight;
+  }
+}
 /* Command palette (Ctrl+K / '/') */
 function palItems(){
   const items=navItems.map(([k,label])=>({label,run:()=>goView(k),hint:'view'}));
