@@ -985,8 +985,8 @@ function setupDrwResizer(){
 function nodeDrw(title,meta,tableHtml,actions){
   openDrw(title,`${meta?`<div style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:10px">${meta}</div>`:''}${tableHtml}`);
   const act=document.getElementById('drwActions');
-  if(act&&actions&&actions.length){
-    act.innerHTML=actions.map(a=>`<button class="cbtn" onclick="${a.fn}">${esc(a.label)}</button>`).join('');
+  if(act){
+    act.innerHTML=(actions||[]).map(a=>`<button class="cbtn" onclick="${a.fn}">${esc(a.label)}</button>`).join('');
   }
 }
 function fallbackCopy(t){
@@ -3748,8 +3748,14 @@ window.removeContainer=async function(id, name, serverId, isRunning){
 
 window.viewContainerLogs=async function(id, name, serverId){
   state._fleetLogsState = { id, name, serverId, rawLines: [], filter: '' };
+  openDrw('Logs: ' + (name || id), `<div id="fleetLogMeta" style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:8px">Loading logs...</div><div id="fleetLogWrap" style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:8px 0;max-width:100%;overflow-x:hidden"><div class="muted" style="padding:14px;text-align:center">Fetching container logs...</div></div>`);
+  const act = document.getElementById('drwActions');
+  if(act){
+    act.innerHTML = `<input id="drwLogQ" placeholder="Filter..." value="" oninput="filterFleetLogs(this.value)" style="height:22px;padding:2px 8px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);width:130px" aria-label="Filter container logs"><button class="cbtn" onclick="copyFleetLogs(this)">Copy</button><button class="cbtn" onclick="refreshFleetLogs()">Refresh</button>`;
+  }
   await refreshFleetLogs();
 };
+
 async function refreshFleetLogs(){
   const s = state._fleetLogsState;
   if(!s || !s.id) return;
@@ -3757,7 +3763,7 @@ async function refreshFleetLogs(){
     const q = s.serverId ? '?server_id=' + encodeURIComponent(s.serverId) + '&tail=150' : '?tail=150';
     const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(s.id) + '/logs' + q);
     s.rawLines = res.lines || [];
-    renderFleetLogsDrawer();
+    updateFleetLogsBody(false);
   }catch(e){
     toast('Failed to load logs: ' + e.message);
   }
@@ -3767,7 +3773,7 @@ window.refreshFleetLogs = refreshFleetLogs;
 function filterFleetLogs(val){
   if(!state._fleetLogsState) return;
   state._fleetLogsState.filter = String(val || '');
-  renderFleetLogsDrawer(true);
+  updateFleetLogsBody(true);
 }
 window.filterFleetLogs = filterFleetLogs;
 
@@ -3779,32 +3785,21 @@ function copyFleetLogs(btn){
 }
 window.copyFleetLogs = copyFleetLogs;
 
-function renderFleetLogsDrawer(keepScroll){
+function updateFleetLogsBody(keepScroll){
   const s = state._fleetLogsState;
   if(!s) return;
+  const metaEl = document.getElementById('fleetLogMeta');
+  const wrapEl = document.getElementById('fleetLogWrap');
+  if(!wrapEl) return;
+
   const lines = s.rawLines || [];
   const q = (s.filter || '').toLowerCase();
   const filtered = q ? lines.filter(l => String(l).toLowerCase().includes(q)) : lines;
   const countLabel = q ? `${filtered.length} of ${lines.length} lines` : `Last ${lines.length} lines`;
-  const body = filtered.length ? renderLogLines(filtered) : `<div class="muted" style="padding:14px;text-align:center">${q ? 'No log lines match filter.' : '(no log output captured)'}</div>`;
-  const wrap = `<div id="fleetLogWrap" style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:8px 0;max-width:100%;overflow-x:hidden">${body}</div>`;
 
-  const actions = [
-    { html: `<input id="drwLogQ" placeholder="Filter..." value="${esc(s.filter||'')}" oninput="filterFleetLogs(this.value)" style="height:22px;padding:2px 8px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);width:130px" aria-label="Filter container logs">` },
-    { html: `<button class="cbtn" onclick="copyFleetLogs(this)">Copy</button>` },
-    { html: `<button class="cbtn" onclick="refreshFleetLogs()">Refresh</button>` }
-  ];
+  if(metaEl) metaEl.textContent = countLabel;
+  wrapEl.innerHTML = filtered.length ? renderLogLines(filtered) : `<div class="muted" style="padding:14px;text-align:center">${q ? 'No log lines match filter.' : '(no log output captured)'}</div>`;
 
-  openDrw('Logs: ' + (s.name || s.id), `<div style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:8px">${esc(countLabel)}</div>${wrap}`);
-  const act = document.getElementById('drwActions');
-  if(act){
-    act.innerHTML = actions.map(a => a.html).join('');
-    const inp = document.getElementById('drwLogQ');
-    if(inp && q && document.activeElement && document.activeElement.id === 'drwLogQ'){
-      inp.focus();
-      inp.selectionStart = inp.selectionEnd = inp.value.length;
-    }
-  }
   if(!keepScroll){
     const drwB = document.getElementById('drwBody');
     if(drwB) drwB.scrollTop = drwB.scrollHeight;
