@@ -416,6 +416,18 @@ func (m *AgentManager) RegisterSession(agentID, secret string, transport AgentTr
 	return sess, nil
 }
 
+// UnregisterServerSessions drops all live sessions of a revoked server so its
+// stale inventory stops being served.
+func (m *AgentManager) UnregisterServerSessions(serverID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, sess := range m.sessions {
+		if sess.serverID == serverID {
+			delete(m.sessions, id)
+		}
+	}
+}
+
 func (m *AgentManager) UnregisterSession(agentID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -453,10 +465,11 @@ func (m *AgentManager) DispatchJob(ctx context.Context, agentID string, job *Job
 	}
 
 	payload, err := json.Marshal(JobDispatchMessage{
-		JobID:  job.ID,
-		Action: job.Action,
-		Target: job.Target,
-		Force:  job.Force,
+		JobID:     job.ID,
+		Action:    job.Action,
+		Target:    job.Target,
+		Force:     job.Force,
+		TailLines: job.TailLines,
 	})
 	if err != nil {
 		return err
@@ -512,6 +525,7 @@ func (m *AgentManager) HandleInboundEnvelope(env *Envelope) error {
 			var res JobResultMessage
 			if err := json.Unmarshal(env.Payload, &res); err == nil {
 				if res.Status == JobStatusSucceeded {
+					_ = m.jobs.SetResult(res.JobID, res.Result)
 					_ = m.jobs.Complete(res.JobID, JobStatusSucceeded)
 				} else if res.Status == JobStatusFailed {
 					_ = m.jobs.Complete(res.JobID, JobStatusFailed, res.Error)

@@ -27,6 +27,7 @@ type ContainerSummary struct {
 	Status   string            `json:"status"`
 	Labels   map[string]string `json:"labels,omitempty"`
 	ServerID string            `json:"server_id,omitempty"`
+	Ports    string            `json:"ports,omitempty"`
 }
 
 type ContainerInspect struct {
@@ -325,6 +326,7 @@ func (c *SocketDockerClient) List(ctx context.Context) ([]ContainerSummary, erro
 		State   string            `json:"State"`
 		Status  string            `json:"Status"`
 		Labels  map[string]string `json:"Labels"`
+		Ports   []dockerPort      `json:"Ports"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, err
@@ -341,9 +343,37 @@ func (c *SocketDockerClient) List(ctx context.Context) ([]ContainerSummary, erro
 			State:   r.State,
 			Status:  r.Status,
 			Labels:  r.Labels,
+			Ports:   formatDockerPorts(r.Ports),
 		}
 	}
 	return out, nil
+}
+
+type dockerPort struct {
+	IP          string `json:"IP"`
+	PrivatePort int    `json:"PrivatePort"`
+	PublicPort  int    `json:"PublicPort"`
+	Type        string `json:"Type"`
+}
+
+// formatDockerPorts renders e.g. "0.0.0.0:8080->80/tcp, 5432/tcp".
+func formatDockerPorts(ports []dockerPort) string {
+	parts := make([]string, 0, len(ports))
+	for _, p := range ports {
+		typ := p.Type
+		if typ == "" {
+			typ = "tcp"
+		}
+		switch {
+		case p.PublicPort > 0 && p.IP != "":
+			parts = append(parts, fmt.Sprintf("%s:%d->%d/%s", p.IP, p.PublicPort, p.PrivatePort, typ))
+		case p.PublicPort > 0:
+			parts = append(parts, fmt.Sprintf("%d->%d/%s", p.PublicPort, p.PrivatePort, typ))
+		case p.PrivatePort > 0:
+			parts = append(parts, fmt.Sprintf("%d/%s", p.PrivatePort, typ))
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (c *SocketDockerClient) Inspect(ctx context.Context, idOrName string) (*ContainerInspect, error) {

@@ -410,6 +410,9 @@ func (s *FleetServer) handleRevokeServer(w http.ResponseWriter, r *http.Request)
 		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, err.Error())
 		return
 	}
+	if s.manager != nil {
+		s.manager.UnregisterServerSessions(id)
+	}
 
 	if s.audit != nil {
 		s.audit.Log(AuditEvent{
@@ -734,11 +737,57 @@ func (s *FleetServer) handleContainerLogs(w http.ResponseWriter, r *http.Request
 		tail = 1000 // capped
 	}
 
+	serverID := r.URL.Query().Get("server_id")
+	if serverID == "" && s.registry != nil {
+		if servers := s.registry.ListServers(); len(servers) == 1 {
+			serverID = servers[0].ID
+		}
+	}
+	if serverID != "" && s.jobs != nil {
+		jobID, err := s.jobs.SubmitWithTail(serverID, "logs", id, principal, "", tail)
+		if err == nil {
+			if job, _ := s.jobs.Get(jobID); job != nil {
+				s.dispatchJobToAgent(serverID, job)
+			}
+			lines := s.waitJobLines(jobID, 8*time.Second)
+			if lines != nil {
+				s.writeJSON(w, http.StatusOK, map[string]interface{}{
+					"container_id": id,
+					"tail":         tail,
+					"lines":        lines,
+				})
+				return
+			}
+		}
+	}
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"container_id": id,
 		"tail":         tail,
 		"lines":        []string{},
 	})
+}
+
+// waitJobLines polls a logs job until it completes, returning split lines.
+// Returns nil on timeout/failure so callers fall back to an empty list.
+func (s *FleetServer) waitJobLines(jobID string, timeout time.Duration) []string {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		job, err := s.jobs.Get(jobID)
+		if err != nil || job == nil {
+			return nil
+		}
+		if job.Status == JobStatusSucceeded {
+			if job.Result == "" {
+				return []string{}
+			}
+			return strings.Split(strings.TrimRight(job.Result, "\n"), "\n")
+		}
+		if job.Status == JobStatusFailed {
+			return nil
+		}
+		time.Sleep(400 * time.Millisecond)
+	}
+	return nil
 }
 
 func (s *FleetServer) handleListJobs(w http.ResponseWriter, r *http.Request) {

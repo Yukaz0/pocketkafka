@@ -3249,7 +3249,7 @@ function viewFleetContainers(){
       : `<button class="btn" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="startContainer('${esc(c.id)}','${esc(srvId)}')">Start</button>
          <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="removeContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}',false)">Remove</button>`;
 
-    const logsBtn = `<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="viewContainerLogs('${esc(c.id)}','${esc(rawName)}')">Logs</button>`;
+    const logsBtn = `<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="viewContainerLogs('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Logs</button>`;
 
     return `<tr>
       <td class="mono">
@@ -3260,14 +3260,15 @@ function viewFleetContainers(){
       <td class="mono" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.image||'')}">${esc(c.image || '-')}</td>
       <td>${badge}</td>
       <td class="mono" style="font-size:10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.command||'')}">${esc(c.command || '-')}</td>
+      <td class="mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.ports||'')}">${esc(c.ports || '-')}</td>
       <td><div class="clRowActions">${actions}${logsBtn}</div></td>
     </tr>`;
   }).join('');
 
   const table = tableScroll(`<table><thead><tr>
-    <th>Container Name / ID</th><th>Host Server</th><th>Image</th><th>State / Status</th><th>Command</th><th>Actions</th>
+    <th>Container Name / ID</th><th>Host Server</th><th>Image</th><th>State / Status</th><th>Command</th><th>Ports</th><th>Actions</th>
   </tr></thead><tbody>
-    ${rows || '<tr><td colspan="6" class="muted" style="padding:28px;text-align:center">No containers found. Ensure a fleet-agent is connected.</td></tr>'}
+    ${rows || '<tr><td colspan="7" class="muted" style="padding:28px;text-align:center">No containers found. Ensure a fleet-agent is connected.</td></tr>'}
   </tbody></table>`);
 
   return `<div>${pageHeader('Containers', 'Docker containers across connected fleet host nodes.')}
@@ -3679,9 +3680,10 @@ window.removeContainer=async function(id, name, serverId, isRunning){
   }
 };
 
-window.viewContainerLogs=async function(id, name){
+window.viewContainerLogs=async function(id, name, serverId){
   try{
-    const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(id) + '/logs?tail=100');
+    const q = serverId ? '?server_id=' + encodeURIComponent(serverId) + '&tail=100' : '?tail=100';
+    const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(id) + '/logs' + q);
     const lines = (res.lines || []).join('\n') || '(no log output captured)';
     const body = `<div style="font-family:var(--font-mono);font-size:11.5px;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;max-height:450px;overflow:auto;white-space:pre-wrap;word-break:break-all">${esc(lines)}</div>`;
     nodeDrw('Logs: ' + (name || id), 'Last 100 lines', body, []);
