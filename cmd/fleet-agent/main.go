@@ -129,6 +129,7 @@ func loadOrEnroll(ctx context.Context, client *http.Client, serverURL, token, st
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-PocketKafka-Request", "1")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -390,6 +391,7 @@ func (t *HTTPStreamTransport) Send(env *fleet.Envelope) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-PocketKafka-Request", "1")
 
 	resp, err := t.client.Do(req)
 	if err != nil {
