@@ -207,7 +207,6 @@ func (r *Registry) ConsumeToken(token string) (*Agent, error) {
 		ID:         agentID,
 		ServerID:   e.ServerID,
 		Secret:     secretHash,
-		RawSecret:  rawSecret,
 		Revoked:    false,
 		EnrolledAt: now,
 	}
@@ -216,7 +215,9 @@ func (r *Registry) ConsumeToken(token string) (*Agent, error) {
 	if err := r.persistLocked(); err != nil {
 		return nil, err
 	}
-	return ag, nil
+	cp := *ag
+	cp.RawSecret = rawSecret
+	return &cp, nil
 }
 
 // Revoke disables an agent immediately.
@@ -245,9 +246,9 @@ func (r *Registry) Lookup(agentID string) (*Agent, error) {
 	if !ok {
 		return nil, fmt.Errorf("fleet: agent %q not found: %w", agentID, ErrNotFound)
 	}
-	// Return shallow copy
-	copy := *ag
-	return &copy, nil
+	cp := *ag
+	cp.RawSecret = ""
+	return &cp, nil
 }
 
 // AuthorizeStream checks whether the agent exists and is not revoked.
@@ -262,8 +263,9 @@ func (r *Registry) AuthorizeStream(agentID string) (*Agent, error) {
 	if ag.Revoked {
 		return nil, fmt.Errorf("fleet: agent %q is revoked: %w", agentID, ErrRevoked)
 	}
-	copy := *ag
-	return &copy, nil
+	cp := *ag
+	cp.RawSecret = ""
+	return &cp, nil
 }
 
 // ListAgents returns all agents sorted by ID.
@@ -273,8 +275,9 @@ func (r *Registry) ListAgents() []*Agent {
 
 	out := make([]*Agent, 0, len(r.agents))
 	for _, a := range r.agents {
-		copy := *a
-		out = append(out, &copy)
+		cp := *a
+		cp.RawSecret = ""
+		out = append(out, &cp)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
