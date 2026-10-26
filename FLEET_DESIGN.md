@@ -21,7 +21,7 @@ Pendekatan: **horizontal penuh** — satu desain utuh, dibangun sekaligus, integ
 - Zona Kafka (tak berubah): Topics, Groups, Data Browser, Schemas, Topology.
 - Zona Fleet: Servers, Containers, Jobs, Audit, Settings-Fleet.
 - Bahasa per zona beda (broker vs host); aksen sekunder beda, tetap flat tanpa gradient.
-- Status sosial: teks + ikon SVG, bukan warna saja. Kontras 4.5:1, keyboard penuh,
+- Status server: teks + ikon SVG, bukan warna saja. Kontras 4.5:1, keyboard penuh,
   `prefers-reduced-motion` hentikan animasi polling.
 - **FR-001**: status Fleet dari field publik `/api/v1/info` (tanpa cookie).
   Disabled = sakelar tak dirender; akses `#/fleet/...` langsung = view
@@ -33,13 +33,28 @@ Pendekatan: **horizontal penuh** — satu desain utuh, dibangun sekaligus, integ
 - Prefix `/api/v1/fleet` (skema PRD §10). Mutasi → `202 Accepted` + `job_id`;
   operator pantau status job (queued→running→succeeded/failed). Alasan: agent
   remote bisa lambat/offline.
-- RBAC: `viewer < operator < admin`. Tiap handler cek otorisasi per target resource.
+- RBAC: role `viewer < operator < admin` adalah alias konfigurasi di atas
+  `authz.Authorizer` yang sama dengan broker (satu sumber kebenaran, bukan store
+  ganda). Resource baru: `fleet_server`, `fleet_container`, `fleet_job`,
+  `fleet_audit`. Operasi: `describe` (viewer), `control` (operator: start/stop/
+  restart/logs), `admin` (revoke, enroll, kelola). Fleet admin bukan otomatis
+  cluster admin dan sebaliknya — grant eksplisit per resource.
 - Storage 3 kelas (bukan satu file monolitik):
   1. **Registry** `__fleet_agents.json` — agent, kredensial (hash, bukan plaintext),
      enrollment. Jarang berubah, pola atomicfile seperti ACL.
   2. **Inventaris + heartbeat** — memori saja; persist opsional snapshot terakhir/agent.
   3. **Audit + job** `fleet_audit.jsonl`, `fleet_jobs.jsonl` — append-only + rotasi.
+     Tiap entri audit: actor, target (server/container), waktu, hasil, correlation
+     ID (FR-011). Log container dibatasi baris/byte + sanitasi secret metadata (FR-008).
 - Retensi konfigurabel, default 30 hari / 10 ribu entri (mana dulu tercapai).
+
+## §3b Konfigurasi listener Fleet
+
+- Key `fleet.*`: `enabled` (default false), `listen` (default `127.0.0.1:18090`),
+  `tls` (cert/key, wajib bila listen non-loopback), `heartbeat_timeout`,
+  `retention_days`/`retention_entries`.
+- Validasi di `config.Load` seperti field lain: listen publik tanpa TLS+auth =
+  startup gagal. Aturan sama dengan `allow_insecure_public` broker.
 
 ## §4 Agent & protokol
 
