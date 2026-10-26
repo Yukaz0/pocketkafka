@@ -1237,6 +1237,19 @@ function render(){
 }
 async function refreshAll(){await refresh();render();}
 window.refreshAll=refreshAll;
+async function waitFleetJobDone(jobId, timeoutMs){
+  const t0 = Date.now();
+  timeoutMs = timeoutMs || 12000;
+  while(Date.now() - t0 < timeoutMs){
+    try{
+      const j = await apiLocal('/api/v1/fleet/jobs/' + encodeURIComponent(jobId));
+      const st = j && (j.status || (j.job && j.job.status));
+      if(st === 'succeeded' || st === 'failed') return j;
+    }catch(e){}
+    await new Promise(r => setTimeout(r, 800));
+  }
+  return null;
+}
 window.goView=async function(v,sub){
   if(v.startsWith('fleet-')){
     const subName=v.replace(/^fleet-/,'');
@@ -3562,6 +3575,7 @@ window.startContainer=async function(id, serverId){
       body: JSON.stringify({ server_id: serverId })
     });
     toast('Start container job accepted: ' + (res.job_id || ''));
+    await waitFleetJobDone(res.job_id);
     await refresh();
     render();
   }catch(e){
@@ -3587,6 +3601,7 @@ window.stopContainer=async function(id, name, serverId){
       body: JSON.stringify({ server_id: serverId })
     });
     toast('Stop container job accepted: ' + (res.job_id || ''));
+    await waitFleetJobDone(res.job_id);
     await refresh();
     render();
   }catch(e){
@@ -3612,6 +3627,7 @@ window.restartContainer=async function(id, name, serverId){
       body: JSON.stringify({ server_id: serverId })
     });
     toast('Restart container job accepted: ' + (res.job_id || ''));
+    await waitFleetJobDone(res.job_id);
     await refresh();
     render();
   }catch(e){
@@ -3637,6 +3653,7 @@ window.removeContainer=async function(id, name, serverId){
       body: JSON.stringify({ server_id: serverId })
     });
     toast('Remove container job accepted: ' + (res.job_id || ''));
+    await waitFleetJobDone(res.job_id);
     await refresh();
     render();
   }catch(e){
