@@ -77,7 +77,7 @@ var clusterTokenRoutes = map[string]bool{
 
 func apiPublicPath(path string) bool {
 	switch path {
-	case "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/status":
+	case "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/status", "/api/v1/info":
 		return true
 	}
 	return false

@@ -271,6 +271,7 @@ func (s *Server) route(mux *http.ServeMux, pattern string, h func(http.ResponseW
 func (s *Server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle("/", noCache(http.FileServer(http.FS(webui.FS()))))
+	s.route(mux, "GET /api/v1/info", s.handleInfo)
 	s.route(mux, "GET /api/v1/cluster", s.handleCluster)
 	s.route(mux, "GET /api/v1/topics", s.handleTopics)
 	s.route(mux, "POST /api/v1/topics", s.handleCreateTopic)
@@ -343,6 +344,16 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]interface{}{
+		"product":  "pocketkafka",
+		"vendor":   "Muhammad Jafar Ikbal (Yukaz0)",
+		"upstream": "https://github.com/Yukaz0/pocketkafka",
+		"license":  "MIT",
+		"version":  s.version,
+	})
 }
 
 func (s *Server) handleCluster(w http.ResponseWriter, r *http.Request) {

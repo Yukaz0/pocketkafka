@@ -69,7 +69,7 @@ func main() {
 	}
 	defer audit.Close()
 
-	log.Printf("pocketkafka v%s starting (cluster=%s data_dir=%s)",
+	log.Printf("pocketkafka v%s by Muhammad Jafar Ikbal (Yukaz0) — https://github.com/Yukaz0/pocketkafka (cluster=%s data_dir=%s)",
 		version, cfg.Broker.ClusterID, cfg.Storage.DataDir)
 	logSecurityPosture(cfg)
 	startPprof()
