@@ -356,21 +356,34 @@ type dockerPort struct {
 	Type        string `json:"Type"`
 }
 
-// formatDockerPorts renders e.g. "0.0.0.0:8080->80/tcp, 5432/tcp".
+// formatDockerPorts renders e.g. "0.0.0.0:8080->80/tcp, 5432/tcp",
+// deduplicating dual-stack IPv6 (::) bindings when an IPv4 (0.0.0.0) binding exists.
 func formatDockerPorts(ports []dockerPort) string {
 	parts := make([]string, 0, len(ports))
+	seen := make(map[string]bool)
 	for _, p := range ports {
 		typ := p.Type
 		if typ == "" {
 			typ = "tcp"
 		}
+		if p.IP == "::" {
+			v4Key := fmt.Sprintf("0.0.0.0:%d->%d/%s", p.PublicPort, p.PrivatePort, typ)
+			if seen[v4Key] {
+				continue
+			}
+		}
+		var s string
 		switch {
 		case p.PublicPort > 0 && p.IP != "":
-			parts = append(parts, fmt.Sprintf("%s:%d->%d/%s", p.IP, p.PublicPort, p.PrivatePort, typ))
+			s = fmt.Sprintf("%s:%d->%d/%s", p.IP, p.PublicPort, p.PrivatePort, typ)
 		case p.PublicPort > 0:
-			parts = append(parts, fmt.Sprintf("%d->%d/%s", p.PublicPort, p.PrivatePort, typ))
+			s = fmt.Sprintf("%d->%d/%s", p.PublicPort, p.PrivatePort, typ)
 		case p.PrivatePort > 0:
-			parts = append(parts, fmt.Sprintf("%d/%s", p.PrivatePort, typ))
+			s = fmt.Sprintf("%d/%s", p.PrivatePort, typ)
+		}
+		if s != "" && !seen[s] {
+			seen[s] = true
+			parts = append(parts, s)
 		}
 	}
 	return strings.Join(parts, ", ")

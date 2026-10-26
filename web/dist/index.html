@@ -3160,6 +3160,44 @@ function serverStatusInfo(s){
   if(diff < 300000) return { status: 'stale', label: 'Stale' };
   return { status: 'offline', label: 'Offline' };
 }
+function renderPortBadges(portsStr){
+  if(!portsStr || portsStr === '-') return '<span class="muted" style="font-size:11px">-</span>';
+  const items = portsStr.split(',').map(s => s.trim()).filter(Boolean);
+  const seen = new Set();
+  const badges = [];
+
+  for(const it of items){
+    const m = it.match(/^(?:(\S+):)?(\d+)->(\d+)(?:\/(\w+))?$/);
+    if(m){
+      const ip = m[1] || '';
+      const pub = m[2];
+      const priv = m[3];
+      const proto = (m[4] || 'tcp').toLowerCase();
+      const key = pub + ':' + priv + '/' + proto;
+      if(seen.has(key)) continue;
+      seen.add(key);
+
+      const isLoopback = ip === '127.0.0.1' || ip === 'localhost';
+      const portText = pub === priv ? pub : (pub + '➔' + priv);
+      const protoText = proto === 'udp' ? '/udp' : '';
+      const prefix = isLoopback ? '<span class="muted" style="font-size:9.5px;margin-right:2px">local:</span>' : '';
+      badges.push(`<span class="chip mono" style="font-size:10.5px;padding:1px 6px;border-radius:3px;white-space:nowrap;display:inline-block" title="${esc(it)}">${prefix}<b>${esc(portText)}</b>${protoText}</span>`);
+    } else {
+      const m2 = it.match(/^(\d+)(?:\/(\w+))?$/);
+      if(m2){
+        const priv = m2[1];
+        const proto = (m2[2] || 'tcp').toLowerCase();
+        const key = priv + '/' + proto;
+        if(seen.has(key)) continue;
+        seen.add(key);
+        badges.push(`<span class="chip mono muted" style="font-size:10.5px;padding:1px 6px;border-radius:3px;white-space:nowrap;display:inline-block;opacity:.7" title="Exposed in container: ${esc(it)}">${esc(priv)}/${esc(proto)}</span>`);
+      }
+    }
+  }
+
+  if(!badges.length) return '<span class="muted" style="font-size:11px">-</span>';
+  return `<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;max-width:320px">${badges.join('')}</div>`;
+}
 
 function viewFleetDisabled(){
   return `<div class="card" style="max-width:640px;margin:40px auto;padding:28px">
@@ -3332,7 +3370,7 @@ function viewFleetContainers(){
       <td class="mono" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.image||'')}">${esc(c.image || '-')}</td>
       <td>${badge}</td>
       <td class="mono" style="font-size:10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.command||'')}">${esc(c.command || '-')}</td>
-      <td class="mono" style="font-size:10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.ports||'')}">${esc(c.ports || '-')}</td>
+      <td class="mono" style="min-width:140px;max-width:320px">${renderPortBadges(c.ports)}</td>
       <td><div class="clRowActions">${actions}${logsBtn}</div></td>
     </tr>`;
   }).join('');
