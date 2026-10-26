@@ -3686,7 +3686,7 @@ window.viewContainerLogs=async function(id, name, serverId){
     const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(id) + '/logs' + q);
     const lines = res.lines || [];
     const body = lines.length ? renderLogLines(lines) : '<div class="muted" style="padding:12px">(no log output captured)</div>';
-    const wrap = `<div style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:10px 0;max-height:480px;overflow:auto">${body}</div>`;
+    const wrap = `<div style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:10px 0">${body}</div>`;
     nodeDrw('Logs: ' + (name || id), 'Last ' + lines.length + ' lines', wrap, []);
   }catch(e){
     toast('Failed to load logs: ' + e.message);
