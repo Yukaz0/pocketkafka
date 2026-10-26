@@ -434,11 +434,11 @@ func (s *FleetServer) handleListEnrollments(w http.ResponseWriter, r *http.Reque
 	}
 
 	type enrollmentView struct {
-		TokenPrefix string    `json:"token_prefix"`
-		ServerID    string    `json:"server_id"`
-		CreatedAt   time.Time `json:"created_at"`
-		ExpiresAt   time.Time `json:"expires_at"`
-		Used        bool      `json:"used"`
+		TokenPrefix string     `json:"token_prefix"`
+		ServerID    string     `json:"server_id"`
+		CreatedAt   time.Time  `json:"created_at"`
+		ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+		Used        bool       `json:"used"`
 	}
 	var list []enrollmentView
 	if s.registry != nil {

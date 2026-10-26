@@ -185,7 +185,8 @@ func (r *Registry) enrollWithExpiry(serverID string, duration time.Duration) (st
 		Used:      false,
 	}
 	if duration != 0 {
-		e.ExpiresAt = now.Add(duration)
+		exp := now.Add(duration)
+		e.ExpiresAt = &exp
 	}
 
 	r.mu.Lock()
@@ -221,7 +222,7 @@ func (r *Registry) ConsumeToken(token string) (*Agent, error) {
 	if e.Used {
 		return nil, ErrTokenUsed
 	}
-	if !e.ExpiresAt.IsZero() && time.Now().After(e.ExpiresAt) {
+	if e.ExpiresAt != nil && time.Now().After(*e.ExpiresAt) {
 		return nil, ErrTokenExpired
 	}
 	if r.maxAgents > 0 {
@@ -386,7 +387,7 @@ func (r *Registry) ListEnrollments() []*Enrollment {
 	now := time.Now()
 	pruned := false
 	for tok, e := range r.enrollments {
-		if e.Used || (!e.ExpiresAt.IsZero() && now.After(e.ExpiresAt)) {
+		if e.Used || (e.ExpiresAt != nil && now.After(*e.ExpiresAt)) {
 			delete(r.enrollments, tok)
 			pruned = true
 		}

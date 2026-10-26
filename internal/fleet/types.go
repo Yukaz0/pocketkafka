@@ -30,12 +30,12 @@ type Agent struct {
 
 // Enrollment represents a single-use token issued to register an agent.
 type Enrollment struct {
-	Token     string    `json:"token"`
-	ServerID  string    `json:"server_id"`
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Used      bool      `json:"used"`
-	UsedAt    time.Time `json:"used_at,omitempty"`
+	Token     string     `json:"token"`
+	ServerID  string     `json:"server_id"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Used      bool       `json:"used"`
+	UsedAt    time.Time  `json:"used_at,omitempty"`
 }
 
 // JobStatus represents the execution lifecycle of a fleet job.

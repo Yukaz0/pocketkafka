@@ -3425,7 +3425,7 @@ function viewFleetSettings(){
     if(isUsed) badge = '<span class="badge muted">USED</span>';
     else if(isExpired) badge = '<span class="badge b-amber">EXPIRED</span>';
 
-    const exp = e.expires_at ? rel(new Date(e.expires_at).getTime()) : '-';
+    const exp = e.expires_at ? rel(new Date(e.expires_at).getTime()) : 'never';
 
     return `<tr>
       <td class="mono">${tok}</td>
