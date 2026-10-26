@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -92,7 +93,13 @@ func (a *Audit) Log(e AuditEvent) {
 	eventCopy := copyAuditEvent(&e)
 	a.events = append(a.events, eventCopy)
 
-	_ = a.appendLocked(eventCopy)
+	if err := a.appendLocked(eventCopy); err != nil {
+		slog.Error("fleet: audit write", "error", err, "path", a.filePath,
+			"actor", eventCopy.Actor, "action", eventCopy.Action)
+	} else {
+		slog.Info("fleet: audit", "actor", eventCopy.Actor, "action", eventCopy.Action,
+			"target", eventCopy.Target, "result", eventCopy.Result)
+	}
 }
 
 // List returns copies of all recorded audit events in chronological order.
@@ -191,6 +198,9 @@ func (a *Audit) appendLocked(e *AuditEvent) error {
 
 	if _, err := f.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("fleet: write %s: %w", a.filePath, err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("fleet: sync %s: %w", a.filePath, err)
 	}
 
 	return nil
