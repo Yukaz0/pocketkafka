@@ -3194,12 +3194,14 @@ function viewFleetContainers(){
     const isRunning = (c.state || '').toLowerCase() === 'running';
     const badge = fleetStatusBadge(c.state, c.status || c.state);
     const shortId = (c.id || '').slice(0, 12);
-    const srv = c.server_id || (srvs.length === 1 ? srvs[0].id : '-');
+    const srvId = c.server_id || (srvs.length === 1 ? srvs[0].id : '');
+    const srvLabel = srvId || 'unknown';
+    const noSrv = srvId === '';
 
     const actions = isRunning
-      ? `<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="restartContainer('${esc(c.id)}','${esc(rawName)}','${esc(srv)}')">Restart</button>
-         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="stopContainer('${esc(c.id)}','${esc(rawName)}','${esc(srv)}')">Stop</button>`
-      : `<button class="btn" style="padding:3px 8px;font-size:11px" onclick="startContainer('${esc(c.id)}','${esc(srv)}')">Start</button>`;
+      ? `<button class="btn ghost" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="restartContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Restart</button>
+         <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="stopContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Stop</button>`
+      : `<button class="btn" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="startContainer('${esc(c.id)}','${esc(srvId)}')">Start</button>`;
 
     const logsBtn = `<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="viewContainerLogs('${esc(c.id)}','${esc(rawName)}')">Logs</button>`;
 
@@ -3208,7 +3210,7 @@ function viewFleetContainers(){
         <div style="font-weight:600">${esc(rawName)}</div>
         <div class="muted" style="font-size:10px">${esc(shortId)}</div>
       </td>
-      <td class="mono" style="font-size:11px;color:var(--muted)">${esc(srv)}</td>
+      <td class="mono" style="font-size:11px;color:var(--muted)">${esc(srvLabel)}</td>
       <td class="mono" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.image||'')}">${esc(c.image || '-')}</td>
       <td>${badge}</td>
       <td class="mono" style="font-size:10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.command||'')}">${esc(c.command || '-')}</td>

@@ -489,6 +489,12 @@ func (s *FleetServer) handleContainerAction(action string) http.HandlerFunc {
 			s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "server_id is required"})
 			return
 		}
+		if s.registry != nil {
+			if _, ok := s.registry.GetServer(serverID); !ok {
+				s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown server_id"})
+				return
+			}
+		}
 
 		if s.jobs == nil {
 			s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "jobs store not configured"})
