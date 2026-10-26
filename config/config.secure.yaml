@@ -1,0 +1,46 @@
+# Secure starting point: copy to config.yaml (or mount as /etc/pocketkafka/config.yaml).
+# Generate real secrets first:
+#   pocketkafka hash-password      # PLAIN/Basic verifier
+#   pocketkafka scram-verifier     # SCRAM verifier (preferred)
+# Fill TLS paths with real cert/key before start.
+broker:
+  id: 0
+  cluster_id: "pocketkafka-prod"
+listeners:
+  plain: "127.0.0.1:9092"
+advertised_listeners:
+  plain: "localhost:9092"
+storage:
+  data_dir: "/var/lib/pocketkafka/data"
+  flush_policy: "interval"
+  flush_interval_ms: 100
+  sync_on_acks_all: true
+web:
+  listen: "127.0.0.1:8080"
+  enabled: true
+  auth: true
+  auth_secret: "${KAFKA_WEB_AUTH_SECRET}"
+  session_ttl_minutes: 480
+  session_idle_minutes: 30
+schema_registry:
+  listen: "127.0.0.1:8081"
+gateway:
+  listen: "127.0.0.1:8082"
+mqtt:
+  listen: "127.0.0.1:1883"
+security:
+  enabled: true
+  allow_insecure_public: false
+  require_tls_for_plain: true
+  super_users: "admin"
+  users:
+    - username: "admin"
+      scram_verifier: "${KAFKA_ADMIN_SCRAM_VERIFIER}"
+  tls:
+    enabled: true
+    listen: "127.0.0.1:9093"
+    cert_file: "/etc/pocketkafka/tls/broker.crt"
+    key_file: "/etc/pocketkafka/tls/broker.key"
+    min_version: "1.3"
+    http: true
+    mqtt: true

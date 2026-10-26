@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # 1. Portainer (GUI Management untuk Docker)
   # portainer:
