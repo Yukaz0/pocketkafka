@@ -187,3 +187,23 @@ Metadata Fleet disimpan di dalam direktori `data_dir` PocketKafka (terpisah dari
 ### 5. `server not found` atau `unknown server_id`
 - **Penyebab**: Host target belum terdaftar atau telah di-revoke oleh administrator.
 - **Solusi**: Periksa daftar server di menu Fleet -> Servers atau daftarkan ulang host melalui proses enrollment baru.
+
+## Docker one-command host onboarding (no Portainer needed)
+
+Build once, run per host. The agent connects OUT to the controller; no
+Docker TCP is exposed.
+
+```bash
+docker build -f Dockerfile.fleet-agent -t pocketkafka-fleet-agent:latest .
+# Issue a token first: Fleet Settings -> Issue Token (server_id = this host)
+docker run -d --restart=always --name fleet-agent \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v fleet-agent-state:/data \
+  -e FLEET_SERVER_URL=http://<controller-host>:8080 \
+  -e FLEET_ENROLL_TOKEN=<single-use-token> \
+  pocketkafka-fleet-agent:latest
+docker logs fleet-agent  # expect "fleet-agent active: agent_id=..."
+```
+
+Use `--network host` or the host LAN IP if `localhost` inside the
+container does not reach the controller.

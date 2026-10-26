@@ -90,6 +90,19 @@ func (j *Jobs) SetMaxActiveJobs(limit int) {
 }
 
 // Submit enqueues a new job or returns the existing job ID if idempotencyKey has already been submitted.
+func (j *Jobs) SubmitForce(serverID, action, target, actor, idempotencyKey string, force bool) (string, error) {
+	id, err := j.Submit(serverID, action, target, actor, idempotencyKey)
+	if err != nil {
+		return "", err
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if job, ok := j.jobs[id]; ok {
+		job.Force = force
+	}
+	return id, nil
+}
+
 func (j *Jobs) Submit(serverID, action, target, actor, idempotencyKey string) (string, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()

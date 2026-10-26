@@ -3217,6 +3217,7 @@ function viewFleetContainers(){
 
     const actions = isRunning
       ? `<button class="btn ghost" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="restartContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Restart</button>
+         <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="removeContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Remove</button>
          <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="stopContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Stop</button>`
       : `<button class="btn" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="startContainer('${esc(c.id)}','${esc(srvId)}')">Start</button>`;
 
@@ -3614,6 +3615,31 @@ window.restartContainer=async function(id, name, serverId){
     render();
   }catch(e){
     toast('Restart container failed: ' + e.message);
+  }
+};
+
+window.removeContainer=async function(id, name, serverId){
+  const targetName = (name && name !== '-') ? name : id;
+  const ok = await askConfirm({
+    title: 'Remove Container',
+    body: 'Permanently remove container "'+targetName+'" on host server "'+(serverId||'-')+'"? Stopped containers only (running ones are rejected). Data in anonymous volumes follows the container.',
+    confirmLabel: 'Remove Container',
+    danger: true,
+    typeToConfirm: targetName
+  });
+  if(!ok) return;
+  try{
+    const q = serverId ? '?server_id=' + encodeURIComponent(serverId) : '';
+    const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(id) + '/remove' + q, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ server_id: serverId })
+    });
+    toast('Remove container job accepted: ' + (res.job_id || ''));
+    await refresh();
+    render();
+  }catch(e){
+    toast('Remove container failed: ' + e.message);
   }
 };
 

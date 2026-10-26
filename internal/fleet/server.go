@@ -310,8 +310,8 @@ func (s *FleetServer) routes() {
 	s.mux.HandleFunc("POST /api/v1/fleet/containers/{id}/start", s.wrap(s.handleContainerAction("start")))
 	s.mux.HandleFunc("POST /api/v1/fleet/containers/{id}/stop", s.wrap(s.handleContainerAction("stop")))
 	s.mux.HandleFunc("POST /api/v1/fleet/containers/{id}/restart", s.wrap(s.handleContainerAction("restart")))
+	s.mux.HandleFunc("POST /api/v1/fleet/containers/{id}/remove", s.wrap(s.handleContainerAction("remove")))
 	s.mux.HandleFunc("GET /api/v1/fleet/containers/{id}/logs", s.wrap(s.handleContainerLogs))
-	s.mux.HandleFunc("GET /api/v1/fleet/logs", s.wrap(s.handleContainerLogs))
 
 	s.mux.HandleFunc("GET /api/v1/fleet/jobs", s.wrap(s.handleListJobs))
 	s.mux.HandleFunc("GET /api/v1/fleet/jobs/{id}", s.wrap(s.handleGetJob))
@@ -594,7 +594,11 @@ func (s *FleetServer) handleListContainers(w http.ResponseWriter, r *http.Reques
 func (s *FleetServer) handleContainerAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		principal, ok := s.checkAuthz(w, r, authz.OpControl, authz.ResourceFleetContainer, id)
+		op := authz.OpControl
+		if action == "remove" {
+			op = authz.OpAdmin
+		}
+		principal, ok := s.checkAuthz(w, r, op, authz.ResourceFleetContainer, id)
 		if !ok {
 			return
 		}
@@ -610,6 +614,7 @@ func (s *FleetServer) handleContainerAction(action string) http.HandlerFunc {
 
 		var req struct {
 			ServerID string `json:"server_id"`
+			Force    bool   `json:"force"`
 		}
 		if r.Body != nil && r.ContentLength > 0 {
 			if !s.readJSON(w, r, &req) {
@@ -644,7 +649,8 @@ func (s *FleetServer) handleContainerAction(action string) http.HandlerFunc {
 			return
 		}
 
-		jobID, err := s.jobs.Submit(serverID, action, id, principal, "")
+		force := req.Force || r.URL.Query().Get("force") == "true"
+		jobID, err := s.jobs.SubmitForce(serverID, action, id, principal, "", force)
 		if err != nil {
 			if errors.Is(err, ErrJobLimitExceeded) {
 				s.writeError(w, r, http.StatusTooManyRequests, ErrCodeLimitExceeded, err.Error())

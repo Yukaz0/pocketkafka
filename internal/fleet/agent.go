@@ -44,6 +44,7 @@ type JobDispatchMessage struct {
 	Target         string `json:"target"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
 	TailLines      int    `json:"tail_lines,omitempty"`
+	Force          bool   `json:"force,omitempty"`
 }
 
 type JobResultMessage struct {
@@ -301,6 +302,10 @@ func (a *AgentRunner) executeJob(ctx context.Context, job JobDispatchMessage) {
 	case "restart":
 		execErr = a.cfg.Docker.Restart(ctx, job.Target, timeout)
 		result = fmt.Sprintf("container %s restarted", job.Target)
+	case "remove":
+		force := job.Force
+		execErr = a.cfg.Docker.Remove(ctx, job.Target, force)
+		result = fmt.Sprintf("container %s removed", job.Target)
 	case "inspect":
 		ins, err := a.cfg.Docker.Inspect(ctx, job.Target)
 		if err != nil {
@@ -446,6 +451,7 @@ func (m *AgentManager) DispatchJob(ctx context.Context, agentID string, job *Job
 		JobID:  job.ID,
 		Action: job.Action,
 		Target: job.Target,
+		Force:  job.Force,
 	})
 	if err != nil {
 		return err

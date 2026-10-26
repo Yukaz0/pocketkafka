@@ -62,6 +62,7 @@ type DockerClient interface {
 	Start(ctx context.Context, idOrName string) error
 	Stop(ctx context.Context, idOrName string, timeoutSeconds int) error
 	Restart(ctx context.Context, idOrName string, timeoutSeconds int) error
+	Remove(ctx context.Context, idOrName string, force bool) error
 	Logs(ctx context.Context, idOrName string, tailLines int) (string, error)
 	Ping(ctx context.Context) error
 }
@@ -204,6 +205,27 @@ func (f *FakeDocker) Restart(ctx context.Context, idOrName string, timeoutSecond
 	}
 	c.State.Running = true
 	c.State.Status = "running"
+	return nil
+}
+func (f *FakeDocker) Remove(ctx context.Context, idOrName string, force bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fmt.Sprintf("remove:%s:%t", idOrName, force))
+
+	id := strings.TrimPrefix(idOrName, "/")
+	c, ok := f.containers[idOrName]
+	if !ok {
+		c, ok = f.containers[id]
+	}
+	if !ok {
+		return fmt.Errorf("container %q not found: %w", idOrName, ErrNotFound)
+	}
+	if c.State.Running && !force {
+		return fmt.Errorf("container %q is running: stop it first or use force", idOrName)
+	}
+	delete(f.containers, idOrName)
+	delete(f.containers, id)
+	delete(f.containers, "/"+id)
 	return nil
 }
 
@@ -402,6 +424,24 @@ func (c *SocketDockerClient) Stop(ctx context.Context, idOrName string, timeoutS
 func (c *SocketDockerClient) Restart(ctx context.Context, idOrName string, timeoutSeconds int) error {
 	target := c.baseURL + "/containers/" + url.PathEscape(idOrName) + "/restart?t=" + strconv.Itoa(timeoutSeconds)
 	return c.postAction(ctx, target)
+}
+
+func (c *SocketDockerClient) Remove(ctx context.Context, idOrName string, force bool) error {
+	target := c.baseURL + "/containers/" + url.PathEscape(idOrName) + "?force=" + strconv.FormatBool(force)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return fmt.Errorf("docker remove failed (%d): %s", resp.StatusCode, string(b))
 }
 
 func (c *SocketDockerClient) postAction(ctx context.Context, target string) error {
