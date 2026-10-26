@@ -712,7 +712,7 @@ function isNum(v){return typeof v==='number'&&isFinite(v);}
 function fmtBytesOpt(v){return isNum(v)?fmtBytes(v):'n/a';}
 function fmtRateOpt(v){return isNum(v)?fmtBytes(v)+'/s':'n/a';}
 function fmtPctOpt(v){return isNum(v)?v.toFixed(1)+'%':'n/a';}
-function rel(t){const d=Math.max(0,Date.now()-t);if(d<1000)return 'now';if(d<60000)return Math.floor(d/1000)+'s ago';if(d<3600000)return Math.floor(d/60000)+'m ago';return Math.floor(d/3600000)+'h ago';}
+function rel(t){const d=Math.max(0,Date.now()-t);if(d<1000)return 'now';if(d<60000)return (Math.floor(d/5000)*5)+'s ago';if(d<3600000)return Math.floor(d/60000)+'m ago';return Math.floor(d/3600000)+'h ago';}
 function online(s){s=(s||'').toLowerCase();return s==='stable'||s==='green';}
 
 async function loadInfo(){
@@ -2592,7 +2592,7 @@ function viewOverview(){
     const warmup=s.warmup===true?`<div class="statSub" style="margin-top:6px">Broker sampling is warming up (${count(s.samples)} samples, ${Number.isFinite(s.ageSeconds)?Math.max(0,Math.floor(s.ageSeconds)):0}s elapsed).</div>`:'';
     const lag=Number.isFinite(c.lag)?count(c.lag):'n/a';
     content=`
-      <div id="overviewHead" class="pageHeading"><div><h2>Overview</h2><p>Broker health, active issues, traffic, and consumer lag.</p></div><div class="statSub" style="margin-left:auto">${esc(activeClusterLabel())} · updated ${rel(d.generatedAtMs)}</div></div>
+      <div id="overviewHead" class="pageHeading"><div><h2>Overview</h2><p>Broker health, active issues, traffic, and consumer lag.</p></div><div class="statSub" style="margin-left:auto">${esc(activeClusterLabel())}</div></div>
       <div id="overviewTop" class="overviewTop"><section class="card" aria-labelledby="overviewHealthTitle"><div class="kicker">Operations</div><h3 id="overviewHealthTitle">Broker health</h3><div class="row" style="margin-top:10px;justify-content:space-between"><span class="mono">${esc(c.clusterId||'Broker identity unavailable')}</span>${hStatusBadge(c.status||'unknown')}</div>${Array.isArray(c.reasons)&&c.reasons.length?`<div class="overviewAttention">${c.reasons.map(r=>`<div class="overviewIssue"><span class="mono">${esc(r.severity||'status')}</span><span class="muted">${esc(r.message||'')}</span></div>`).join('')}</div>`:''}<div class="overviewLinks"><a class="btn ghost" href="#/health">Open Health</a><a class="btn ghost" href="#/settings/clusters">View Clusters</a></div></section>
       <section class="card"><div class="row" style="justify-content:space-between"><h3>Needs attention</h3><span class="mono">${att.length} ${att.length===1?'topic':'topics'}</span></div><div class="overviewAttention">${issues}</div></section></div>
       <dl id="overviewFacts" class="overviewFacts" aria-label="Broker summary"><div class="overviewFact"><dt>Broker status</dt><dd>${esc(c.status||'n/a')}</dd></div><div class="overviewFact"><dt>Active topic issues</dt><dd>${att.length}</dd></div><div class="overviewFact"><dt>Throughput</dt><dd>${rate}<small style="font-size:10px;color:var(--muted)"> msg/s</small></dd></div><div class="overviewFact"><dt>Consumer lag</dt><dd>${lag}</dd></div></dl>
