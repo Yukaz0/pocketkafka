@@ -1250,6 +1250,20 @@ async function waitFleetJobDone(jobId, timeoutMs){
   }
   return null;
 }
+async function waitFleetContainerGone(cid, serverId, timeoutMs){
+  const t0 = Date.now();
+  timeoutMs = timeoutMs || 15000;
+  const short = (cid||'').slice(0,12);
+  while(Date.now() - t0 < timeoutMs){
+    try{
+      const d = await apiLocal('/api/v1/fleet/containers' + (serverId ? '?server_id=' + encodeURIComponent(serverId) : ''));
+      const list = (d && d.containers) || [];
+      if(!list.some(c => c.id === cid || (c.id||'').startsWith(short))) return true;
+    }catch(e){}
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return false;
+}
 window.goView=async function(v,sub){
   if(v.startsWith('fleet-')){
     const subName=v.replace(/^fleet-/,'');
@@ -3657,6 +3671,7 @@ window.removeContainer=async function(id, name, serverId, isRunning){
     });
     toast('Remove container job accepted: ' + (res.job_id || ''));
     await waitFleetJobDone(res.job_id);
+    await waitFleetContainerGone(id, serverId);
     await refresh();
     render();
   }catch(e){

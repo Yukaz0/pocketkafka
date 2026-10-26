@@ -217,28 +217,7 @@ func (a *AgentRunner) Run(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-hbTicker.C:
-				var containers []ContainerSummary
-				if a.cfg.Docker != nil {
-					cList, err := a.cfg.Docker.List(ctx)
-					if err == nil {
-						containers = cList
-					}
-				}
-				hbPayload, err := json.Marshal(HeartbeatMessage{
-					AgentID:    a.cfg.AgentID,
-					Timestamp:  time.Now().Unix(),
-					Containers: containers,
-				})
-				if err != nil {
-					continue
-				}
-				hbEnv, err := Sign(a.cfg.Secret, DirectionAgentToControl, OpHeartbeat, hbPayload, time.Minute)
-				if err != nil {
-					continue
-				}
-				hbEnv.AgentID = a.cfg.AgentID
-				hbEnv.HMAC = ComputeHMAC(a.cfg.Secret, hbEnv.Direction, hbEnv.Op, hbEnv.BodySHA256, hbEnv.IssuedAt, hbEnv.MessageID)
-				_ = a.cfg.Transport.Send(hbEnv)
+				a.sendHeartbeat(ctx)
 			}
 		}
 	}()
@@ -262,6 +241,30 @@ func (a *AgentRunner) Run(ctx context.Context) error {
 			go a.executeJob(ctx, dispatch)
 		}
 	}
+}
+
+func (a *AgentRunner) sendHeartbeat(ctx context.Context) {
+	var containers []ContainerSummary
+	if a.cfg.Docker != nil {
+		if cList, err := a.cfg.Docker.List(ctx); err == nil {
+			containers = cList
+		}
+	}
+	hbPayload, err := json.Marshal(HeartbeatMessage{
+		AgentID:    a.cfg.AgentID,
+		Timestamp:  time.Now().Unix(),
+		Containers: containers,
+	})
+	if err != nil {
+		return
+	}
+	hbEnv, err := Sign(a.cfg.Secret, DirectionAgentToControl, OpHeartbeat, hbPayload, time.Minute)
+	if err != nil {
+		return
+	}
+	hbEnv.AgentID = a.cfg.AgentID
+	hbEnv.HMAC = ComputeHMAC(a.cfg.Secret, hbEnv.Direction, hbEnv.Op, hbEnv.BodySHA256, hbEnv.IssuedAt, hbEnv.MessageID)
+	_ = a.cfg.Transport.Send(hbEnv)
 }
 
 func (a *AgentRunner) executeJob(ctx context.Context, job JobDispatchMessage) {
@@ -323,6 +326,9 @@ func (a *AgentRunner) executeJob(ctx context.Context, job JobDispatchMessage) {
 	default:
 		execErr = fmt.Errorf("unknown action: %s", job.Action)
 	}
+	// Push fresh inventory BEFORE the result: the control plane snapshot
+	// the UI reads is already post-mutation when the job completes.
+	a.sendHeartbeat(ctx)
 
 	if execErr != nil {
 		a.sendJobResult(JobResultMessage{
@@ -338,7 +344,6 @@ func (a *AgentRunner) executeJob(ctx context.Context, job JobDispatchMessage) {
 		}, OpJobResult)
 	}
 }
-
 func (a *AgentRunner) sendJobResult(res JobResultMessage, op string) {
 	payload, err := json.Marshal(res)
 	if err != nil {
