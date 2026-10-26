@@ -232,7 +232,7 @@ html[data-theme="light"] body[data-zone="fleet"] .navLink.active{color:#0284c7;b
   .edge.hot{stroke:var(--primary);stroke-width:2}
   .errdot{fill:var(--danger)}
   /* node detail drawer */
-  .drw{position:fixed;left:var(--drawer-left,224px);right:0;bottom:0;height:300px;background:var(--surface);border-top:1px solid var(--border);transform:translateY(100%);transition:transform .18s ease,z-index .01s;z-index:60;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+  .drw{position:fixed;left:var(--drawer-left,224px);right:0;bottom:0;height:min(52dvh,560px);min-height:300px;background:var(--surface);border-top:1px solid var(--border);transform:translateY(100%);transition:transform .18s ease,z-index .01s;z-index:60;display:flex;flex-direction:column;box-shadow:var(--shadow)}
   .drw.open{transform:none}
   .drwHd{padding:10px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-family:var(--font-mono)}
   .drwHd b{font-size:12px}
@@ -3694,23 +3694,34 @@ window.viewContainerLogs=async function(id, name, serverId){
 };
 function renderLogLines(lines){
   return lines.map((raw, i) => {
-    const line = String(raw || '');
-    const m = line.match(/^(time=(\S+)\s+)?(level=([A-Za-z]+)\s+)?(.*)$/);
-    const ts = m && m[2] ? m[2] : '';
-    const lvl = (m && m[4] ? m[4] : '').toUpperCase();
-    const msg = m ? m[5] : line;
-    const badge = lvl === 'ERROR' ? '<span class="badge b-red">ERROR</span>'
-      : lvl === 'WARN' || lvl === 'WARNING' ? '<span class="badge b-amber">WARN</span>'
-      : lvl === 'INFO' ? '<span class="badge b-green">INFO</span>'
-      : lvl === 'DEBUG' ? '<span class="badge muted">DEBUG</span>'
-      : lvl ? '<span class="badge muted">' + esc(lvl) + '</span>' : '';
-    const shortTs = ts.length > 19 ? ts.slice(11, 19) : ts;
+    const parsed = parseLogLine(String(raw || ''));
+    const badge = parsed.lvl === 'ERROR' ? '<span class="badge b-red">ERROR</span>'
+      : parsed.lvl === 'WARN' || parsed.lvl === 'WARNING' ? '<span class="badge b-amber">WARN</span>'
+      : parsed.lvl === 'INFO' ? '<span class="badge b-green">INFO</span>'
+      : parsed.lvl === 'DEBUG' ? '<span class="badge muted">DEBUG</span>'
+      : parsed.lvl ? '<span class="badge muted">' + esc(parsed.lvl) + '</span>' : '';
     return '<div style="display:flex;gap:8px;padding:2px 12px;overflow-wrap:anywhere;word-break:normal;white-space:pre-wrap">'
       + '<span class="muted" style="flex:0 0 28px;text-align:right;user-select:none">' + (i + 1) + '</span>'
-      + (shortTs ? '<span class="muted" style="flex:0 0 auto">' + esc(shortTs) + '</span>' : '')
+      + (parsed.ts ? '<span class="muted" style="flex:0 0 auto">' + esc(parsed.ts) + '</span>' : '')
       + (badge ? '<span style="flex:0 0 auto">' + badge + '</span>' : '')
-      + '<span style="flex:1 1 auto;min-width:0">' + esc(msg) + '</span></div>';
+      + '<span style="flex:1 1 auto;min-width:0">' + esc(parsed.msg) + '</span></div>';
   }).join('');
+}
+function parseLogLine(line){
+  const s = line.trim();
+  if(s.startsWith('{') && s.endsWith('}')){
+    try{
+      const o = JSON.parse(s);
+      return {ts: shortTs(o.time || o.timestamp || o.ts || ''), lvl: String(o.level || o.lvl || o.severity || '').toUpperCase(), msg: String(o.msg || o.message || o.log || line)};
+    }catch(e){}
+  }
+  const m = line.match(/^(time=(\S+)\s+)?(level=([A-Za-z]+)\s+)?(.*)$/);
+  return {ts: shortTs(m && m[2] ? m[2] : ''), lvl: (m && m[4] ? m[4] : '').toUpperCase(), msg: m ? m[5] : line};
+}
+function shortTs(ts){
+  ts = String(ts || '');
+  if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(ts)) return ts.slice(11, 19);
+  return ts.length > 24 ? ts.slice(0, 24) : ts;
 }
 
 window.goFleetContainers=function(serverId){
