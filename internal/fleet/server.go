@@ -125,7 +125,9 @@ func (s *FleetServer) wrap(h http.HandlerFunc) http.HandlerFunc {
 		if s.maxBodyBytes > 0 && r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, s.maxBodyBytes)
 		}
-		if !strings.HasPrefix(r.URL.Path, "/api/v1/fleet/agent/") {
+		// Agent transport endpoints authenticate via HMAC/tokens, not the proxy.
+		// POST /enroll carries the single-use enrollment token as its credential.
+		if !strings.HasPrefix(r.URL.Path, "/api/v1/fleet/agent/") && r.URL.Path != "/api/v1/fleet/enroll" {
 			if s.proxyToken == "" || !validProxyToken(r, s.proxyToken) {
 				slog.Error("fleet: rejected direct request without proxy token", "path", r.URL.Path)
 				w.Header().Set("Content-Type", "application/json")

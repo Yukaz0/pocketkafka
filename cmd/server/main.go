@@ -224,7 +224,9 @@ func main() {
 			MaxBodyBytes: cfg.Network.MaxRequestSizeBytes,
 			ProxyToken:   fleetProxyToken,
 		})
-		ws.WithFleet(cfg.Fleet.Enabled, cfg.Fleet.Listen, fleetProxyToken, fleetUseTLS, cfg.Fleet.TLS.CAFile, cfg.Fleet.TLS.ServerName)
+		if ws != nil {
+			ws.WithFleet(cfg.Fleet.Enabled, cfg.Fleet.Listen, fleetProxyToken, fleetUseTLS, cfg.Fleet.TLS.CAFile, cfg.Fleet.TLS.ServerName)
+		}
 		var fleetTLSConf *tls.Config
 		if fleetUseTLS {
 			cert, err := tls.LoadX509KeyPair(cfg.Fleet.TLS.CertFile, cfg.Fleet.TLS.KeyFile)
