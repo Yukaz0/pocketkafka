@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,7 +101,6 @@ func (j *Jobs) Submit(serverID, action, target, actor, idempotencyKey string) (s
 		Status:         JobStatusQueued,
 		CreatedAt:      time.Now().UTC(),
 	}
-
 	j.jobs[id] = job
 	j.order = append(j.order, id)
 	if idempotencyKey != "" {
@@ -108,6 +108,13 @@ func (j *Jobs) Submit(serverID, action, target, actor, idempotencyKey string) (s
 	}
 
 	if err := j.appendLocked(job); err != nil {
+		delete(j.jobs, id)
+		if len(j.order) > 0 && j.order[len(j.order)-1] == id {
+			j.order = j.order[:len(j.order)-1]
+		}
+		if idempotencyKey != "" {
+			delete(j.idempotencyIndex, idempotencyKey)
+		}
 		return "", err
 	}
 
@@ -128,10 +135,18 @@ func (j *Jobs) Start(id string) error {
 		return fmt.Errorf("%w: cannot start job %s with status %s", ErrIllegalJobTransition, id, job.Status)
 	}
 
+	oldStatus := job.Status
+	oldStartedAt := job.StartedAt
+
 	job.Status = JobStatusRunning
 	job.StartedAt = time.Now().UTC()
 
-	return j.appendLocked(job)
+	if err := j.appendLocked(job); err != nil {
+		job.Status = oldStatus
+		job.StartedAt = oldStartedAt
+		return err
+	}
+	return nil
 }
 
 // Complete transitions a job from running to succeeded or failed.
@@ -156,13 +171,23 @@ func (j *Jobs) Complete(id string, status JobStatus, errMsg ...string) error {
 		return fmt.Errorf("%w: cannot complete job %s already in terminal status %s", ErrIllegalJobTransition, id, job.Status)
 	}
 
+	oldStatus := job.Status
+	oldCompletedAt := job.CompletedAt
+	oldError := job.Error
+
 	job.Status = status
 	job.CompletedAt = time.Now().UTC()
 	if status == JobStatusFailed && len(errMsg) > 0 {
 		job.Error = errMsg[0]
 	}
 
-	return j.appendLocked(job)
+	if err := j.appendLocked(job); err != nil {
+		job.Status = oldStatus
+		job.CompletedAt = oldCompletedAt
+		job.Error = oldError
+		return err
+	}
+	return nil
 }
 
 // Fail is a convenience helper for completing a job with failed status.
@@ -250,19 +275,26 @@ func (j *Jobs) Prune() (int, error) {
 
 	if j.retentionEntries > 0 && len(newOrder) > j.retentionEntries {
 		excess := len(newOrder) - j.retentionEntries
-		toRemove := newOrder[:excess]
-		newOrder = newOrder[excess:]
-		for _, id := range toRemove {
-			if job, ok := j.jobs[id]; ok {
+		kept := make([]string, 0, len(newOrder))
+		for _, id := range newOrder {
+			job, ok := j.jobs[id]
+			if !ok {
+				continue
+			}
+			isTerminal := job.Status == JobStatusSucceeded || job.Status == JobStatusFailed
+			if excess > 0 && isTerminal {
 				delete(j.jobs, id)
 				if job.IdempotencyKey != "" {
 					delete(j.idempotencyIndex, job.IdempotencyKey)
 				}
 				pruned++
+				excess--
+				continue
 			}
+			kept = append(kept, id)
 		}
+		newOrder = kept
 	}
-
 	j.order = newOrder
 
 	if j.filePath != "" {
@@ -280,7 +312,9 @@ func (j *Jobs) checkTimeoutLocked(job *Job) {
 			job.Status = JobStatusFailed
 			job.CompletedAt = time.Now().UTC()
 			job.Error = fmt.Sprintf("job execution timed out after %v", j.timeout)
-			_ = j.appendLocked(job)
+			if err := j.appendLocked(job); err != nil {
+				slog.Warn("fleet: failed to append timed out job", "job_id", job.ID, "err", err)
+			}
 		}
 	}
 }
@@ -348,6 +382,7 @@ func (j *Jobs) load() error {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1<<20), 10<<20)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {

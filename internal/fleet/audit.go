@@ -19,9 +19,9 @@ import (
 )
 
 var (
-	reKeyValSecret = regexp.MustCompile(`(?i)\b(token|secret|password|passwd|pass|key|api_key|raw_secret|auth|authorization|credential)\b(\s*[:=]\s*)(["']?)([^"'\s,;]+)(["']?)`)
+	reKeyValSecret = regexp.MustCompile(`(?i)\b([a-z0-9_-]*(?:secret[-_]?key|api[-_]?key|private[-_]?key|access[-_]?key|auth[-_]?key|master[-_]?key|raw[-_]?secret|secret|token|password|passwd)|pass|pwd|key|auth|authorization|credential|credentials)\b(\s*[:=]\s*)(["']?)([^"'\s,;]+)(["']?)`)
 	reBearerSecret = regexp.MustCompile(`(?i)\bBearer\s+([A-Za-z0-9._~+/-]+=*)`)
-	reJSONSecret   = regexp.MustCompile(`(?i)("(?:token|secret|password|passwd|pass|key|api_key|raw_secret|authorization|credential)")\s*:\s*"([^"]+)"`)
+	reJSONSecret   = regexp.MustCompile(`(?i)("(?:[a-z0-9_-]*(?:secret[-_]?key|api[-_]?key|private[-_]?key|access[-_]?key|auth[-_]?key|master[-_]?key|raw[-_]?secret|secret|token|password|passwd)|pass|pwd|key|auth|authorization|credential|credentials)")\s*:\s*"([^"]+)"`)
 )
 
 // Audit writes security- and operationally-relevant audit events to fleet_audit.jsonl.
@@ -239,6 +239,7 @@ func (a *Audit) load() error {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1<<20), 10<<20)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
