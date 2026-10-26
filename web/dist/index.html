@@ -3230,9 +3230,10 @@ function viewFleetContainers(){
 
     const actions = isRunning
       ? `<button class="btn ghost" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="restartContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Restart</button>
-         <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="removeContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Remove</button>
+         <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="removeContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}',true)">Remove</button>
          <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="stopContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Stop</button>`
-      : `<button class="btn" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="startContainer('${esc(c.id)}','${esc(srvId)}')">Start</button>`;
+      : `<button class="btn" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="startContainer('${esc(c.id)}','${esc(srvId)}')">Start</button>
+         <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="removeContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}',false)">Remove</button>`;
 
     const logsBtn = `<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="viewContainerLogs('${esc(c.id)}','${esc(rawName)}')">Logs</button>`;
 
@@ -3635,22 +3636,24 @@ window.restartContainer=async function(id, name, serverId){
   }
 };
 
-window.removeContainer=async function(id, name, serverId){
+window.removeContainer=async function(id, name, serverId, isRunning){
   const targetName = (name && name !== '-') ? name : id;
   const ok = await askConfirm({
     title: 'Remove Container',
-    body: 'Permanently remove container "'+targetName+'" on host server "'+(serverId||'-')+'"? Stopped containers only (running ones are rejected). Data in anonymous volumes follows the container.',
-    confirmLabel: 'Remove Container',
+    body: isRunning
+      ? 'Force-remove RUNNING container "'+targetName+'" on host "'+(serverId||'-')+'"? This stops and deletes it immediately.'
+      : 'Permanently remove container "'+targetName+'" on host server "'+(serverId||'-')+'"? Data in anonymous volumes follows the container.',
+    confirmLabel: isRunning ? 'Force Remove' : 'Remove Container',
     danger: true,
     typeToConfirm: targetName
   });
   if(!ok) return;
   try{
-    const q = serverId ? '?server_id=' + encodeURIComponent(serverId) : '';
+    const q = serverId ? '?server_id=' + encodeURIComponent(serverId) + (isRunning ? '&force=true' : '') : (isRunning ? '?force=true' : '');
     const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(id) + '/remove' + q, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ server_id: serverId })
+      body: JSON.stringify({ server_id: serverId, force: !!isRunning })
     });
     toast('Remove container job accepted: ' + (res.job_id || ''));
     await waitFleetJobDone(res.job_id);
