@@ -481,7 +481,11 @@ func (m *AgentManager) HandleInboundEnvelope(env *Envelope) error {
 			m.mu.Lock()
 			sess.containers = hb.Containers
 			sess.lastHeartbeat = time.Now()
+			serverID := sess.serverID
 			m.mu.Unlock()
+			if m.registry != nil && serverID != "" {
+				m.registry.TouchServer(serverID)
+			}
 		}
 	case OpJobAccepted:
 		// Agent acknowledged job reception

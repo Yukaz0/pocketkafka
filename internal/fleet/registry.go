@@ -311,6 +311,18 @@ func (r *Registry) Revoke(agentID string) error {
 	return r.persistLocked()
 }
 
+// TouchServer refreshes a server's last-seen timestamp on heartbeat.
+func (r *Registry) TouchServer(serverID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if srv, ok := r.servers[serverID]; ok {
+		srv.UpdatedAt = time.Now()
+		if srv.Status != "revoked" {
+			srv.Status = "online"
+		}
+	}
+}
+
 // RevokeServer revokes all active agents belonging to serverID and marks server revoked.
 func (r *Registry) RevokeServer(serverID string) error {
 	r.mu.Lock()

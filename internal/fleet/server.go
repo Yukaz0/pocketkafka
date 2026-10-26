@@ -429,16 +429,35 @@ func (s *FleetServer) handleRevokeServer(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *FleetServer) handleListEnrollments(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.checkAuthz(w, r, authz.OpDescribe, authz.ResourceFleetServer, "*"); !ok {
+	if _, ok := s.checkAuthz(w, r, authz.OpAdmin, authz.ResourceFleetServer, "*"); !ok {
 		return
 	}
 
-	var list []*Enrollment
+	type enrollmentView struct {
+		TokenPrefix string    `json:"token_prefix"`
+		ServerID    string    `json:"server_id"`
+		CreatedAt   time.Time `json:"created_at"`
+		ExpiresAt   time.Time `json:"expires_at"`
+		Used        bool      `json:"used"`
+	}
+	var list []enrollmentView
 	if s.registry != nil {
-		list = s.registry.ListEnrollments()
+		for _, e := range s.registry.ListEnrollments() {
+			prefix := e.Token
+			if len(prefix) > 8 {
+				prefix = prefix[:8]
+			}
+			list = append(list, enrollmentView{
+				TokenPrefix: prefix,
+				ServerID:    e.ServerID,
+				CreatedAt:   e.CreatedAt,
+				ExpiresAt:   e.ExpiresAt,
+				Used:        e.Used,
+			})
+		}
 	}
 	if list == nil {
-		list = []*Enrollment{}
+		list = []enrollmentView{}
 	}
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"enrollments": list,
@@ -656,7 +675,7 @@ func (s *FleetServer) handleContainerAction(action string) http.HandlerFunc {
 	}
 }
 func (s *FleetServer) dispatchJobToAgent(serverID string, job *Job) {
-	if s.manager == nil || s.registry == nil {
+	if s.manager == nil || s.registry == nil || s.jobs == nil {
 		return
 	}
 	var agentID string
@@ -666,8 +685,12 @@ func (s *FleetServer) dispatchJobToAgent(serverID string, job *Job) {
 			break
 		}
 	}
-	if agentID != "" {
-		_ = s.manager.DispatchJob(context.Background(), agentID, job)
+	if agentID == "" {
+		_ = s.jobs.Fail(job.ID, "no active agent for server "+serverID)
+		return
+	}
+	if err := s.manager.DispatchJob(context.Background(), agentID, job); err != nil {
+		_ = s.jobs.Fail(job.ID, err.Error())
 	}
 }
 
