@@ -782,7 +782,18 @@ function updAgo(){
   el.title='Auto-refresh: '+(state.refreshMs/1000)+'s';
 }
 setInterval(updAgo,1000);
-function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden&&!isReducedMotion()){ await refresh(); if(state.zone==='fleet'){ render(); } else { const connActive=state.view==='connections'||(state.view==='settings'&&state.settingsTab==='connections'); if(connActive&&!patchConnections())render(); if(state.view==='metrics')loadThroughput(); } } scheduleRefresh(); },state.refreshMs); }
+function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden&&!isReducedMotion()){ await refresh(); if(state.zone==='fleet'){ if(!patchFleetView())render(); } else { const connActive=state.view==='connections'||(state.view==='settings'&&(state.settingsTab==='connections'||state.settingsTab==='general'||state.settingsTab==='clusters')); if(connActive&&!patchConnections())render(); if(state.view==='metrics')loadThroughput(); } } scheduleRefresh(); },state.refreshMs); }
+function patchFleetView(){
+  const v=document.getElementById('view'); if(!v)return false;
+  const html=state.view==='fleet-servers'?viewFleetServers()
+    :state.view==='fleet-containers'?viewFleetContainers()
+    :state.view==='fleet-jobs'?viewFleetJobs()
+    :state.view==='fleet-audit'?viewFleetAudit()
+    :state.view==='fleet-settings'?viewFleetSettings()
+    :null;
+  if(html==null)return false;
+  v.innerHTML=html; bindView(); return true;
+}
 function skel(w){return '<span class="skel" style="width:'+(w||60)+'px"></span>';}
 scheduleRefresh();
 
