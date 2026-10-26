@@ -8,8 +8,6 @@
 <link rel="icon" href="/favicon.ico" sizes="48x48">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#3659d0">
-<link href="https://fonts.cdnfonts.com/css/sf-pro-display" rel="stylesheet">
-<link href="https://fonts.cdnfonts.com/css/sf-mono" rel="stylesheet">
 <style>
   :root{
     color-scheme:dark;
@@ -19,12 +17,12 @@
     --live:var(--success); --success:#3ecf8e; --warn:#e8b339; --danger:#f16a5c;
     --str:#7ee0a3; --num:#7cb8ff; --bool:#ecc86b; --key:#dfe5ee;
     --text:#e8ecf3; --muted:#98a2b3;
-    --font-ui:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','SF Pro','Helvetica Neue',Helvetica,Arial,sans-serif;
-    --font-mono:'SF Mono',SFMono-Regular,ui-monospace,Menlo,Monaco,Consolas,monospace;
+    --font-ui:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
     --rail-w:56px; --radius:4px; --radius-sm:4px;
     --ring:0 0 0 1px var(--primary);
     --danger-soft:rgba(241,106,92,.12); --danger-line:rgba(241,106,92,.4); --danger-text:#f5a49b; --success-soft:rgba(62,207,142,.14); --success-line:rgba(62,207,142,.42); --warn-soft:rgba(232,179,57,.14); --warn-line:rgba(232,179,57,.42); --shade:rgba(8,10,14,.6); --overlay:rgba(8,10,14,.5);
-    --shadow:0 8px 24px rgba(0,0,0,.35);
+    --shadow:none;
   }
   html[data-theme="light"]{
     color-scheme:light;
@@ -36,7 +34,7 @@
     --danger-soft:#fce8e6; --danger-line:#b3261e; --danger-text:#8f1d18; --success-soft:#e2f3e9; --success-line:#188554; --warn-soft:#fff1ce; --warn-line:#805600; --shade:rgba(15,18,25,.12); --overlay:rgba(15,18,25,.48);
     --str:#188554; --num:#2450c8; --bool:#a8700a; --key:#2a3340;
     --text:#1a2029; --muted:#5c6674;
-    --shadow:0 8px 24px rgba(15,20,40,.10);
+    --shadow:none;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;height:100vh;overflow:hidden}
@@ -49,7 +47,7 @@
   .navGroupLabel{padding:6px 8px;color:var(--muted);font:500 10px var(--font-mono);letter-spacing:.04em}
   .navGroupToggle{display:flex;align-items:center;justify-content:space-between;width:100%;padding:6px 8px;border:0;background:none;color:var(--muted);font:500 10px var(--font-mono);letter-spacing:.04em;text-align:left;cursor:pointer}
   .navGroupToggle:hover{color:var(--text)}
-  .navGroupToggle:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+  .navGroupChevron{display:inline-block;width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);transition:transform .14s ease;margin-right:4px}
   .navGroup.is-collapsed .navGroupChevron{transform:rotate(-45deg)}
   .navGroup.is-collapsed .navGroupLinks{display:block}
   .navGroup.is-collapsed .navGroupLinks .navLink:not(.active){display:none}
@@ -57,7 +55,7 @@
   .navLink svg{width:18px;height:18px;flex:0 0 18px}
   .navLink:hover{background:var(--surface2);color:var(--text)}
   .navLink.active{background:var(--primary-soft);border-color:var(--border);color:var(--primary-text)}
-  .navLink:focus-visible,.navToggle:focus-visible,.themeToggle:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+  .navLink:focus-visible,.navToggle:focus-visible,.themeToggle:focus-visible,.navGroupToggle:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
   .navFooter{padding:10px 8px;border-top:1px solid var(--border);display:grid;gap:6px}
   .navToggle,.themeToggle{min-height:36px;padding:6px 9px;border:1px solid transparent;border-radius:4px;background:none;color:var(--muted);display:flex;align-items:center;gap:10px;text-align:left;font:500 12px var(--font-ui);cursor:pointer}
   .navToggle:hover,.themeToggle:hover{background:var(--surface2);color:var(--text)}
@@ -495,6 +493,15 @@
 
   /* tail paused notice */
   .tailPausedBar{background:var(--primary-soft);color:var(--primary-text);border:1px solid var(--primary);border-radius:4px;padding:6px 12px;font-size:12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;cursor:pointer}
+  /* settings tabs */
+  .settingsTabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto}
+  .settingsTab{background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);padding:8px 14px;font:500 12px var(--font-ui);cursor:pointer;white-space:nowrap;transition:color .12s,border-color .12s}
+  .settingsTab:hover{color:var(--text);background:var(--surface2)}
+  .settingsTab.active{color:var(--primary-text);border-bottom-color:var(--primary);font-weight:600}
+  .settingsTab:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+  @media (prefers-reduced-motion: reduce){
+    *,::before,::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;scroll-behavior:auto !important}
+  }
 </style>
 </head>
 <body>
@@ -537,7 +544,7 @@
   </div>
 </div>
 <div class="drw" id="drw">
-  <div class="drwHd" id="drwHd"><b id="drwT"></b><button class="x" onclick="closeDrw()">[x]</button></div>
+  <div class="drwHd" id="drwHd"><b id="drwT"></b><button class="x" onclick="closeDrw()" aria-label="Close details">[x]</button></div>
   <div class="drwBody" id="drwBody"></div>
 </div>
 <div class="msg" id="msg"></div>
@@ -565,14 +572,14 @@ const I={
   moon:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>'
 };
 
-const state={view:'overview',theme:'dark',sidebarCollapsed:false,cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,activeCluster:localStorage.getItem('pk_active_cluster')||'local',targetGeneration:0,targetRequests:new Set(),targetSwitching:false,groupLagWarn:Number(localStorage.getItem('pk_group_lag_warn'))||1000000000,alarmsDismissed:new Set((()=>{try{return JSON.parse(localStorage.getItem('pk_alarms_dismissed')||'[]');}catch(e){return [];}})()),
+const state={view:'overview',settingsTab:'general',theme:'dark',sidebarCollapsed:false,cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,activeCluster:localStorage.getItem('pk_active_cluster')||'local',targetGeneration:0,targetRequests:new Set(),targetSwitching:false,groupLagWarn:Number(localStorage.getItem('pk_group_lag_warn'))||1000000000,alarmsDismissed:new Set((()=>{try{return JSON.parse(localStorage.getItem('pk_alarms_dismissed')||'[]');}catch(e){return [];}})()),
   integrations:null, integrationsError:'',
   brokerCfg:null, brokerCfgError:'',
   /* pengaturan persisten */
   refreshMs:+(localStorage.getItem('pk_refreshMs')||5000)||5000,
   density:localStorage.getItem('pk_density')||'comfortable',
   timeAbs:localStorage.getItem('pk_timeAbs')==='1',
-  navGroupsCollapsed:{operations:false,developer:false},
+  navGroupsCollapsed:{more:true},
   sort:{},
   tpSamples:[], tpTotal:0, tailPaused:false, pendingTail:0,
   /* Fitur 3.2 filter builder */
@@ -582,7 +589,7 @@ const state={view:'overview',theme:'dark',sidebarCollapsed:false,cluster:null,to
   /* Fitur 3.4 message diff */
   diffSel:[], diffOpen:false,
 };
-const navItems=[['overview','Overview',I.overview,'overview'],['connections','Connections',I.server,'connections'],['health','Health',I.pulse,'operations'],['clusters','Clusters',I.cluster,'operations'],['metrics','Metrics',I.chart,'operations'],['integrations','Integrations',I.topology,'operations'],['logs','Broker Logs',I.document,'operations'],['security','Security & ACL',I.shield,'operations'],['databrowser','Data Browser',I.search,'developer'],['topics','Topics',I.tag,'developer'],['groups','Consumer Groups',I.users,'developer'],['schemas','Schemas',I.schema,'developer'],['producer','Producer Studio',I.send,'developer'],['devstudio','Dev Studio',I.flask,'developer'],['topology','Topology',I.topology,'developer'],['storage','Storage',I.archive,'developer'],['settings','Settings',I.gear,'connections']];
+const navItems=[['overview','Overview',I.overview,'core'],['topics','Topics',I.tag,'core'],['databrowser','Data Browser',I.search,'core'],['groups','Consumer Groups',I.users,'core'],['metrics','Metrics',I.chart,'core'],['health','Health',I.pulse,'more'],['integrations','Integrations',I.topology,'more'],['logs','Broker Logs',I.document,'more'],['schemas','Schemas',I.schema,'more'],['producer','Producer Studio',I.send,'more'],['devstudio','Dev Studio',I.flask,'more'],['topology','Topology',I.topology,'more'],['storage','Storage',I.archive,'more'],['settings','Settings',I.gear,'more']];
 
 function initTheme(){
   const saved=localStorage.getItem('pk_theme');
@@ -590,7 +597,7 @@ function initTheme(){
   localStorage.setItem('pk_theme',state.theme);
   document.documentElement.dataset.theme=state.theme;
   state.sidebarCollapsed=localStorage.getItem('pk_sidebar_collapsed')==='1';
-  try{state.navGroupsCollapsed=Object.assign({operations:false,developer:false},JSON.parse(localStorage.getItem('pk_nav_groups')||'{}'));}catch(e){state.navGroupsCollapsed={operations:false,developer:false};}
+  try{state.navGroupsCollapsed=Object.assign({more:true},JSON.parse(localStorage.getItem('pk_nav_groups')||'{}'));}catch(e){state.navGroupsCollapsed={more:true};}
 }
 
 const KAFKA_UNSUPPORTED_VIEWS={devstudio:'Developer Studio writes are not supported for Kafka targets.',schemas:'Schema Registry APIs are not supported for Kafka targets.',topology:'Topology is not available for Kafka targets.',storage:'Storage inspection is not available for Kafka targets.',logs:'Broker logs are not available for Kafka targets.',metrics:'Broker metrics are not available for Kafka targets.',integrations:'Integrations is not available for Kafka targets.'};
@@ -714,19 +721,19 @@ function updAgo(){
   el.title='Auto-refresh: '+(state.refreshMs/1000)+'s';
 }
 setInterval(updAgo,1000);
-function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden){ await refresh(); if(state.view==='connections'&&!patchConnections())render(); if(state.view==='metrics')loadThroughput(); } scheduleRefresh(); },state.refreshMs); }
+function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden){ await refresh(); const connActive=state.view==='connections'||(state.view==='settings'&&state.settingsTab==='connections'); if(connActive&&!patchConnections())render(); if(state.view==='metrics')loadThroughput(); } scheduleRefresh(); },state.refreshMs); }
 function skel(w){return '<span class="skel" style="width:'+(w||60)+'px"></span>';}
 scheduleRefresh();
 
 function buildNav(){
   const nav=document.getElementById('navItems'); if(!nav)return;
-  const groups=[['overview',''],['operations','Operations'],['developer','Developer tools'],['connections','']];
+  const groups=[['core',''],['more','More Tools']];
   nav.innerHTML=groups.map(([group,label])=>{
     const items=navItems.filter(item=>item[3]===group);
     if(!items.length)return '';
-    const collapsible=group==='operations'||group==='developer';
+    const collapsible=group==='more';
     const collapsed=collapsible&&state.navGroupsCollapsed[group];
-    const heading=label?`<button class="navGroupToggle" type="button" onclick="toggleNavGroup('${group}')" aria-label="Toggle ${esc(label)} navigation" aria-expanded="${collapsed?'false':'true'}" aria-controls="navGroup-${group}"><span>${esc(label)}</span><span class="navGroupChevron" aria-hidden="true"></span></button>`:'';
+    const heading=label?`<button class="navGroupToggle" id="navGroupToggle-${group}" type="button" onclick="toggleNavGroup('${group}')" aria-label="Toggle ${esc(label)} navigation" aria-expanded="${collapsed?'false':'true'}" aria-controls="navGroup-${group}"><span>${esc(label)}</span><span class="navGroupChevron" aria-hidden="true"></span></button>`:'';
     const links=items.map(([key,name,icon])=>{
       const unavailable=navUnavailableReason(key);
       return `<button class="navLink ${state.view===key?'active':''}" type="button" ${unavailable?'disabled aria-disabled="true" title="'+esc(unavailable)+'"':'onclick="goView(\''+key+'\')"'} ${state.view===key?'aria-current="page"':''}><span>${icon}</span><span class="navText">${esc(name)}</span></button>`;
@@ -741,10 +748,12 @@ function buildNav(){
   if(theme){const next=state.theme==='dark'?'light':'dark';theme.setAttribute('aria-label','Switch to '+next+' theme');theme.title='Switch to '+next+' theme';theme.querySelector('.navActionText').textContent=next.charAt(0).toUpperCase()+next.slice(1)+' theme';}
 }
 window.toggleNavGroup=function(group){
-  if(group!=='operations'&&group!=='developer')return;
+  if(group!=='more')return;
   state.navGroupsCollapsed[group]=!state.navGroupsCollapsed[group];
   localStorage.setItem('pk_nav_groups',JSON.stringify(state.navGroupsCollapsed));
   buildNav();
+  const btn=document.getElementById('navGroupToggle-'+group);
+  if(btn)btn.focus();
 };
 window.toggleSidebar=function(){state.sidebarCollapsed=!state.sidebarCollapsed;localStorage.setItem('pk_sidebar_collapsed',state.sidebarCollapsed?'1':'0');buildNav();};
 function openDrawer(){const nav=document.getElementById('appNav');nav.classList.add('mobileOpen');document.getElementById('navBackdrop').classList.add('visible');const b=document.getElementById('burgerBtn');b.setAttribute('aria-expanded','true');nav.querySelector('.navLink')?.focus();}
@@ -1012,11 +1021,20 @@ function currentHash(){
 }
 function applyHash(){
   const [view,parts]=currentHash();
-  state.view=view;
-  if(view==='databrowser'){state.topic=parts[0]||null;state.partition=parts[1]||'all';state.off=parts[2]||null;}
-  else{state.topic=null;state.partition='all';state.off=null;}
-  state.group=view==='groups'?(parts[0]||null):null;
-  state.topicDetail=view==='topics'?(parts[0]||null):null;
+  if(view==='clusters'||view==='connections'||view==='security'){
+    state.view='settings';
+    state.settingsTab=view;
+    history.replaceState(null,'','#/settings/'+view);
+  }else if(view==='settings'){
+    state.view='settings';
+    state.settingsTab=parts[0]||'general';
+  }else{
+    state.view=view;
+  }
+  if(state.view!=='databrowser'){state.topic=null;state.partition='all';state.off=null;}
+  else{state.topic=parts[0]||null;state.partition=parts[1]||'all';state.off=parts[2]||null;}
+  state.group=state.view==='groups'?(parts[0]||null):null;
+  state.topicDetail=state.view==='topics'?(parts[0]||null):null;
   render();
 }
 window.addEventListener('hashchange',applyHash);
@@ -1040,9 +1058,11 @@ function render(){
     if(topicPane){topicPane.hidden=!browsing;if(!browsing)topicPane.classList.remove('mobileOpen');}
     if(topicBtn){topicBtn.hidden=!browsing;topicBtn.setAttribute('aria-expanded',String(browsing&&topicPane.classList.contains('mobileOpen')));}
     const item=navItems.find(([k])=>k===state.view);
-    $('#title').textContent=item?item[1]:'Overview';
-    $('#crumb').textContent=state.view==='databrowser'&&state.topic?('/ '+state.topic):(state.view==='groups'&&state.group?('/ '+state.group):'');
-    $('#topActions').innerHTML=(state.view==='overview'||state.view==='connections'?`<button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="refreshAll()">Refresh</button>`:
+    $('#title').textContent=item?item[1]:(state.view==='settings'?'Settings':'Overview');
+    const tabLabels={general:'General',clusters:'Clusters',connections:'Connections',security:'Security & ACL'};
+    $('#crumb').textContent=state.view==='databrowser'&&state.topic?('/ '+state.topic):(state.view==='groups'&&state.group?('/ '+state.group):(state.view==='settings'&&state.settingsTab&&state.settingsTab!=='general'?('/ '+(tabLabels[state.settingsTab]||state.settingsTab)):''));
+    const isConnActive=state.view==='connections'||(state.view==='settings'&&(state.settingsTab==='connections'||state.settingsTab==='general'||state.settingsTab==='clusters'));
+    $('#topActions').innerHTML=(state.view==='overview'||isConnActive?`<button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="refreshAll()">Refresh</button>`:
       state.view==='databrowser'?`<button class="btn" style="padding:5px 12px;font-size:12px" onclick="goView('connections')">Connections</button>`:'');
     const v=$('#view');
     if(state.auth&&state.auth.enabled&&!state.auth.authenticated){v.innerHTML=viewLogin();bindLogin();}
@@ -1075,7 +1095,27 @@ function render(){
 }
 async function refreshAll(){await refresh();render();}
 window.refreshAll=refreshAll;
-window.goView=async function(v){
+window.goView=async function(v,sub){
+  if(v==='clusters'||v==='connections'||v==='security'){
+    state.view='settings';
+    state.settingsTab=v;
+    state.topic=null;state.partition='all';state.off=null;state.group=null;state.topicDetail=null;
+    const h='#/settings/'+v;
+    if(location.hash!==h)location.hash=h;
+    await refresh();
+    render();
+    return;
+  }
+  if(v==='settings'){
+    state.view='settings';
+    state.settingsTab=sub||state.settingsTab||'general';
+    state.topic=null;state.partition='all';state.off=null;state.group=null;state.topicDetail=null;
+    const h=state.settingsTab==='general'?'#/settings':'#/settings/'+state.settingsTab;
+    if(location.hash!==h)location.hash=h;
+    await refresh();
+    render();
+    return;
+  }
   if(!navItems.some(([key])=>key===v))return;
   if(v!=='databrowser'){state.topic=null;state.partition='all';state.off=null;}
   if(v!=='groups')state.group=null;
@@ -1122,7 +1162,7 @@ window.logout=async function(){
 };
 
 /* Settings */
-function viewSettings(){
+function viewGeneralSettings(){
   const c=state.cluster||{};
   const auth=state.auth||{};
   const refreshOpts=[1000,5000,15000,30000,0].map(ms=>`<option value="${ms}" ${state.refreshMs===ms?'selected':''}>${ms===0?'Off':(ms/1000)+'s'}</option>`).join('');
@@ -1182,6 +1222,27 @@ function viewSettings(){
     </div>
   </div>`;
 }
+function viewSettings(){
+  const tab=state.settingsTab||'general';
+  const navTabs=`<nav class="settingsTabs" aria-label="Settings sections">
+    <button class="settingsTab ${tab==='general'?'active':''}" type="button" onclick="goSettingsTab('general')" ${tab==='general'?'aria-current="page"':''}>General</button>
+    <button class="settingsTab ${tab==='clusters'?'active':''}" type="button" onclick="goSettingsTab('clusters')" ${tab==='clusters'?'aria-current="page"':''}>Clusters</button>
+    <button class="settingsTab ${tab==='connections'?'active':''}" type="button" onclick="goSettingsTab('connections')" ${tab==='connections'?'aria-current="page"':''}>Connections</button>
+    <button class="settingsTab ${tab==='security'?'active':''}" type="button" onclick="goSettingsTab('security')" ${tab==='security'?'aria-current="page"':''}>Security & ACL</button>
+  </nav>`;
+  let body='';
+  if(tab==='clusters') body=viewClusters();
+  else if(tab==='connections') body=viewConnections();
+  else if(tab==='security') body=viewSecurity();
+  else body=viewGeneralSettings();
+  return `<div>${navTabs}${body}</div>`;
+}
+window.goSettingsTab=function(tab){
+  state.settingsTab=tab;
+  const h=tab==='general'?'#/settings':'#/settings/'+tab;
+  if(location.hash!==h)location.hash=h;
+  render();
+};
 window.setDensity=function(d){state.density=d;localStorage.setItem('pk_density',d);applyDensity();};
 window.setTimeFmt=function(m){state.timeAbs=m==='abs';localStorage.setItem('pk_timeAbs',state.timeAbs?'1':'0');render();};
 window.setRefresh=function(ms){state.refreshMs=ms;localStorage.setItem('pk_refreshMs',String(ms));};
@@ -2350,12 +2411,12 @@ function viewOverview(){
     const lag=Number.isFinite(c.lag)?count(c.lag):'n/a';
     content=`
       <div id="overviewHead" class="pageHeading"><div><h2>Overview</h2><p>Broker health, active issues, traffic, and consumer lag.</p></div><div class="statSub" style="margin-left:auto">${esc(activeClusterLabel())} · updated ${rel(d.generatedAtMs)}</div></div>
-      <div id="overviewTop" class="overviewTop"><section class="card" aria-labelledby="overviewHealthTitle"><div class="kicker">Operations</div><h3 id="overviewHealthTitle">Broker health</h3><div class="row" style="margin-top:10px;justify-content:space-between"><span class="mono">${esc(c.clusterId||'Broker identity unavailable')}</span>${hStatusBadge(c.status||'unknown')}</div>${Array.isArray(c.reasons)&&c.reasons.length?`<div class="overviewAttention">${c.reasons.map(r=>`<div class="overviewIssue"><span class="mono">${esc(r.severity||'status')}</span><span class="muted">${esc(r.message||'')}</span></div>`).join('')}</div>`:''}<div class="overviewLinks"><a class="btn ghost" href="#/health">Open Health</a><a class="btn ghost" href="#/clusters">View Clusters</a></div></section>
+      <div id="overviewTop" class="overviewTop"><section class="card" aria-labelledby="overviewHealthTitle"><div class="kicker">Operations</div><h3 id="overviewHealthTitle">Broker health</h3><div class="row" style="margin-top:10px;justify-content:space-between"><span class="mono">${esc(c.clusterId||'Broker identity unavailable')}</span>${hStatusBadge(c.status||'unknown')}</div>${Array.isArray(c.reasons)&&c.reasons.length?`<div class="overviewAttention">${c.reasons.map(r=>`<div class="overviewIssue"><span class="mono">${esc(r.severity||'status')}</span><span class="muted">${esc(r.message||'')}</span></div>`).join('')}</div>`:''}<div class="overviewLinks"><a class="btn ghost" href="#/health">Open Health</a><a class="btn ghost" href="#/settings/clusters">View Clusters</a></div></section>
       <section class="card"><div class="row" style="justify-content:space-between"><h3>Needs attention</h3><span class="mono">${att.length} ${att.length===1?'topic':'topics'}</span></div><div class="overviewAttention">${issues}</div></section></div>
       <dl id="overviewFacts" class="overviewFacts" aria-label="Broker summary"><div class="overviewFact"><dt>Broker status</dt><dd>${esc(c.status||'n/a')}</dd></div><div class="overviewFact"><dt>Active topic issues</dt><dd>${att.length}</dd></div><div class="overviewFact"><dt>Throughput</dt><dd>${rate}<small style="font-size:10px;color:var(--muted)"> msg/s</small></dd></div><div class="overviewFact"><dt>Consumer lag</dt><dd>${lag}</dd></div></dl>
       <div id="overviewNotes">${rateNote}${warmup}</div>
       <div id="overviewCharts" class="overviewCharts" style="margin-top:12px"><section class="card"><h3 class="overviewChartTitle">Messages per second · last ${win}s</h3>${overviewSpark(hist.map(x=>x.messagesPerSec),`Messages per second over the last ${win} seconds`)}<div class="statSub">Messages / second</div></section><section class="card"><h3 class="overviewChartTitle">Total consumer lag · last ${win}s</h3>${overviewSpark(hist.map(x=>x.lag),`Total consumer lag over the last ${win} seconds`)}<div class="statSub">Messages behind latest offsets</div></section></div>
-      <section id="overviewFactsCard" class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><h3>Broker facts</h3><span class="statSub">${count(c.topics)} topics · ${count(c.partitions)} partitions · ${count(c.groups)} groups</span></div><div class="overviewLinks"><a class="btn ghost" href="#/topics">Topics</a><a class="btn ghost" href="#/groups">Consumer Groups</a><a class="btn ghost" href="#/databrowser">Data Browser</a><a class="btn ghost" href="#/connections">Connections</a></div></section>`;
+      <section id="overviewFactsCard" class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><h3>Broker facts</h3><span class="statSub">${count(c.topics)} topics · ${count(c.partitions)} partitions · ${count(c.groups)} groups</span></div><div class="overviewLinks"><a class="btn ghost" href="#/topics">Topics</a><a class="btn ghost" href="#/groups">Consumer Groups</a><a class="btn ghost" href="#/databrowser">Data Browser</a><a class="btn ghost" href="#/settings/connections">Connections</a></div></section>`;
   }
   return `<div id="overviewRoot">${content}</div>`;
 }
@@ -2689,7 +2750,8 @@ function patchClusters(){
 async function loadClusters(){
   try{const result=await apiLocal('/api/v1/health/clusters?window='+healthWindow);clusterData=Object.assign({},result,{clusters:(result.clusters||[]).map(clusterMetadataForUI)});clusterErr=null;}
   catch(e){ clusterErr=redactTargetEndpoint(e.message); }
-  if(state.view!=='clusters')return;
+  const clustersActive=state.view==='clusters'||(state.view==='settings'&&state.settingsTab==='clusters');
+  if(!clustersActive)return;
   if(!patchClusters())render();
 }
 window.loadClusters=loadClusters;
@@ -2798,6 +2860,9 @@ window.loadLogs=loadLogs;
 /* Command palette (Ctrl+K / '/') */
 function palItems(){
   const items=navItems.map(([k,label])=>({label,run:()=>goView(k),hint:'view'}));
+  items.push({label:'Clusters',run:()=>goView('clusters'),hint:'settings'});
+  items.push({label:'Connections',run:()=>goView('connections'),hint:'settings'});
+  items.push({label:'Security & ACL',run:()=>goView('security'),hint:'settings'});
   (state.topics||[]).forEach(t=>items.push({label:t.name,run:()=>{state.topic=t.name;goView('databrowser').then(()=>loadMsgs());},hint:'topic'}));
   (state.groups||[]).forEach(g=>items.push({label:g.name,run:()=>{goView('groups').then(()=>openGroup(g.name));},hint:'group'}));
   return items;
@@ -2892,17 +2957,20 @@ function bindView(){
   const active=!document.hidden,authRequired=!!(state.auth&&state.auth.enabled&&!state.auth.authenticated),viewReady=active&&!authRequired&&!state.targetSwitching&&!navUnavailableReason(state.view),localViewReady=active&&!authRequired;
   if(viewReady&&state.view==='overview')startOverviewPoll();else stopOverviewPoll();
   if(viewReady&&state.view==='health')startHealthPoll();else stopHealthPoll();
-  if(localViewReady&&state.view==='clusters')startClusterPoll();else stopClusterPoll();
+  const clustersActive=state.view==='clusters'||(state.view==='settings'&&state.settingsTab==='clusters');
+  if(localViewReady&&clustersActive)startClusterPoll();else stopClusterPoll();
   if(viewReady&&state.view==='databrowser')startMsgVirtWatch();else stopMsgVirtWatch();
   if(viewReady&&state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();}
   if(viewReady&&state.view==='groups'&&state.group)loadGroupDetail();
-  if(localViewReady&&state.view==='security'){
+  const securityActive=state.view==='security'||(state.view==='settings'&&state.settingsTab==='security');
+  if(localViewReady&&securityActive){
     loadDelegatedTokens();
     if(!state.targetSwitching&&!isTargetUnavailable()&&!isKafkaTarget()){loadACLs();loadAudit();}
   }
   if(viewReady&&state.view==='metrics')loadThroughput();
   if(viewReady&&state.view==='integrations')loadIntegrations();
-  if(localViewReady&&state.view==='settings')loadBrokerConfig();
+  const generalSettingsActive=state.view==='settings'&&(!state.settingsTab||state.settingsTab==='general');
+  if(localViewReady&&generalSettingsActive)loadBrokerConfig();
   if(viewReady&&state.view==='logs')loadLogs();
   if(viewReady&&state.view==='topology')renderTopoSvg();
   if(viewReady&&state.view==='databrowser')bindTailPause();
