@@ -1,0 +1,75 @@
+name: Release
+
+# Provenance rilis: artefak biner + SBOM di-attestasi GitHub (SLSA-style)
+# sehingga asal-usul biner dapat diverifikasi pihak ketiga.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.26'
+
+      - name: Build release binaries
+        run: |
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          mkdir -p dist
+          for spec in "linux/amd64 pocketkafka-linux-amd64" "linux/arm64 pocketkafka-linux-arm64"; do
+            set -- $spec
+            CGO_ENABLED=0 GOOS=linux GOARCH="${1#linux/}" \
+              go build -trimpath -buildvcs=true \
+              -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "dist/$2" ./cmd/server
+            CGO_ENABLED=0 GOOS=linux GOARCH="${1#linux/}" \
+              go build -trimpath -buildvcs=true \
+              -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "dist/pkctl-${1#linux/}" ./cmd/kctl
+          done
+          ./dist/pocketkafka-linux-amd64 about
+          sha256sum dist/* > dist/SHA256SUMS.txt
+
+      - name: Attest binaries
+        uses: actions/attest-build-provenance@4fdf19e1f805bfb15b9f4ddf3fdea42746ab3cbb # v3.2.0
+        with:
+          subject-path: 'dist/pocketkafka-*, dist/pkctl-*'
+
+      - name: SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0de65bc221b6bb0ad6c436e572f # v0.24.3
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: dist/pocketkafka-sbom.cdx.json
+          upload-artifact: false
+          dependency-snapshot: false
+
+      - name: Attest SBOM
+        uses: actions/attest-build-provenance@4fdf19e1f805bfb15b9f4ddf3fdea42746ab3cbb # v3.2.0
+        with:
+          subject-path: 'dist/pocketkafka-sbom.cdx.json'
+
+      - name: Publish release
+        uses: softprops/action-gh-release@a8aa24558716657a3569683d25cc497352d654182 # v2.3.3
+        with:
+          files: |
+            dist/pocketkafka-linux-amd64
+            dist/pocketkafka-linux-arm64
+            dist/pkctl-amd64
+            dist/pkctl-arm64
+            dist/SHA256SUMS.txt
+            dist/pocketkafka-sbom.cdx.json

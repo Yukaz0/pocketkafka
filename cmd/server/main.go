@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	_ "embed"
 	"flag"
 	"fmt"
 	"log"
@@ -39,6 +40,9 @@ import (
 
 var version = "dev"
 
+//go:embed notice.txt
+var noticeText string
+
 func main() {
 	// Operational subcommands never load a config or open a listener, so they
 	// are dispatched before the flag set below.
@@ -52,6 +56,9 @@ func main() {
 			os.Exit(runScramVerifier(os.Args[2:]))
 		case "version":
 			fmt.Println(version)
+			return
+		case "about":
+			fmt.Printf("pocketkafka %s\n%s", version, noticeText)
 			return
 		}
 	}
