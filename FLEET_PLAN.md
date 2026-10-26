@@ -77,7 +77,7 @@ git commit -m "feat(fleet): config fleet.* with loopback default and public-list
 
 ```go
 func TestEnrollTokenSingleUse(t *testing.T) {
-    r := NewRegistry(t.TempDir());
+	r := NewRegistry(t.TempDir())
     tok, _ := r.Enroll("srv-1")
     if _, err := r.ConsumeToken(tok); err != nil { t.Fatal(err) }
     if _, err := r.ConsumeToken(tok); err == nil { t.Fatal("reuse must fail") }
@@ -116,7 +116,33 @@ git commit -m "feat(fleet): registry with single-use enrollment and hashed secre
 - Consumes: `fleet.Registry` (Task 2).
 - Produces: `fleet.Jobs` (Submit, Get, Complete), `fleet.Audit` (Log) dipakai Task 5.
 
-- [ ] **Step 1: Write failing tests** (state ilegal + idempotency + sanitasi, kode eksplisit per kasus)
+- [ ] **Step 1: Write failing tests** — kode eksplisit, bukan daftar:
+
+```go
+func TestJobIllegalTransition(t *testing.T) {
+	j := NewJobs(t.TempDir())
+	id, _ := j.Submit("srv-1", "restart", "c1", "op", "idem-1")
+	if err := j.Complete(id, "succeeded"); err == nil {
+		t.Fatal("queued→succeeded langsung harus ditolak, wajib via running")
+	}
+}
+
+func TestJobIdempotency(t *testing.T) {
+	j := NewJobs(t.TempDir())
+	a, _ := j.Submit("srv-1", "stop", "c1", "op", "idem-9")
+	b, _ := j.Submit("srv-1", "stop", "c1", "op", "idem-9")
+	if a != b { t.Fatal("idempotency key sama harus kembalikan job sama") }
+}
+
+func TestAuditSanitizesSecret(t *testing.T) {
+	a := NewAudit(t.TempDir())
+	a.Log(AuditEvent{Actor: "op", Action: "enroll", Detail: "token=abc123secret"})
+	raw, _ := os.ReadFile(filepath.Join(t.TempDir(), "fleet_audit.jsonl"))
+	if strings.Contains(string(raw), "abc123secret") {
+		t.Fatal("secret bocor ke audit log")
+	}
+}
+```
 - [ ] **Step 2: Run** `go test ./internal/fleet -v` → FAIL
 - [ ] **Step 3: Implement** (append-only file, lock per file, rotasi by count+age)
 - [ ] **Step 4: Run** → PASS
@@ -135,7 +161,33 @@ git commit -m "feat(fleet): registry with single-use enrollment and hashed secre
 - Consumes: `fleet.Registry`, `fleet.Jobs`.
 - Produces: channel agent↔kontrol dipakai Task 5.
 
-- [ ] **Step 1: Write failing tests** (5 kasus di atas, satu fungsi test per kasus)
+- [ ] **Step 1: Write failing tests** — satu fungsi per kasus kritis:
+
+```go
+func TestHMACRejectsReplay(t *testing.T) {
+	v := NewVerifier("key-1", time.Minute)
+	env := SignedEnvelope(t, "agent→control", "job.result", []byte(`{}`))
+	if err := v.Verify(env); err != nil { t.Fatal(err) }
+	if err := v.Verify(env); err == nil { t.Fatal("pesan sama diulang harus ditolak") }
+}
+
+func TestRevokedMidStreamGetsNoJob(t *testing.T) {
+	r := NewRegistry(t.TempDir())
+	tok, _ := r.Enroll("srv-1")
+	agent, _ := r.ConsumeToken(tok)
+	r.Revoke(agent.ID)
+	if _, err := r.AuthorizeStream(agent.ID); err == nil {
+		t.Fatal("stream terbuka agent tercabut tak boleh terima job")
+	}
+}
+
+func TestHMACRejectsCrossEndpoint(t *testing.T) {
+	v := NewVerifier("key-1", time.Minute)
+	env := SignedEnvelope(t, "agent→control", "job.result", []byte(`{}`))
+	env.Op = "server.delete"
+	if err := v.Verify(env); err == nil { t.Fatal("op diubah setelah sign harus ditolak") }
+}
+```
 - [ ] **Step 2: Run** → FAIL
 - [ ] **Step 3: Implement**
 - [ ] **Step 4: Run** → PASS
@@ -144,10 +196,25 @@ git commit -m "feat(fleet): registry with single-use enrollment and hashed secre
 ### Task 5: Fleet server (mux terpisah) + wiring
 
 **Files:**
-- Create: `internal/fleet/server.go` (mux sendiri, middleware recover + limit body, route `GET /api/v1/fleet/status`, `GET/POST enrollments`, `GET/DELETE servers`, `GET containers`, `GET detail`, `GET logs`, `POST start/stop/restart` → 202+job_id, `GET jobs/{id}`, `GET audit-events`; tiap route cek `authz.Authorizer` resource `fleet_*`)
+- Create: `internal/fleet/server.go` (mux sendiri, middleware recover + limit body, route `GET /api/v1/fleet/status`, dst; tiap route cek `authz.Authorizer` resource `fleet_*`)
+- Modify: `internal/web/web.go`: reverse-proxy same-origin `/api/v1/fleet/*` → loopback fleet listener (bukan URL absolut + CORS). SPA tetap panggil path relatif; cookie/sesi ikut; isolasi proses tetap karena handler Fleet di mux terpisah. Bila fleet disabled, proxy balas 404 tanpa forward.
 - Modify: `cmd/server/main.go` (buka listener Fleet bila enabled; tutup total bila disabled)
 - Modify: `internal/web/web.go` (tambah field `fleetEnabled` ke `GET /api/v1/info`)
-- Test: `internal/fleet/server_test.go` (tabel authz viewer/operator/admin × tiap route; FR-001: disabled → semua route 404/403; audit tertulis tiap mutasi)
+- Test: `internal/fleet/server_test.go` (tabel authz + FR-001 + audit):
+
+```go
+func TestFleetDisabledServes404(t *testing.T) {
+	h := NewDisabledHandler()
+	for _, p := range []string{"/api/v1/fleet/servers", "/api/v1/fleet/jobs/x", "/api/v1/fleet/audit-events"} {
+		req := httptest.NewRequest("GET", p, nil)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != 404 && rr.Code != 403 {
+			t.Fatalf("%s = %d, want 404/403", p, rr.Code)
+		}
+	}
+}
+```
 
 **Interfaces:**
 - Consumes: Task 1–4.
@@ -176,6 +243,7 @@ git commit -m "feat(fleet): registry with single-use enrollment and hashed secre
 
 **Files:**
 - Modify: `internal/fleet/*.go` (rate limit enroll + operasi mahal, batas job/agent/koneksi, sanitasi error envelope `code/message/request_id`)
+- Modify: `.github/workflows/release.yml`: build `fleet-agent-linux-amd64/arm64` dari `./cmd/fleet-agent` (ldflags version sama), masukkan ke `dist/`, `SHA256SUMS.txt`, attestasi, dan file rilis — sejajar `pocketkafka-*`/`pkctl-*`
 - Create: `cmd/fleet-agent` systemd unit contoh + `FLEET_RUNBOOK.md` (install, TLS, backup/restore metadata, upgrade/rollback, troubleshooting)
 - Modify: `ROADMAP.md` (tandai Fleet masuk pre-v1.0)
 - Test: `go test ./...`, `go test -race ./internal/fleet`, `INTEROP_DOCKER=1 test/interop/run.sh` (broker tak regresi), review P0 PRD §13
