@@ -92,3 +92,23 @@ type Envelope struct {
 
 // HMACEnvelope is an alias for Envelope.
 type HMACEnvelope = Envelope
+
+// ErrorResponse represents the consistent Fleet API error envelope.
+type ErrorResponse struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	RequestID string `json:"request_id"`
+	ErrorText string `json:"error"`
+}
+
+const (
+	ErrCodeBadRequest              = "ERR_BAD_REQUEST"
+	ErrCodeUnauthorized            = "ERR_UNAUTHORIZED"
+	ErrCodeForbidden               = "ERR_FORBIDDEN"
+	ErrCodeNotFound                = "ERR_NOT_FOUND"
+	ErrCodePayloadTooLarge         = "ERR_PAYLOAD_TOO_LARGE"
+	ErrCodeRateLimited             = "ERR_RATE_LIMITED"
+	ErrCodeLimitExceeded           = "ERR_LIMIT_EXCEEDED"
+	ErrCodeConnectionLimitExceeded = "ERR_CONNECTION_LIMIT_EXCEEDED"
+	ErrCodeInternal                = "ERR_INTERNAL"
+)

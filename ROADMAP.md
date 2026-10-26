@@ -27,3 +27,15 @@ Prometheus `/metrics`, `/healthz`+`/livez`, provenance rilis.
 - API wire + REST yang diiklankan dibekukan; perubahan breaking naik major.
 - Transaksi: implementasi penuh atau tetap fail-closed permanen (diputuskan eksplisit).
 - Done: tidak ada `planned` tersisa di README; compatibility matrix penuh hijau.
+
+## Fleet (Pre-v1.0 Experimental)
+
+Subkomponen manajemen host dan container jarak jauh (`fleet-agent` + UI zona Fleet).
+- **Status saat ini**: Pre-v1.0 / experimental preview (disabled secara default via `fleet.enabled: false`).
+- **Cakupan fitur**:
+  - Registry & enrollment agen aman via token sekali-pakai + pertukaran kredensial HMAC bertanda-tangan.
+  - Lifecycle kontrol container Docker (start/stop/restart) berbasis antrean job async idempotensial.
+  - Audit log append-only dengan rotasi dan correlation ID.
+  - Rate limiting, batasan koneksi/job/agen, dan isolasi kegagalan (panic recovery di tiap handler).
+  - UI zona Fleet di SPA terintegrasi dan sistem packaging systemd + GitHub Release artifact.
+- **Kriteria stabil (v1.0)**: evaluasi ketahanan multi-host pada rilis v0.2–v0.3 sebelum promosi ke fitur stabil di v1.0.

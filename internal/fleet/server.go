@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Yukaz0/pocketkafka/internal/authz"
@@ -41,26 +43,35 @@ func NewProxyToken() string {
 
 // ServerConfig holds dependencies for FleetServer.
 type ServerConfig struct {
-	Registry     *Registry
-	Jobs         *Jobs
-	Audit        *Audit
-	Manager      *AgentManager
-	Authorizer   authz.Authorizer
-	MaxBodyBytes int64
+	Registry        *Registry
+	Jobs            *Jobs
+	Audit           *Audit
+	Manager         *AgentManager
+	Authorizer      authz.Authorizer
+	MaxBodyBytes    int64
 	// ProxyToken authenticates the dashboard reverse proxy to this listener.
 	// Generated per process; direct requests without it are rejected.
-	ProxyToken string
+	ProxyToken      string
+	MaxConnections  int
+	MaxActiveJobs   int
+	MaxAgents       int
+	EnrollRateLimit int
+	OpRateLimit     int
 }
 type FleetServer struct {
-	mu           sync.RWMutex
-	mux          *http.ServeMux
-	registry     *Registry
-	jobs         *Jobs
-	audit        *Audit
-	manager      *AgentManager
-	authorizer   authz.Authorizer
-	maxBodyBytes int64
-	proxyToken   string
+	mu             sync.RWMutex
+	mux            *http.ServeMux
+	registry       *Registry
+	jobs           *Jobs
+	audit          *Audit
+	manager        *AgentManager
+	authorizer     authz.Authorizer
+	maxBodyBytes   int64
+	proxyToken     string
+	maxConnections int
+	activeConns    atomic.Int64
+	enrollLimiter  *RateLimiter
+	opLimiter      *RateLimiter
 
 	agentChannels map[string]*ChannelTransport
 }
@@ -77,28 +88,123 @@ func NewFleetServer(cfg ServerConfig) *FleetServer {
 		maxBytes = 2 * 1024 * 1024 // 2MB default
 	}
 
+	maxConnections := cfg.MaxConnections
+	if maxConnections <= 0 {
+		maxConnections = 256
+	}
+
+	maxActiveJobs := cfg.MaxActiveJobs
+	if maxActiveJobs <= 0 {
+		maxActiveJobs = 1000
+	}
+	if cfg.Jobs != nil {
+		cfg.Jobs.SetMaxActiveJobs(maxActiveJobs)
+	}
+
+	maxAgents := cfg.MaxAgents
+	if maxAgents <= 0 {
+		maxAgents = 500
+	}
+	if cfg.Registry != nil {
+		cfg.Registry.SetMaxAgents(maxAgents)
+	}
+
+	enrollRateLimit := cfg.EnrollRateLimit
+	if enrollRateLimit <= 0 {
+		enrollRateLimit = 30
+	}
+
+	opRateLimit := cfg.OpRateLimit
+	if opRateLimit <= 0 {
+		opRateLimit = 120
+	}
+
 	s := &FleetServer{
-		mux:           http.NewServeMux(),
-		registry:      cfg.Registry,
-		jobs:          cfg.Jobs,
-		audit:         cfg.Audit,
-		manager:       cfg.Manager,
-		authorizer:    cfg.Authorizer,
-		maxBodyBytes:  maxBytes,
-		proxyToken:    cfg.ProxyToken,
-		agentChannels: make(map[string]*ChannelTransport),
+		mux:            http.NewServeMux(),
+		registry:       cfg.Registry,
+		jobs:           cfg.Jobs,
+		audit:          cfg.Audit,
+		manager:        cfg.Manager,
+		authorizer:     cfg.Authorizer,
+		maxBodyBytes:   maxBytes,
+		proxyToken:     cfg.ProxyToken,
+		maxConnections: maxConnections,
+		enrollLimiter:  NewRateLimiter(enrollRateLimit, time.Minute),
+		opLimiter:      NewRateLimiter(opRateLimit, time.Minute),
+		agentChannels:  make(map[string]*ChannelTransport),
 	}
 
 	s.routes()
 	return s
 }
 
+func generateRequestID() string {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("req-%d", time.Now().UnixNano())
+	}
+	return "req-" + hex.EncodeToString(b[:])
+}
+
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		ip := strings.TrimSpace(parts[0])
+		if ip != "" {
+			return ip
+		}
+	}
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		ip := strings.TrimSpace(xri)
+		if ip != "" {
+			return ip
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+func (s *FleetServer) writeError(w http.ResponseWriter, r *http.Request, status int, code, msg string) {
+	reqID := r.Header.Get("X-Request-ID")
+	if reqID == "" {
+		reqID = r.Header.Get("X-Correlation-ID")
+	}
+	if reqID == "" {
+		reqID = generateRequestID()
+	}
+	w.Header().Set("X-Request-ID", reqID)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(ErrorResponse{
+		Code:      code,
+		Message:   msg,
+		RequestID: reqID,
+		ErrorText: msg,
+	})
+}
+
 // NewDisabledHandler returns an http.Handler that responds with 404 Not Found to indicate fleet is disabled.
 func NewDisabledHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqID := r.Header.Get("X-Request-ID")
+		if reqID == "" {
+			reqID = r.Header.Get("X-Correlation-ID")
+		}
+		if reqID == "" {
+			reqID = generateRequestID()
+		}
+		w.Header().Set("X-Request-ID", reqID)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":"fleet disabled"}`))
+		_ = json.NewEncoder(w).Encode(ErrorResponse{
+			Code:      ErrCodeNotFound,
+			Message:   "fleet disabled",
+			RequestID: reqID,
+			ErrorText: "fleet disabled",
+		})
 	})
 }
 
@@ -117,11 +223,19 @@ func (s *FleetServer) wrap(h http.HandlerFunc) http.HandlerFunc {
 		defer func() {
 			if rec := recover(); rec != nil {
 				slog.Error("fleet: panic recovered", "panic", rec, "path", r.URL.Path)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte(`{"error":"internal server error"}`))
+				s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, "internal server error")
 			}
 		}()
+
+		if s.maxConnections > 0 {
+			if cur := s.activeConns.Add(1); cur > int64(s.maxConnections) {
+				s.activeConns.Add(-1)
+				s.writeError(w, r, http.StatusTooManyRequests, ErrCodeConnectionLimitExceeded, "connection limit reached")
+				return
+			}
+			defer s.activeConns.Add(-1)
+		}
+
 		if s.maxBodyBytes > 0 && r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, s.maxBodyBytes)
 		}
@@ -130,9 +244,7 @@ func (s *FleetServer) wrap(h http.HandlerFunc) http.HandlerFunc {
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/fleet/agent/") && r.URL.Path != "/api/v1/fleet/enroll" {
 			if s.proxyToken == "" || !validProxyToken(r, s.proxyToken) {
 				slog.Error("fleet: rejected direct request without proxy token", "path", r.URL.Path)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte(`{"error":"forbidden"}`))
+				s.writeError(w, r, http.StatusForbidden, ErrCodeForbidden, "forbidden: missing or invalid proxy token")
 				return
 			}
 		}
@@ -159,16 +271,12 @@ func (s *FleetServer) checkAuthz(w http.ResponseWriter, r *http.Request, op auth
 	principal := s.principalFromRequest(r)
 	if s.authorizer == nil {
 		slog.Error("fleet: authorizer missing, denying request", "path", r.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: authorizer not configured"})
+		s.writeError(w, r, http.StatusForbidden, ErrCodeForbidden, "forbidden: authorizer not configured")
 		return principal, false
 	}
 	res := authz.Resource{Type: resType, Name: resName}
 	if err := s.authorizer.Authorize(principal, op, res); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: " + err.Error()})
+		s.writeError(w, r, http.StatusForbidden, ErrCodeForbidden, "forbidden: "+err.Error())
 		return principal, false
 	}
 	return principal, true
@@ -182,17 +290,17 @@ func (s *FleetServer) writeJSON(w http.ResponseWriter, status int, data interfac
 
 func (s *FleetServer) readJSON(w http.ResponseWriter, r *http.Request, v interface{}) bool {
 	if r.Body == nil {
-		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "empty body"})
+		s.writeError(w, r, http.StatusBadRequest, ErrCodeBadRequest, "empty body")
 		return false
 	}
 	err := json.NewDecoder(r.Body).Decode(v)
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			s.writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+			s.writeError(w, r, http.StatusRequestEntityTooLarge, ErrCodePayloadTooLarge, "request body too large")
 			return false
 		}
-		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body: " + err.Error()})
+		s.writeError(w, r, http.StatusBadRequest, ErrCodeBadRequest, "invalid JSON body: "+err.Error())
 		return false
 	}
 	return true
@@ -280,13 +388,13 @@ func (s *FleetServer) handleGetServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.registry == nil {
-		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
+		s.writeError(w, r, http.StatusNotFound, ErrCodeNotFound, "server not found")
 		return
 	}
 
 	srv, ok := s.registry.GetServer(id)
 	if !ok {
-		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
+		s.writeError(w, r, http.StatusNotFound, ErrCodeNotFound, "server not found")
 		return
 	}
 	s.writeJSON(w, http.StatusOK, srv)
@@ -300,17 +408,17 @@ func (s *FleetServer) handleRevokeServer(w http.ResponseWriter, r *http.Request)
 	}
 
 	if s.registry == nil {
-		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "registry not configured"})
+		s.writeError(w, r, http.StatusNotFound, ErrCodeNotFound, "registry not configured")
 		return
 	}
 
 	err := s.registry.RevokeServer(id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			s.writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			s.writeError(w, r, http.StatusNotFound, ErrCodeNotFound, err.Error())
 			return
 		}
-		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, err.Error())
 		return
 	}
 
@@ -354,6 +462,11 @@ func (s *FleetServer) handleCreateEnrollment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if s.enrollLimiter != nil && !s.enrollLimiter.Allow(clientIP(r)) {
+		s.writeError(w, r, http.StatusTooManyRequests, ErrCodeRateLimited, "rate limit exceeded for enroll")
+		return
+	}
+
 	var req struct {
 		ServerID string `json:"server_id"`
 		Duration string `json:"duration,omitempty"`
@@ -363,12 +476,12 @@ func (s *FleetServer) handleCreateEnrollment(w http.ResponseWriter, r *http.Requ
 	}
 
 	if strings.TrimSpace(req.ServerID) == "" {
-		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "server_id is required"})
+		s.writeError(w, r, http.StatusBadRequest, ErrCodeBadRequest, "server_id is required")
 		return
 	}
 
 	if s.registry == nil {
-		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "registry not configured"})
+		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, "registry not configured")
 		return
 	}
 
@@ -381,7 +494,11 @@ func (s *FleetServer) handleCreateEnrollment(w http.ResponseWriter, r *http.Requ
 
 	tok, err := s.registry.enrollWithExpiry(req.ServerID, dur)
 	if err != nil {
-		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		if errors.Is(err, ErrLimitExceeded) {
+			s.writeError(w, r, http.StatusTooManyRequests, ErrCodeLimitExceeded, err.Error())
+			return
+		}
+		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, err.Error())
 		return
 	}
 
@@ -404,6 +521,11 @@ func (s *FleetServer) handleCreateEnrollment(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *FleetServer) handleAgentEnroll(w http.ResponseWriter, r *http.Request) {
+	if s.enrollLimiter != nil && !s.enrollLimiter.Allow(clientIP(r)) {
+		s.writeError(w, r, http.StatusTooManyRequests, ErrCodeRateLimited, "rate limit exceeded for enroll")
+		return
+	}
+
 	var req struct {
 		Token string `json:"token"`
 	}
@@ -412,13 +534,17 @@ func (s *FleetServer) handleAgentEnroll(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if s.registry == nil {
-		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "registry not configured"})
+		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, "registry not configured")
 		return
 	}
 
 	agent, err := s.registry.ConsumeToken(strings.TrimSpace(req.Token))
 	if err != nil {
-		s.writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		if errors.Is(err, ErrLimitExceeded) {
+			s.writeError(w, r, http.StatusTooManyRequests, ErrCodeLimitExceeded, err.Error())
+			return
+		}
+		s.writeError(w, r, http.StatusUnauthorized, ErrCodeUnauthorized, err.Error())
 		return
 	}
 
@@ -465,6 +591,15 @@ func (s *FleetServer) handleContainerAction(action string) http.HandlerFunc {
 			return
 		}
 
+		limiterKey := principal
+		if limiterKey == "" || limiterKey == authz.AnonymPrincipal {
+			limiterKey = clientIP(r)
+		}
+		if s.opLimiter != nil && !s.opLimiter.Allow("action:"+limiterKey) {
+			s.writeError(w, r, http.StatusTooManyRequests, ErrCodeRateLimited, "rate limit exceeded for operation")
+			return
+		}
+
 		var req struct {
 			ServerID string `json:"server_id"`
 		}
@@ -486,24 +621,28 @@ func (s *FleetServer) handleContainerAction(action string) http.HandlerFunc {
 		}
 
 		if serverID == "" {
-			s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "server_id is required"})
+			s.writeError(w, r, http.StatusBadRequest, ErrCodeBadRequest, "server_id is required")
 			return
 		}
 		if s.registry != nil {
 			if _, ok := s.registry.GetServer(serverID); !ok {
-				s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown server_id"})
+				s.writeError(w, r, http.StatusNotFound, ErrCodeNotFound, "unknown server_id")
 				return
 			}
 		}
 
 		if s.jobs == nil {
-			s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "jobs store not configured"})
+			s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, "jobs store not configured")
 			return
 		}
 
 		jobID, err := s.jobs.Submit(serverID, action, id, principal, "")
 		if err != nil {
-			s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			if errors.Is(err, ErrJobLimitExceeded) {
+				s.writeError(w, r, http.StatusTooManyRequests, ErrCodeLimitExceeded, err.Error())
+				return
+			}
+			s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, err.Error())
 			return
 		}
 		job, _ := s.jobs.Get(jobID)
@@ -527,7 +666,6 @@ func (s *FleetServer) handleContainerAction(action string) http.HandlerFunc {
 		})
 	}
 }
-
 func (s *FleetServer) dispatchJobToAgent(serverID string, job *Job) {
 	if s.manager == nil || s.registry == nil {
 		return
@@ -544,6 +682,7 @@ func (s *FleetServer) dispatchJobToAgent(serverID string, job *Job) {
 	}
 }
 
+
 func (s *FleetServer) handleContainerLogs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -552,7 +691,17 @@ func (s *FleetServer) handleContainerLogs(w http.ResponseWriter, r *http.Request
 	if id == "" {
 		id = "*"
 	}
-	if _, ok := s.checkAuthz(w, r, authz.OpDescribe, authz.ResourceFleetContainer, id); !ok {
+	principal, ok := s.checkAuthz(w, r, authz.OpDescribe, authz.ResourceFleetContainer, id)
+	if !ok {
+		return
+	}
+
+	limiterKey := principal
+	if limiterKey == "" || limiterKey == authz.AnonymPrincipal {
+		limiterKey = clientIP(r)
+	}
+	if s.opLimiter != nil && !s.opLimiter.Allow("logs:"+limiterKey) {
+		s.writeError(w, r, http.StatusTooManyRequests, ErrCodeRateLimited, "rate limit exceeded for operation")
 		return
 	}
 
@@ -602,13 +751,13 @@ func (s *FleetServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.jobs == nil {
-		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+		s.writeError(w, r, http.StatusNotFound, ErrCodeNotFound, "job not found")
 		return
 	}
 
 	job, err := s.jobs.Get(id)
 	if err != nil || job == nil {
-		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+		s.writeError(w, r, http.StatusNotFound, ErrCodeNotFound, "job not found")
 		return
 	}
 	s.writeJSON(w, http.StatusOK, job)
@@ -646,49 +795,48 @@ func (s *FleetServer) getOrCreateAgentChannel(agentID string) *ChannelTransport 
 	}
 	return ch
 }
-
 func (s *FleetServer) handleAgentInbound(w http.ResponseWriter, r *http.Request) {
+
 	agentID := r.URL.Query().Get("agent_id")
 	if agentID == "" {
-		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id query parameter required"})
+		s.writeError(w, r, http.StatusBadRequest, ErrCodeBadRequest, "agent_id query parameter required")
 		return
 	}
 
 	tsStr := r.Header.Get("X-Fleet-Timestamp")
 	mac := r.Header.Get("X-Fleet-HMAC")
 	if tsStr == "" || mac == "" {
-		s.writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing authentication headers"})
+		s.writeError(w, r, http.StatusUnauthorized, ErrCodeUnauthorized, "missing authentication headers")
 		return
 	}
 
 	ts, err := strconv.ParseInt(tsStr, 10, 64)
 	if err != nil || time.Since(time.Unix(ts, 0)).Abs() > 5*time.Minute {
-		s.writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "timestamp skew exceeded"})
+		s.writeError(w, r, http.StatusUnauthorized, ErrCodeUnauthorized, "timestamp skew exceeded")
 		return
 	}
 
 	if s.registry == nil {
-		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "registry not configured"})
+		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, "registry not configured")
 		return
 	}
 
 	if _, err := s.registry.AuthorizeStream(agentID); err != nil {
-		s.writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		s.writeError(w, r, http.StatusForbidden, ErrCodeForbidden, err.Error())
 		return
 	}
 
 	secret, err := s.registry.AgentKey(agentID)
 	if err != nil {
-		s.writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "agent key unavailable"})
+		s.writeError(w, r, http.StatusUnauthorized, ErrCodeUnauthorized, "agent key unavailable")
 		return
 	}
 
 	expectedMAC := ComputeHMAC(secret, DirectionAgentToControl, "poll", "", ts, agentID)
 	if subtle.ConstantTimeCompare([]byte(mac), []byte(expectedMAC)) != 1 {
-		s.writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "HMAC signature mismatch"})
+		s.writeError(w, r, http.StatusUnauthorized, ErrCodeUnauthorized, "HMAC signature mismatch")
 		return
 	}
-
 	ch := s.getOrCreateAgentChannel(agentID)
 
 	var batch []*Envelope
@@ -718,7 +866,7 @@ func (s *FleetServer) handleAgentEnvelope(w http.ResponseWriter, r *http.Request
 	}
 
 	if s.manager == nil {
-		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "manager not configured"})
+		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, "manager not configured")
 		return
 	}
 
@@ -726,7 +874,7 @@ func (s *FleetServer) handleAgentEnvelope(w http.ResponseWriter, r *http.Request
 	// anonymous POST with a forged AgentID must not grow agentChannels.
 	gate := NewVerifier("", time.Minute, DirectionAgentToControl).WithRegistry(s.registry)
 	if err := gate.Verify(&env); err != nil {
-		s.writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		s.writeError(w, r, http.StatusUnauthorized, ErrCodeUnauthorized, err.Error())
 		return
 	}
 
@@ -734,9 +882,7 @@ func (s *FleetServer) handleAgentEnvelope(w http.ResponseWriter, r *http.Request
 	s.getOrCreateAgentChannel(env.AgentID)
 
 	if err := s.manager.HandleInboundEnvelope(&env); err != nil {
-		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		s.writeError(w, r, http.StatusBadRequest, ErrCodeBadRequest, err.Error())
 		return
 	}
-
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

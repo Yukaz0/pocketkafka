@@ -20,6 +20,7 @@ import (
 var (
 	ErrJobNotFound          = errors.New("fleet: job not found")
 	ErrIllegalJobTransition = errors.New("fleet: illegal job transition")
+	ErrJobLimitExceeded     = errors.New("fleet: active job limit reached")
 )
 
 // Jobs manages execution lifecycle, idempotency, persistence, and retention of fleet background tasks.
@@ -32,6 +33,7 @@ type Jobs struct {
 	timeout          time.Duration
 	retentionDays    int
 	retentionEntries int
+	maxActiveJobs    int
 }
 
 // NewJobs constructs a Jobs store backed by fleet_jobs.jsonl in dirOrPath.
@@ -42,6 +44,7 @@ func NewJobs(dirOrPath string) *Jobs {
 		idempotencyIndex: make(map[string]string),
 		retentionDays:    30,
 		retentionEntries: 10000,
+		maxActiveJobs:    1000,
 	}
 
 	if dirOrPath == "" {
@@ -79,6 +82,13 @@ func (j *Jobs) SetRetention(days int, entries int) {
 	}
 }
 
+// SetMaxActiveJobs sets the maximum allowed number of active (queued/running) jobs.
+func (j *Jobs) SetMaxActiveJobs(limit int) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.maxActiveJobs = limit
+}
+
 // Submit enqueues a new job or returns the existing job ID if idempotencyKey has already been submitted.
 func (j *Jobs) Submit(serverID, action, target, actor, idempotencyKey string) (string, error) {
 	j.mu.Lock()
@@ -87,6 +97,18 @@ func (j *Jobs) Submit(serverID, action, target, actor, idempotencyKey string) (s
 	if idempotencyKey != "" {
 		if existingID, ok := j.idempotencyIndex[idempotencyKey]; ok {
 			return existingID, nil
+		}
+	}
+
+	if j.maxActiveJobs > 0 {
+		active := 0
+		for _, existing := range j.jobs {
+			if existing.Status == JobStatusQueued || existing.Status == JobStatusAccepted || existing.Status == JobStatusRunning {
+				active++
+			}
+		}
+		if active >= j.maxActiveJobs {
+			return "", fmt.Errorf("%w: maximum %d active jobs allowed", ErrJobLimitExceeded, j.maxActiveJobs)
 		}
 	}
 

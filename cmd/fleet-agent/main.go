@@ -23,6 +23,8 @@ import (
 
 	"github.com/Yukaz0/pocketkafka/internal/fleet"
 )
+var version = "dev"
+
 
 type AgentState struct {
 	AgentID  string `json:"agent_id"`
@@ -38,9 +40,14 @@ func main() {
 		dockerFlag   = flag.String("docker-socket", getEnv("FLEET_DOCKER_SOCKET", "/var/run/docker.sock"), "path to docker socket")
 		insecureFlag = flag.Bool("insecure", getEnv("FLEET_INSECURE", "") == "true" || getEnv("FLEET_INSECURE", "") == "1", "skip TLS verification")
 		caCertFlag   = flag.String("ca-cert", getEnv("FLEET_CA_CERT", ""), "path to CA certificate PEM")
+		versionFlag  = flag.Bool("version", false, "print fleet-agent version and exit")
 	)
 	flag.Parse()
 
+	if *versionFlag {
+		fmt.Printf("fleet-agent version %s\n", version)
+		os.Exit(0)
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 

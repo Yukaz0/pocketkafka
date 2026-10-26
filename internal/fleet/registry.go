@@ -24,6 +24,7 @@ var (
 	ErrTokenUsed      = errors.New("fleet: enrollment token already consumed")
 	ErrTokenExpired   = errors.New("fleet: enrollment token expired")
 	ErrServerRequired = errors.New("fleet: server ID required")
+	ErrLimitExceeded  = errors.New("fleet: resource limit exceeded")
 )
 
 type registryData struct {
@@ -42,6 +43,7 @@ type Registry struct {
 	agents      map[string]*Agent
 	enrollments map[string]*Enrollment
 	servers     map[string]*Server
+	maxAgents   int
 }
 
 // NewRegistry constructs a Registry bound to dirOrPath and masterKey.
@@ -62,6 +64,7 @@ func NewRegistry(dirOrPath, masterKey string) (*Registry, error) {
 		agents:      make(map[string]*Agent),
 		enrollments: make(map[string]*Enrollment),
 		servers:     make(map[string]*Server),
+		maxAgents:   500,
 	}
 	if dirOrPath == "" {
 		return r, nil
@@ -78,6 +81,13 @@ func NewRegistry(dirOrPath, masterKey string) (*Registry, error) {
 }
 
 // NewRegistryWithKey is an alias for NewRegistry.
+
+// SetMaxAgents sets the maximum allowed number of active agents.
+func (r *Registry) SetMaxAgents(limit int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.maxAgents = limit
+}
 func NewRegistryWithKey(dirOrPath, masterKey string) (*Registry, error) {
 	return NewRegistry(dirOrPath, masterKey)
 }
@@ -178,6 +188,18 @@ func (r *Registry) enrollWithExpiry(serverID string, duration time.Duration) (st
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.maxAgents > 0 {
+		active := 0
+		for _, a := range r.agents {
+			if !a.Revoked {
+				active++
+			}
+		}
+		if active >= r.maxAgents {
+			return "", fmt.Errorf("%w: maximum %d agents allowed", ErrLimitExceeded, r.maxAgents)
+		}
+	}
+
 	r.enrollments[token] = e
 	if err := r.persistLocked(); err != nil {
 		return "", err
@@ -200,6 +222,18 @@ func (r *Registry) ConsumeToken(token string) (*Agent, error) {
 	if time.Now().After(e.ExpiresAt) {
 		return nil, ErrTokenExpired
 	}
+	if r.maxAgents > 0 {
+		active := 0
+		for _, a := range r.agents {
+			if !a.Revoked {
+				active++
+			}
+		}
+		if active >= r.maxAgents {
+			return nil, fmt.Errorf("%w: maximum %d agents allowed", ErrLimitExceeded, r.maxAgents)
+		}
+	}
+
 
 	rawBytes := make([]byte, 32)
 	if _, err := rand.Read(rawBytes); err != nil {
