@@ -237,11 +237,11 @@ html[data-theme="light"] body[data-zone="fleet"] .navLink.active{color:#0284c7;b
   .drw.maximized{height:100%!important;top:0!important;border-top:none}
   .drwResizer{position:absolute;top:-4px;left:0;right:0;height:8px;cursor:ns-resize;z-index:10}
   .drwResizer:hover,.drwResizer.active{background:var(--primary);opacity:.4}
-  .drwHd{padding:8px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-family:var(--font-mono);flex-shrink:0}
-  .drwHd b{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .drwHd{padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px 8px;font-family:var(--font-mono);flex-shrink:0;flex-wrap:wrap}
+  .drwHd b{font-size:12px;min-width:0;flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .drwHd .x{cursor:pointer;color:var(--muted);border:none;background:none;font:13px var(--font-mono);padding:2px 6px;border-radius:3px}
   .drwHd .x:hover{color:var(--text);background:var(--surface2)}
-  .drwBody{flex:1;overflow:auto;padding:10px 16px}
+  .drwBody{flex:1;overflow:auto;padding:10px 14px}
   /* burger + drawer menu */
   .burger{display:none;width:36px;height:36px;border:1px solid var(--border);background:transparent;border-radius:4px;cursor:pointer;flex-direction:column;gap:4px;align-items:center;justify-content:center;flex-shrink:0;transition:background .12s}
   .burger span{display:block;width:16px;height:2px;background:var(--text)}
@@ -561,7 +561,7 @@ html[data-theme="light"] body[data-zone="fleet"] .navLink.active{color:#0284c7;b
         <div class="drwResizer" id="drwResizer" title="Drag to resize drawer height"></div>
         <div class="drwHd" id="drwHd">
           <b id="drwT"></b>
-          <div id="drwActions" style="margin-left:auto;display:flex;align-items:center;gap:6px"></div>
+          <div id="drwActions" style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0"></div>
           <button class="x" id="drwMaxBtn" onclick="toggleDrwMax()" title="Maximize / Restore drawer" aria-label="Maximize drawer">[⛶]</button>
           <button class="x" onclick="closeDrw()" aria-label="Close details">[x]</button>
         </div>
@@ -922,14 +922,17 @@ window.pickTopicNav=function(name){
 };
 /* node detail drawer (topologi) */
 /* node detail / log drawer */
-function openDrw(title,innerHtml){
+function openDrw(title,innerHtml,keepMaximized){
   setupDrwResizer();
   $('#drwT').textContent=title;
   $('#drwBody').innerHTML=innerHtml;
   const d=document.getElementById('drw');
-  d.classList.remove('maximized');
-  const btn=document.getElementById('drwMaxBtn');
-  if(btn){btn.textContent='[⛶]';btn.title='Maximize drawer';}
+  const wasMax=!!keepMaximized&&d.classList.contains('maximized');
+  if(!wasMax){
+    d.classList.remove('maximized');
+    const btn=document.getElementById('drwMaxBtn');
+    if(btn){btn.textContent='[⛶]';btn.title='Maximize drawer';}
+  }
   d.classList.add('open');
 }
 function closeDrw(){
@@ -3750,8 +3753,10 @@ window.removeContainer=async function(id, name, serverId, isRunning){
 };
 
 window.viewContainerLogs=async function(id, name, serverId){
-  state._fleetLogsState = { mode: 'single', id, name, serverId, rawLines: [], filter: '', level: 'all' };
-  openDrw('Logs: ' + (name || id), `<div id="fleetLogMeta" style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:8px">Loading logs...</div><div id="fleetLogWrap" style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:8px 0;max-width:100%;overflow-x:hidden"><div class="muted" style="padding:14px;text-align:center">Fetching container logs...</div></div>`);
+  const prevLevel = state._fleetLogsState ? state._fleetLogsState.level : 'all';
+  const prevFilter = state._fleetLogsState ? state._fleetLogsState.filter : '';
+  state._fleetLogsState = { mode: 'single', id, name, serverId, rawLines: [], filter: prevFilter, level: prevLevel };
+  openDrw('Logs: ' + (name || id), `<div id="fleetLogMeta" style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:8px">Loading logs...</div><div id="fleetLogWrap" style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:8px 0;max-width:100%;overflow-x:hidden"><div class="muted" style="padding:14px;text-align:center">Fetching container logs...</div></div>`, true);
   renderFleetLogsActions();
   await refreshFleetLogs();
 };
@@ -3762,7 +3767,7 @@ window.viewAllContainersLogs=async function(){
   const prevLevel = state._fleetLogsState ? state._fleetLogsState.level : 'all';
   const prevFilter = state._fleetLogsState ? state._fleetLogsState.filter : '';
   state._fleetLogsState = { mode: 'all', id: 'all', name: 'All Running Containers', serverId: '', rawLines: [], filter: prevFilter, level: prevLevel };
-  openDrw('Logs: All Containers', `<div id="fleetLogMeta" style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:8px">Fetching logs from ${running.length} containers...</div><div id="fleetLogWrap" style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:8px 0;max-width:100%;overflow-x:hidden"><div class="muted" style="padding:14px;text-align:center">Fetching logs from ${running.length} running containers...</div></div>`);
+  openDrw('Logs: All Containers', `<div id="fleetLogMeta" style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:8px">Fetching logs from ${running.length} containers...</div><div id="fleetLogWrap" style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:8px 0;max-width:100%;overflow-x:hidden"><div class="muted" style="padding:14px;text-align:center">Fetching logs from ${running.length} running containers...</div></div>`, true);
   renderFleetLogsActions();
   await refreshFleetLogs();
 };
@@ -3782,15 +3787,15 @@ function renderFleetLogsActions(){
         return `<option value="${esc(c.id)}" ${isSel?'selected':''}>${esc(rawName)}</option>`;
       }).join('');
 
-  act.innerHTML = `<select id="drwLogContainerSel" onchange="switchFleetLogContainer(this.value)" style="height:24px;padding:1px 6px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);max-width:140px" title="Pilih container" aria-label="Pilih container">${cntOpts}</select>`
-    + `<select id="drwLogLevelSel" onchange="filterFleetLogLevel(this.value)" style="height:24px;padding:1px 6px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);width:95px" title="Filter level log" aria-label="Filter level log">`
+  act.innerHTML = `<select id="drwLogContainerSel" onchange="switchFleetLogContainer(this.value)" style="height:24px;padding:1px 6px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);flex:1 1 110px;max-width:140px;min-width:90px" title="Pilih container" aria-label="Pilih container">${cntOpts}</select>`
+    + `<select id="drwLogLevelSel" onchange="filterFleetLogLevel(this.value)" style="height:24px;padding:1px 6px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);flex:0 0 auto;width:95px" title="Filter level log" aria-label="Filter level log">`
     + `<option value="all" ${s.level==='all'?'selected':''}>All Levels</option>`
     + `<option value="error" ${s.level==='error'?'selected':''}>ERROR</option>`
     + `<option value="warn" ${s.level==='warn'?'selected':''}>WARN</option>`
     + `<option value="info" ${s.level==='info'?'selected':''}>INFO</option>`
     + `<option value="debug" ${s.level==='debug'?'selected':''}>DEBUG</option>`
     + `</select>`
-    + `<input id="drwLogQ" placeholder="Filter teks..." value="${esc(s.filter||'')}" oninput="filterFleetLogs(this.value)" style="height:22px;padding:2px 8px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);width:110px" aria-label="Filter container logs">`
+    + `<input id="drwLogQ" placeholder="Filter..." value="${esc(s.filter||'')}" oninput="filterFleetLogs(this.value)" style="height:22px;padding:2px 8px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);flex:1 1 80px;max-width:110px;min-width:60px" aria-label="Filter container logs">`
     + `<button class="cbtn" onclick="copyFleetLogs(this)">Copy</button>`
     + `<button class="cbtn" onclick="refreshFleetLogs()">Refresh</button>`;
 }
