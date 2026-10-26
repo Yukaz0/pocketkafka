@@ -3295,7 +3295,10 @@ function viewFleetContainers(){
         </select>
         <input placeholder="Search container or image..." value="${esc(state.fleetSearch||'')}" oninput="fleetFilter('fleetSearch',this.value)" style="max-width:240px" aria-label="Search containers">
       </div>
-      <button class="btn ghost" onclick="refreshAll()">Refresh</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn ghost" onclick="viewAllContainersLogs()">All Logs</button>
+        <button class="btn ghost" onclick="refreshAll()">Refresh</button>
+      </div>
     </div>
   </div>`;
 
@@ -3747,22 +3750,100 @@ window.removeContainer=async function(id, name, serverId, isRunning){
 };
 
 window.viewContainerLogs=async function(id, name, serverId){
-  state._fleetLogsState = { id, name, serverId, rawLines: [], filter: '' };
+  state._fleetLogsState = { mode: 'single', id, name, serverId, rawLines: [], filter: '', level: 'all' };
   openDrw('Logs: ' + (name || id), `<div id="fleetLogMeta" style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:8px">Loading logs...</div><div id="fleetLogWrap" style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:8px 0;max-width:100%;overflow-x:hidden"><div class="muted" style="padding:14px;text-align:center">Fetching container logs...</div></div>`);
-  const act = document.getElementById('drwActions');
-  if(act){
-    act.innerHTML = `<input id="drwLogQ" placeholder="Filter..." value="" oninput="filterFleetLogs(this.value)" style="height:22px;padding:2px 8px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);width:130px" aria-label="Filter container logs"><button class="cbtn" onclick="copyFleetLogs(this)">Copy</button><button class="cbtn" onclick="refreshFleetLogs()">Refresh</button>`;
-  }
+  renderFleetLogsActions();
   await refreshFleetLogs();
+};
+
+window.viewAllContainersLogs=async function(){
+  const cnts = state.fleetContainers || [];
+  const running = cnts.filter(c => (c.state||'').toLowerCase() === 'running');
+  const prevLevel = state._fleetLogsState ? state._fleetLogsState.level : 'all';
+  const prevFilter = state._fleetLogsState ? state._fleetLogsState.filter : '';
+  state._fleetLogsState = { mode: 'all', id: 'all', name: 'All Running Containers', serverId: '', rawLines: [], filter: prevFilter, level: prevLevel };
+  openDrw('Logs: All Containers', `<div id="fleetLogMeta" style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:8px">Fetching logs from ${running.length} containers...</div><div id="fleetLogWrap" style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:8px 0;max-width:100%;overflow-x:hidden"><div class="muted" style="padding:14px;text-align:center">Fetching logs from ${running.length} running containers...</div></div>`);
+  renderFleetLogsActions();
+  await refreshFleetLogs();
+};
+
+function renderFleetLogsActions(){
+  const s = state._fleetLogsState;
+  if(!s) return;
+  const act = document.getElementById('drwActions');
+  if(!act) return;
+  const cnts = state.fleetContainers || [];
+  const runningCnts = cnts.filter(c => (c.state||'').toLowerCase() === 'running');
+
+  const cntOpts = `<option value="all" ${s.mode==='all'?'selected':''}>All Running (${runningCnts.length})</option>`
+    + cnts.map(c => {
+        const rawName = (c.names && c.names[0]) ? c.names[0].replace(/^\//, '') : (c.id||'').slice(0, 12);
+        const isSel = s.mode === 'single' && (s.id === c.id || s.name === rawName);
+        return `<option value="${esc(c.id)}" ${isSel?'selected':''}>${esc(rawName)}</option>`;
+      }).join('');
+
+  act.innerHTML = `<select id="drwLogContainerSel" onchange="switchFleetLogContainer(this.value)" style="height:24px;padding:1px 6px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);max-width:140px" title="Pilih container" aria-label="Pilih container">${cntOpts}</select>`
+    + `<select id="drwLogLevelSel" onchange="filterFleetLogLevel(this.value)" style="height:24px;padding:1px 6px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);width:95px" title="Filter level log" aria-label="Filter level log">`
+    + `<option value="all" ${s.level==='all'?'selected':''}>All Levels</option>`
+    + `<option value="error" ${s.level==='error'?'selected':''}>ERROR</option>`
+    + `<option value="warn" ${s.level==='warn'?'selected':''}>WARN</option>`
+    + `<option value="info" ${s.level==='info'?'selected':''}>INFO</option>`
+    + `<option value="debug" ${s.level==='debug'?'selected':''}>DEBUG</option>`
+    + `</select>`
+    + `<input id="drwLogQ" placeholder="Filter teks..." value="${esc(s.filter||'')}" oninput="filterFleetLogs(this.value)" style="height:22px;padding:2px 8px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);width:110px" aria-label="Filter container logs">`
+    + `<button class="cbtn" onclick="copyFleetLogs(this)">Copy</button>`
+    + `<button class="cbtn" onclick="refreshFleetLogs()">Refresh</button>`;
+}
+
+window.switchFleetLogContainer = async function(val){
+  if(val === 'all'){
+    await viewAllContainersLogs();
+  } else {
+    const cnts = state.fleetContainers || [];
+    const c = cnts.find(item => item.id === val || (item.id||'').startsWith(val));
+    const rawName = c ? ((c.names && c.names[0]) ? c.names[0].replace(/^\//, '') : c.id.slice(0, 12)) : val;
+    const serverId = c ? (c.server_id || '') : '';
+    await viewContainerLogs(val, rawName, serverId);
+  }
+};
+
+window.filterFleetLogLevel = function(lvl){
+  if(!state._fleetLogsState) return;
+  state._fleetLogsState.level = lvl || 'all';
+  updateFleetLogsBody(true);
 };
 
 async function refreshFleetLogs(){
   const s = state._fleetLogsState;
-  if(!s || !s.id) return;
+  if(!s) return;
   try{
-    const q = s.serverId ? '?server_id=' + encodeURIComponent(s.serverId) + '&tail=150' : '?tail=150';
-    const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(s.id) + '/logs' + q);
-    s.rawLines = res.lines || [];
+    if(s.mode === 'all'){
+      const cnts = state.fleetContainers || [];
+      const running = cnts.filter(c => (c.state||'').toLowerCase() === 'running');
+      const fetched = await Promise.all(running.map(async c => {
+        const rawName = (c.names && c.names[0]) ? c.names[0].replace(/^\//, '') : (c.id||'').slice(0, 12);
+        const srv = c.server_id || '';
+        const q = srv ? '?server_id=' + encodeURIComponent(srv) + '&tail=40' : '?tail=40';
+        try{
+          const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(c.id) + '/logs' + q);
+          return (res.lines || []).map(line => ({ container: rawName, line }));
+        }catch(e){
+          return [{ container: rawName, line: `(failed to load: ${e.message})` }];
+        }
+      }));
+      const all = fetched.flat();
+      all.sort((a, b) => {
+        const tA = parseLogLine(a.line).ts;
+        const tB = parseLogLine(b.line).ts;
+        if(tA && tB) return tA.localeCompare(tB);
+        return 0;
+      });
+      s.rawLines = all;
+    } else {
+      const q = s.serverId ? '?server_id=' + encodeURIComponent(s.serverId) + '&tail=150' : '?tail=150';
+      const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(s.id) + '/logs' + q);
+      s.rawLines = (res.lines || []).map(line => ({ container: '', line }));
+    }
     updateFleetLogsBody(false);
   }catch(e){
     toast('Failed to load logs: ' + e.message);
@@ -3780,10 +3861,33 @@ window.filterFleetLogs = filterFleetLogs;
 function copyFleetLogs(btn){
   const s = state._fleetLogsState;
   if(!s) return;
-  const text = (s.rawLines || []).join('\n');
+  const text = (s.rawLines || []).map(entry => {
+    const raw = typeof entry === 'string' ? entry : entry.line;
+    const c = (typeof entry === 'object' && entry.container) ? `[${entry.container}] ` : '';
+    return c + raw;
+  }).join('\n');
   copyText2(text, btn);
 }
 window.copyFleetLogs = copyFleetLogs;
+
+function matchLogLevel(parsed, rawText, filterLevel){
+  if(!filterLevel || filterLevel === 'all') return true;
+  const lvl = (parsed.lvl || '').toUpperCase();
+  const raw = String(rawText || '').toLowerCase();
+  if(filterLevel === 'error'){
+    return lvl === 'ERROR' || lvl === 'FATAL' || /\b(error|fatal|panic|exception|failed|failure)\b/i.test(raw);
+  }
+  if(filterLevel === 'warn'){
+    return lvl === 'WARN' || lvl === 'WARNING' || /\b(warn|warning)\b/i.test(raw);
+  }
+  if(filterLevel === 'info'){
+    return lvl === 'INFO' || (!lvl && !/\b(error|fatal|panic|warn|warning|debug|trace)\b/i.test(raw));
+  }
+  if(filterLevel === 'debug'){
+    return lvl === 'DEBUG' || lvl === 'TRACE' || /\b(debug|trace)\b/i.test(raw);
+  }
+  return true;
+}
 
 function updateFleetLogsBody(keepScroll){
   const s = state._fleetLogsState;
@@ -3792,13 +3896,26 @@ function updateFleetLogsBody(keepScroll){
   const wrapEl = document.getElementById('fleetLogWrap');
   if(!wrapEl) return;
 
-  const lines = s.rawLines || [];
+  const rawEntries = s.rawLines || [];
   const q = (s.filter || '').toLowerCase();
-  const filtered = q ? lines.filter(l => String(l).toLowerCase().includes(q)) : lines;
-  const countLabel = q ? `${filtered.length} of ${lines.length} lines` : `Last ${lines.length} lines`;
+  const targetLevel = s.level || 'all';
+
+  const filtered = rawEntries.filter(entry => {
+    const raw = typeof entry === 'string' ? entry : entry.line;
+    const cName = (typeof entry === 'object' && entry.container) ? entry.container.toLowerCase() : '';
+    const parsed = parseLogLine(raw);
+    if(!matchLogLevel(parsed, raw, targetLevel)) return false;
+    if(q){
+      if(!raw.toLowerCase().includes(q) && !cName.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const levelTag = targetLevel !== 'all' ? ` [${targetLevel.toUpperCase()}]` : '';
+  const countLabel = (q || targetLevel !== 'all') ? `${filtered.length} of ${rawEntries.length} lines${levelTag}` : `Last ${rawEntries.length} lines`;
 
   if(metaEl) metaEl.textContent = countLabel;
-  wrapEl.innerHTML = filtered.length ? renderLogLines(filtered) : `<div class="muted" style="padding:14px;text-align:center">${q ? 'No log lines match filter.' : '(no log output captured)'}</div>`;
+  wrapEl.innerHTML = filtered.length ? renderLogLines(filtered) : `<div class="muted" style="padding:14px;text-align:center">${(q || targetLevel !== 'all') ? 'No log lines match filter criteria.' : '(no log output captured)'}</div>`;
 
   if(!keepScroll){
     const drwB = document.getElementById('drwBody');
@@ -3806,16 +3923,20 @@ function updateFleetLogsBody(keepScroll){
   }
 }
 
-function renderLogLines(lines){
-  return lines.map((raw, i) => {
+function renderLogLines(entries){
+  return entries.map((item, i) => {
+    const raw = typeof item === 'string' ? item : item.line;
+    const container = (typeof item === 'object' && item.container) ? item.container : '';
     const parsed = parseLogLine(String(raw || ''));
     const badge = parsed.lvl === 'ERROR' ? '<span class="badge b-red">ERROR</span>'
       : parsed.lvl === 'WARN' || parsed.lvl === 'WARNING' ? '<span class="badge b-amber">WARN</span>'
       : parsed.lvl === 'INFO' ? '<span class="badge b-green">INFO</span>'
       : parsed.lvl === 'DEBUG' ? '<span class="badge muted">DEBUG</span>'
       : parsed.lvl ? '<span class="badge muted">' + esc(parsed.lvl) + '</span>' : '';
-    return '<div style="display:flex;gap:8px;padding:2px 12px;max-width:100%;min-width:0">'
+    const cntBadge = container ? `<span class="chip mono" style="font-size:9.5px;padding:1px 5px;flex:0 0 auto;background:var(--surface2)">${esc(container)}</span>` : '';
+    return '<div style="display:flex;gap:8px;padding:2px 12px;max-width:100%;min-width:0;align-items:baseline">'
       + '<span class="muted" style="flex:0 0 34px;min-width:34px;text-align:right;user-select:none">' + (i + 1) + '</span>'
+      + cntBadge
       + (parsed.ts ? '<span class="muted" style="flex:0 0 auto">' + esc(parsed.ts) + '</span>' : '')
       + (badge ? '<span style="flex:0 0 auto">' + badge + '</span>' : '')
       + '<span style="flex:1 1 auto;min-width:0;overflow-wrap:anywhere;word-break:break-word;white-space:pre-wrap">' + esc(parsed.msg) + '</span></div>';
@@ -3848,6 +3969,17 @@ function parseLogLine(line){
   }else{
     const mPrefLvl = msg.match(/^\[?(INFO|WARN|WARNING|ERROR|FATAL|DEBUG|TRACE)\]?:?\s*(.*)$/i);
     if(mPrefLvl){ lvl = mPrefLvl[1].toUpperCase(); msg = mPrefLvl[2]; }
+  }
+  if(!lvl){
+    if(/\b(error|fatal|panic|exception)\b/i.test(msg)){
+      lvl = 'ERROR';
+    }else if(/\b(warn|warning)\b/i.test(msg)){
+      lvl = 'WARN';
+    }else if(/\b(info)\b/i.test(msg)){
+      lvl = 'INFO';
+    }else if(/\b(debug|trace)\b/i.test(msg)){
+      lvl = 'DEBUG';
+    }
   }
   if(!ts){
     const mTimeFmt = msg.match(/\btime="?([^"\s]+)"?/i);
