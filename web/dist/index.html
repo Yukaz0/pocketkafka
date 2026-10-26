@@ -3400,7 +3400,7 @@ function viewFleetSettings(){
   </div>`;
 
   const enrRows = enrs.map(e => {
-    const tok = esc((e.token || '').slice(0, 10)) + '...';
+    const tok = esc(((e.token_prefix || e.token || '').slice(0, 10))) + '...';
     const isUsed = !!e.used;
     const isExpired = e.expires_at && (new Date(e.expires_at).getTime() < Date.now());
     let badge = '<span class="badge b-green">ACTIVE</span>';

@@ -686,11 +686,11 @@ func (s *FleetServer) dispatchJobToAgent(serverID string, job *Job) {
 		}
 	}
 	if agentID == "" {
-		_ = s.jobs.Fail(job.ID, "no active agent for server "+serverID)
+		_ = s.jobs.Cancel(job.ID, "no active agent for server "+serverID)
 		return
 	}
 	if err := s.manager.DispatchJob(context.Background(), agentID, job); err != nil {
-		_ = s.jobs.Fail(job.ID, err.Error())
+		_ = s.jobs.Cancel(job.ID, err.Error())
 	}
 }
 

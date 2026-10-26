@@ -217,6 +217,37 @@ func (j *Jobs) Fail(id string, errMsg string) error {
 	return j.Complete(id, JobStatusFailed, errMsg)
 }
 
+// Cancel fails a job that never started (queued): the dispatch target is
+// gone (no agent) or unreachable. Complete() rejects queued jobs by design,
+// so cancelling needs its own transition with the same rollback guarantee.
+func (j *Jobs) Cancel(id string, errMsg string) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	job, ok := j.jobs[id]
+	if !ok {
+		return ErrJobNotFound
+	}
+	if job.Status != JobStatusQueued {
+		return fmt.Errorf("%w: cannot cancel job %s with status %s (only queued)", ErrIllegalJobTransition, id, job.Status)
+	}
+
+	oldStatus := job.Status
+	oldError := job.Error
+
+	job.Status = JobStatusFailed
+	job.CompletedAt = time.Now().UTC()
+	job.Error = errMsg
+
+	if err := j.appendLocked(job); err != nil {
+		job.Status = oldStatus
+		job.CompletedAt = time.Time{}
+		job.Error = oldError
+		return err
+	}
+	return nil
+}
+
 // Get returns a copy of the job with the specified ID.
 func (j *Jobs) Get(id string) (*Job, error) {
 	j.mu.Lock()
