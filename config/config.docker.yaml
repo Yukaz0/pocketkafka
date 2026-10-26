@@ -1,0 +1,36 @@
+# Docker compose variant: web auth ON (dashboard login required).
+# Secrets via env (KAFKA_WEB_AUTH_SECRET, KAFKA_ADMIN_PASSWORD);
+# password dibaca dari file agar tidak masuk ke image.
+broker:
+  id: 0
+  cluster_id: "pocketkafka-local"
+listeners:
+  plain: "0.0.0.0:9092"
+  internal: "0.0.0.0:29092"
+advertised_listeners:
+  plain: "localhost:9092"
+  internal: "local-kafka:29092"
+storage:
+  data_dir: "/var/lib/pocketkafka/data"
+web:
+  listen: "0.0.0.0:8080"
+  enabled: true
+  auth: true
+  auth_secret: "${KAFKA_WEB_AUTH_SECRET}"
+schema_registry:
+  listen: "0.0.0.0:8081"
+gateway:
+  listen: "0.0.0.0:8082"
+mqtt:
+  listen: "0.0.0.0:1883"
+security:
+  enabled: false
+  allow_insecure_public: true
+  super_users: "admin"
+  users:
+    - username: "admin"
+      password_file: "/run/secrets/admin_password"
+fleet:
+  enabled: true
+  listen: "127.0.0.1:18090"
+  secret_key: "${KAFKA_FLEET_SECRET_KEY}"

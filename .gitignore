@@ -35,3 +35,4 @@
 
 # Internal design docs and local reviews (not published to GitHub)
 /docs/
+/secrets/

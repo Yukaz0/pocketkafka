@@ -79,30 +79,15 @@ services:
       - "1883:1883"   # MQTT Bridge (IoT)
       - "18090:18090" # Fleet listener (agent langsung; UI pakai proxy 8080)
     environment:
-      - KAFKA_BROKER_ID=0
-      - KAFKA_LISTENERS=plain://0.0.0.0:9092,internal://0.0.0.0:29092
-      - KAFKA_ADVERTISED_LISTENERS=plain://localhost:9092,internal://local-kafka:29092
-      # The dashboard is toggled by web.enabled (env: KAFKA_ENABLE_WEB_UI). The
-      # Schema Registry and REST proxy have no off switch: their listeners are
-      # always started, so there is no KAFKA_ENABLE_* variable for them.
-      - KAFKA_ENABLE_WEB_UI=true
+      - KAFKA_WEB_AUTH_SECRET=${KAFKA_WEB_AUTH_SECRET:?set KAFKA_WEB_AUTH_SECRET (>=16 chars)}
+      - KAFKA_FLEET_SECRET_KEY=${KAFKA_FLEET_SECRET_KEY:?set KAFKA_FLEET_SECRET_KEY (>=16 chars)}
       - KAFKA_DATA_DIR=/var/lib/pocketkafka/data
       - KAFKA_LOG_LEVEL=info
-      # The shipped config binds loopback; a container must listen on all
-      # interfaces for the published ports to reach it, and
-      # allow_insecure_public is the explicit acknowledgement that this stack
-      # is an open development broker (security.enabled=false).
-      - KAFKA_WEB_LISTEN=0.0.0.0:8080
-      - KAFKA_SCHEMA_REGISTRY_LISTEN=0.0.0.0:8081
-      - KAFKA_GATEWAY_LISTEN=0.0.0.0:8082
-      - KAFKA_MQTT_LISTEN=0.0.0.0:1883
-      - KAFKA_ALLOW_INSECURE_PUBLIC=true
-      # Fleet: kontrol Docker multi-server di dalam Control Center.
-      # Secret wajib (≥16 char); tanpa ini broker crash-loop saat fleet aktif.
-      - KAFKA_FLEET_ENABLED=true
-      - KAFKA_FLEET_SECRET_KEY=${KAFKA_FLEET_SECRET_KEY:-fleet-dev-secret-key-0123456789abcdef}
+    command: ["--config", "/etc/pocketkafka/config.docker.yaml"]
     volumes:
       - kafka_data:/var/lib/pocketkafka/data
+      - ./config/config.docker.yaml:/etc/pocketkafka/config.docker.yaml:ro
+      - ./secrets/admin_password.txt:/run/secrets/admin_password:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/pocketkafka", "healthcheck", "--addr", "127.0.0.1:9092"]
       interval: 10s
