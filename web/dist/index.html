@@ -785,6 +785,8 @@ setInterval(updAgo,1000);
 function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden&&!isReducedMotion()){ await refresh(); if(state.zone==='fleet'){ if(!patchFleetView())render(); } else { const connActive=state.view==='connections'||(state.view==='settings'&&(state.settingsTab==='connections'||state.settingsTab==='general'||state.settingsTab==='clusters')); if(connActive&&!patchConnections())render(); if(state.view==='metrics')loadThroughput(); } } scheduleRefresh(); },state.refreshMs); }
 function patchFleetView(){
   const v=document.getElementById('view'); if(!v)return false;
+  const ae=document.activeElement;
+  if(ae&&v.contains(ae)&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'))return true;
   const html=state.view==='fleet-servers'?viewFleetServers()
     :state.view==='fleet-containers'?viewFleetContainers()
     :state.view==='fleet-jobs'?viewFleetJobs()
@@ -792,8 +794,12 @@ function patchFleetView(){
     :state.view==='fleet-settings'?viewFleetSettings()
     :null;
   if(html==null)return false;
-  v.innerHTML=html; bindView(); return true;
+  const keepScroll=v.scrollTop;
+  v.innerHTML=html; bindView();
+  v.scrollTop=keepScroll; return true;
 }
+let fleetFilterTimer=null;
+function fleetFilter(key,val){ state[key]=val; clearTimeout(fleetFilterTimer); fleetFilterTimer=setTimeout(()=>{ patchFleetView(); },200); }
 function skel(w){return '<span class="skel" style="width:'+(w||60)+'px"></span>';}
 scheduleRefresh();
 
@@ -3102,7 +3108,7 @@ function viewFleetServers(){
   const toolbar = `<div class="card" style="margin-bottom:16px;padding:12px">
     <div class="row" style="gap:10px;justify-content:space-between;flex-wrap:wrap">
       <div style="display:flex;gap:8px;align-items:center;flex:1;max-width:380px">
-        <input placeholder="Filter hosts by name, ID, or IP..." value="${esc(state.fleetSearch||'')}" oninput="state.fleetSearch=this.value;render()" style="width:100%" aria-label="Filter servers">
+        <input placeholder="Filter hosts by name, ID, or IP..." value="${esc(state.fleetSearch||'')}" oninput="fleetFilter('fleetSearch',this.value)" style="width:100%" aria-label="Filter servers">
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn" onclick="openEnrollModal()">+ Enroll Server</button>
@@ -3194,7 +3200,7 @@ function viewFleetContainers(){
           <option value="exited" ${stFilter==='exited'?'selected':''}>Exited / Stopped</option>
           <option value="paused" ${stFilter==='paused'?'selected':''}>Paused</option>
         </select>
-        <input placeholder="Search container or image..." value="${esc(state.fleetSearch||'')}" oninput="state.fleetSearch=this.value;render()" style="max-width:240px" aria-label="Search containers">
+        <input placeholder="Search container or image..." value="${esc(state.fleetSearch||'')}" oninput="fleetFilter('fleetSearch',this.value)" style="max-width:240px" aria-label="Search containers">
       </div>
       <button class="btn ghost" onclick="refreshAll()">Refresh</button>
     </div>
@@ -3282,7 +3288,7 @@ function viewFleetJobs(){
           <option value="succeeded" ${statusFilter==='succeeded'?'selected':''}>Succeeded</option>
           <option value="failed" ${statusFilter==='failed'?'selected':''}>Failed</option>
         </select>
-        <input placeholder="Filter by job ID, target, host..." value="${esc(state.fleetJobSearch||'')}" oninput="state.fleetJobSearch=this.value;render()" style="max-width:240px" aria-label="Search jobs">
+        <input placeholder="Filter by job ID, target, host..." value="${esc(state.fleetJobSearch||'')}" oninput="fleetFilter('fleetJobSearch',this.value)" style="max-width:240px" aria-label="Search jobs">
       </div>
       <button class="btn ghost" onclick="refreshAll()">Refresh</button>
     </div>
@@ -3349,7 +3355,7 @@ function viewFleetAudit(){
 
   const toolbar = `<div class="card" style="margin-bottom:16px;padding:12px">
     <div class="row" style="gap:10px;justify-content:space-between;flex-wrap:wrap">
-      <input placeholder="Filter audit events by actor, action, target..." value="${esc(state.fleetAuditSearch||'')}" oninput="state.fleetAuditSearch=this.value;render()" style="max-width:320px" aria-label="Search audit events">
+      <input placeholder="Filter audit events by actor, action, target..." value="${esc(state.fleetAuditSearch||'')}" oninput="fleetFilter('fleetAuditSearch',this.value)" style="max-width:320px" aria-label="Search audit events">
       <button class="btn ghost" onclick="refreshAll()">Refresh</button>
     </div>
   </div>`;
