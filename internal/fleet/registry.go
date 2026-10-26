@@ -37,30 +37,49 @@ type registryData struct {
 type Registry struct {
 	mu          sync.RWMutex
 	path        string
+	masterKey   string
+	box         *secretBox
 	agents      map[string]*Agent
 	enrollments map[string]*Enrollment
 	servers     map[string]*Server
 }
 
-// NewRegistry constructs a Registry bound to dirOrPath.
+// NewRegistry constructs a Registry bound to dirOrPath and masterKey.
 // If dirOrPath is a directory, state lives in __fleet_agents.json.
 // If dirOrPath is empty, state is in-memory only.
-func NewRegistry(dirOrPath string) *Registry {
+// Fails closed if masterKey is shorter than 16 characters.
+func NewRegistry(dirOrPath, masterKey string) (*Registry, error) {
+	if len(masterKey) < minMasterKeyChars {
+		return nil, fmt.Errorf("fleet: master key must be at least %d characters (got %d)", minMasterKeyChars, len(masterKey))
+	}
+	box, err := newSecretBox(masterKey)
+	if err != nil {
+		return nil, err
+	}
 	r := &Registry{
+		masterKey:   masterKey,
+		box:         box,
 		agents:      make(map[string]*Agent),
 		enrollments: make(map[string]*Enrollment),
 		servers:     make(map[string]*Server),
 	}
 	if dirOrPath == "" {
-		return r
+		return r, nil
 	}
 	if strings.HasSuffix(dirOrPath, ".json") {
 		r.path = dirOrPath
 	} else {
 		r.path = filepath.Join(dirOrPath, "__fleet_agents.json")
 	}
-	_ = r.load()
-	return r
+	if err := r.load(); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// NewRegistryWithKey is an alias for NewRegistry.
+func NewRegistryWithKey(dirOrPath, masterKey string) (*Registry, error) {
+	return NewRegistry(dirOrPath, masterKey)
 }
 
 func (r *Registry) load() error {
@@ -193,6 +212,14 @@ func (r *Registry) ConsumeToken(token string) (*Agent, error) {
 		return nil, fmt.Errorf("fleet: hash secret: %w", err)
 	}
 
+	if r.box == nil {
+		return nil, errors.New("fleet: secret box not initialized")
+	}
+	sealedKey, err := r.box.seal(rawSecret)
+	if err != nil {
+		return nil, fmt.Errorf("fleet: seal secret: %w", err)
+	}
+
 	agentBytes := make([]byte, 8)
 	if _, err := rand.Read(agentBytes); err != nil {
 		return nil, fmt.Errorf("fleet: generate agent id: %w", err)
@@ -207,10 +234,10 @@ func (r *Registry) ConsumeToken(token string) (*Agent, error) {
 		ID:         agentID,
 		ServerID:   e.ServerID,
 		Secret:     secretHash,
+		SealedKey:  sealedKey,
 		Revoked:    false,
 		EnrolledAt: now,
 	}
-
 	r.agents[agentID] = ag
 	if err := r.persistLocked(); err != nil {
 		return nil, err
@@ -281,4 +308,29 @@ func (r *Registry) ListAgents() []*Agent {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+func (r *Registry) agentKey(agentID string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ag, ok := r.agents[agentID]
+	if !ok {
+		return "", fmt.Errorf("fleet: agent %q not found: %w", agentID, ErrNotFound)
+	}
+	if ag.Revoked {
+		return "", fmt.Errorf("fleet: agent %q revoked: %w", agentID, ErrRevoked)
+	}
+	if ag.SealedKey == "" {
+		return "", fmt.Errorf("fleet: agent %q has no sealed key", agentID)
+	}
+	if r.box == nil {
+		return "", errors.New("fleet: registry secret box not initialized")
+	}
+	return r.box.open(ag.SealedKey)
+}
+
+// AgentKey decrypts and returns the raw secret for an agent.
+func (r *Registry) AgentKey(agentID string) (string, error) {
+	return r.agentKey(agentID)
 }

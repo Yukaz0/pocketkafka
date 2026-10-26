@@ -245,6 +245,7 @@ type Fleet struct {
 	Enabled          bool     `yaml:"enabled"`
 	Listen           string   `yaml:"listen"`
 	TLS              FleetTLS `yaml:"tls"`
+	SecretKey        string   `yaml:"secret_key"`
 	HeartbeatTimeout int      `yaml:"heartbeat_timeout"`
 	RetentionDays    int      `yaml:"retention_days"`
 	RetentionEntries int      `yaml:"retention_entries"`
@@ -459,6 +460,7 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Fleet.Listen, os.Getenv("KAFKA_FLEET_LISTEN"))
 	setStr(&cfg.Fleet.TLS.CertFile, os.Getenv("KAFKA_FLEET_TLS_CERT_FILE"))
 	setStr(&cfg.Fleet.TLS.KeyFile, os.Getenv("KAFKA_FLEET_TLS_KEY_FILE"))
+	setStr(&cfg.Fleet.SecretKey, os.Getenv("KAFKA_FLEET_SECRET_KEY"))
 	setInt(&cfg.Fleet.HeartbeatTimeout, os.Getenv("KAFKA_FLEET_HEARTBEAT_TIMEOUT"))
 	setInt(&cfg.Fleet.RetentionDays, os.Getenv("KAFKA_FLEET_RETENTION_DAYS"))
 	setInt(&cfg.Fleet.RetentionEntries, os.Getenv("KAFKA_FLEET_RETENTION_ENTRIES"))

@@ -379,6 +379,14 @@ func (m *AgentManager) RegisterSession(agentID, secret string, transport AgentTr
 		}
 	}
 
+	if secret == "" && m.registry != nil {
+		sec, err := m.registry.agentKey(agentID)
+		if err != nil {
+			return nil, fmt.Errorf("fleet: decrypt agent key: %w", err)
+		}
+		secret = sec
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

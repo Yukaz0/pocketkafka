@@ -317,6 +317,7 @@ func validateSecurity(c *Config, add func(string, ...interface{})) {
 	for _, secret := range []struct{ field, value string }{
 		{"web.cluster_token", c.Web.ClusterToken},
 		{"web.secrets_key", c.Web.SecretsKey},
+		{"fleet.secret_key", c.Fleet.SecretKey},
 	} {
 		if unresolvedEnv(secret.value) {
 			add("%s: %q references an unset environment variable", secret.field, secret.value)
@@ -501,5 +502,11 @@ func validateFleet(c *Config, add func(string, ...interface{})) {
 	}
 	if c.Fleet.RetentionEntries < 0 {
 		add("fleet.retention_entries: must be >= 0 (got %d)", c.Fleet.RetentionEntries)
+	}
+	if c.Fleet.SecretKey != "" && len(c.Fleet.SecretKey) < 16 {
+		add("fleet.secret_key: must be at least 16 characters when set")
+	}
+	if env := os.Getenv("KAFKA_FLEET_SECRET_KEY"); env != "" && len(env) < 16 {
+		add("KAFKA_FLEET_SECRET_KEY: must be at least 16 characters when set")
 	}
 }

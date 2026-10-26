@@ -121,7 +121,16 @@ func (v *Verifier) Verify(env *Envelope) error {
 		return fmt.Errorf("fleet: body hash mismatch: %w", ErrInvalidBodyHash)
 	}
 
-	expectedHMAC := ComputeHMAC(v.key, env.Direction, env.Op, expectedBodyHash, env.IssuedAt, env.MessageID)
+	verificationKey := v.key
+	if verificationKey == "" && v.registry != nil && env.AgentID != "" {
+		decKey, err := v.registry.agentKey(env.AgentID)
+		if err != nil {
+			return fmt.Errorf("fleet: agent key unavailable: %w", err)
+		}
+		verificationKey = decKey
+	}
+
+	expectedHMAC := ComputeHMAC(verificationKey, env.Direction, env.Op, expectedBodyHash, env.IssuedAt, env.MessageID)
 	if !hmac.Equal([]byte(env.HMAC), []byte(expectedHMAC)) {
 		return fmt.Errorf("fleet: invalid hmac: %w", ErrInvalidHMAC)
 	}

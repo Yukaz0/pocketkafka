@@ -361,6 +361,7 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 	if f := asMap(m, "fleet"); f != nil {
 		cfg.Fleet.Enabled = getBool(f, "enabled", cfg.Fleet.Enabled)
 		cfg.Fleet.Listen = getString(f, "listen", cfg.Fleet.Listen)
+		cfg.Fleet.SecretKey = getString(f, "secret_key", cfg.Fleet.SecretKey)
 		cfg.Fleet.HeartbeatTimeout = getInt(f, "heartbeat_timeout", cfg.Fleet.HeartbeatTimeout)
 		cfg.Fleet.RetentionDays = getInt(f, "retention_days", cfg.Fleet.RetentionDays)
 		cfg.Fleet.RetentionEntries = getInt(f, "retention_entries", cfg.Fleet.RetentionEntries)

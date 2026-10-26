@@ -19,8 +19,9 @@ type Server struct {
 type Agent struct {
 	ID         string    `json:"id"`
 	ServerID   string    `json:"server_id"`
-	Secret     string    `json:"secret"` // Stored as PBKDF2 hash
-	RawSecret  string    `json:"-"`      // Plaintext secret returned only upon ConsumeToken, never persisted
+	Secret     string    `json:"secret"`               // Stored as PBKDF2 hash
+	SealedKey  string    `json:"sealed_key,omitempty"` // AES-GCM encrypted agent key
+	RawSecret  string    `json:"-"`                    // Plaintext secret returned only upon ConsumeToken, never persisted
 	Revoked    bool      `json:"revoked"`
 	RevokedAt  time.Time `json:"revoked_at,omitempty"`
 	EnrolledAt time.Time `json:"enrolled_at"`
