@@ -368,6 +368,8 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 		if t := asMap(f, "tls"); t != nil {
 			cfg.Fleet.TLS.CertFile = getString(t, "cert_file", cfg.Fleet.TLS.CertFile)
 			cfg.Fleet.TLS.KeyFile = getString(t, "key_file", cfg.Fleet.TLS.KeyFile)
+			cfg.Fleet.TLS.CAFile = getString(t, "ca_file", cfg.Fleet.TLS.CAFile)
+			cfg.Fleet.TLS.ServerName = getString(t, "server_name", cfg.Fleet.TLS.ServerName)
 		}
 	}
 }

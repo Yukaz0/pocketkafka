@@ -238,6 +238,13 @@ type TLS struct {
 type FleetTLS struct {
 	CertFile string `yaml:"cert_file"`
 	KeyFile  string `yaml:"key_file"`
+	// CAFile trusts the fleet listener certificate (self-signed deployments).
+	// Empty falls back to system roots; when the listener serves its own
+	// CertFile, that certificate is trusted automatically.
+	CAFile string `yaml:"ca_file"`
+	// ServerName overrides the TLS ServerName the dashboard proxy uses.
+	// Empty derives from the listen host (wildcard binds dial loopback).
+	ServerName string `yaml:"server_name"`
 }
 
 // Fleet configures the agent fleet management subsystem.
@@ -460,6 +467,8 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Fleet.Listen, os.Getenv("KAFKA_FLEET_LISTEN"))
 	setStr(&cfg.Fleet.TLS.CertFile, os.Getenv("KAFKA_FLEET_TLS_CERT_FILE"))
 	setStr(&cfg.Fleet.TLS.KeyFile, os.Getenv("KAFKA_FLEET_TLS_KEY_FILE"))
+	setStr(&cfg.Fleet.TLS.CAFile, os.Getenv("KAFKA_FLEET_TLS_CA_FILE"))
+	setStr(&cfg.Fleet.TLS.ServerName, os.Getenv("KAFKA_FLEET_TLS_SERVER_NAME"))
 	setStr(&cfg.Fleet.SecretKey, os.Getenv("KAFKA_FLEET_SECRET_KEY"))
 	setInt(&cfg.Fleet.HeartbeatTimeout, os.Getenv("KAFKA_FLEET_HEARTBEAT_TIMEOUT"))
 	setInt(&cfg.Fleet.RetentionDays, os.Getenv("KAFKA_FLEET_RETENTION_DAYS"))

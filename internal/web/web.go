@@ -2,12 +2,16 @@ package web
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -77,6 +81,8 @@ type Server struct {
 	fleetListen     string
 	fleetProxyToken string
 	fleetUseTLS     bool
+	fleetTLSCA      string
+	fleetTLSServer  string
 
 	cfg config.Config
 
@@ -142,14 +148,18 @@ func (s *Server) WithConfig(cfg config.Config) *Server {
 	s.fleetEnabled = cfg.Fleet.Enabled
 	s.fleetListen = cfg.Fleet.Listen
 	s.fleetUseTLS = cfg.Fleet.TLS.CertFile != "" && cfg.Fleet.TLS.KeyFile != ""
+	s.fleetTLSCA = cfg.Fleet.TLS.CAFile
+	s.fleetTLSServer = cfg.Fleet.TLS.ServerName
 	return s
 }
 
-func (s *Server) WithFleet(enabled bool, listen, proxyToken string, useTLS bool) *Server {
+func (s *Server) WithFleet(enabled bool, listen, proxyToken string, useTLS bool, caFile, serverName string) *Server {
 	s.fleetEnabled = enabled
 	s.fleetListen = listen
 	s.fleetProxyToken = proxyToken
 	s.fleetUseTLS = useTLS
+	s.fleetTLSCA = caFile
+	s.fleetTLSServer = serverName
 	return s
 }
 
@@ -351,7 +361,14 @@ func (s *Server) routes() *http.ServeMux {
 		u := fleetTargetURL(s.fleetListen, s.fleetUseTLS)
 		proxy := httputil.NewSingleHostReverseProxy(u)
 		if s.fleetUseTLS {
-			proxy.Transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
+			tlsConf, err := fleetProxyTLS(s.fleetTLSCA, s.fleetTLSServer, u)
+			if err != nil {
+				slog.Error("fleet: proxy TLS config invalid", "error", err)
+				mux.Handle("/api/v1/fleet/", fleet.NewDisabledHandler())
+				mux.Handle("/api/v1/fleet", fleet.NewDisabledHandler())
+				return mux
+			}
+			proxy.Transport = &http.Transport{TLSClientConfig: tlsConf}
 		}
 		origDirector := proxy.Director
 		proxy.Director = func(req *http.Request) {
@@ -379,7 +396,11 @@ func fleetTargetURL(listen string, useTLS bool) *url.URL {
 	if host == "" {
 		host = "127.0.0.1:18090"
 	}
-	if strings.HasPrefix(host, ":") {
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		if h == "" || h == "0.0.0.0" || h == "::" {
+			host = net.JoinHostPort("127.0.0.1", p)
+		}
+	} else if strings.HasPrefix(host, ":") {
 		host = "127.0.0.1" + host
 	}
 	scheme := "http"
@@ -391,6 +412,37 @@ func fleetTargetURL(listen string, useTLS bool) *url.URL {
 		u, _ = url.Parse(scheme + "://127.0.0.1:18090")
 	}
 	return u
+}
+
+// fleetProxyTLS builds the TLS config the dashboard proxy uses to reach the
+// fleet listener. Wildcard binds are dialed via loopback (see fleetTargetURL);
+// ServerName defaults to the dialed host unless fleet.tls.server_name is set.
+// Trust order: fleet.tls.ca_file, else the listener's own cert_file, else
+// system roots. A self-signed listener cert without ca_file therefore works
+// only when the proxy can read that same cert_file.
+func fleetProxyTLS(caFile, serverName string, u *url.URL) (*tls.Config, error) {
+	conf := &tls.Config{MinVersion: tls.VersionTLS12}
+	host := u.Hostname()
+	if serverName != "" {
+		conf.ServerName = serverName
+	} else if host != "" {
+		conf.ServerName = host
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if caFile != "" {
+		pem, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("fleet: read ca_file: %w", err)
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("fleet: ca_file has no valid certificates")
+		}
+	}
+	conf.RootCAs = pool
+	return conf, nil
 }
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
