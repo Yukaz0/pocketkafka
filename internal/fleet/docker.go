@@ -18,14 +18,15 @@ import (
 )
 
 type ContainerSummary struct {
-	ID      string            `json:"id"`
-	Names   []string          `json:"names"`
-	Image   string            `json:"image"`
-	Command string            `json:"command"`
-	Created int64             `json:"created"`
-	State   string            `json:"state"`
-	Status  string            `json:"status"`
-	Labels  map[string]string `json:"labels,omitempty"`
+	ID       string            `json:"id"`
+	Names    []string          `json:"names"`
+	Image    string            `json:"image"`
+	Command  string            `json:"command"`
+	Created  int64             `json:"created"`
+	State    string            `json:"state"`
+	Status   string            `json:"status"`
+	Labels   map[string]string `json:"labels,omitempty"`
+	ServerID string            `json:"server_id,omitempty"`
 }
 
 type ContainerInspect struct {

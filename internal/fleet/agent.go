@@ -375,10 +375,13 @@ func NewAgentManager(registry *Registry, jobs *Jobs) *AgentManager {
 }
 
 func (m *AgentManager) RegisterSession(agentID, secret string, transport AgentTransport) (*ControlSession, error) {
+	var serverID string
 	if m.registry != nil {
-		if _, err := m.registry.AuthorizeStream(agentID); err != nil {
+		ag, err := m.registry.AuthorizeStream(agentID)
+		if err != nil {
 			return nil, fmt.Errorf("fleet: connection rejected: %w", err)
 		}
+		serverID = ag.ServerID
 	}
 
 	if secret == "" && m.registry != nil {
@@ -394,6 +397,7 @@ func (m *AgentManager) RegisterSession(agentID, secret string, transport AgentTr
 
 	sess := &ControlSession{
 		agentID:   agentID,
+		serverID:  serverID,
 		transport: transport,
 		verifier:  NewVerifier(secret, time.Minute, DirectionAgentToControl).WithRegistry(m.registry),
 		secret:    secret,
@@ -415,7 +419,10 @@ func (m *AgentManager) ListContainers() []ContainerSummary {
 
 	var out []ContainerSummary
 	for _, sess := range m.sessions {
-		out = append(out, sess.containers...)
+		for _, c := range sess.containers {
+			c.ServerID = sess.serverID
+			out = append(out, c)
+		}
 	}
 	return out
 }
