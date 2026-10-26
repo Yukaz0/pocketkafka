@@ -68,7 +68,7 @@
   .appNav.collapsed .navLink,.appNav.collapsed .navToggle,.appNav.collapsed .themeToggle{justify-content:center;padding:6px 0}
   .sideBackdrop{display:none}
   .ws{flex:1;display:flex;min-height:0;min-width:0}
-  .content{flex:1;display:flex;flex-direction:column;min-width:0}
+  .content{flex:1;display:flex;flex-direction:column;min-width:0;position:relative;overflow:hidden}
   .plist{width:230px;border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;flex-shrink:0}
   .plist .ph{padding:9px 12px;border-bottom:1px solid var(--border);font:600 10px var(--font-mono);letter-spacing:.04em;color:var(--muted)}
   .plist input{margin:10px;background:var(--bg-canvas);border:1px solid var(--border);color:var(--text);font:11.5px var(--font-mono);padding:6px 9px;width:calc(100% - 20px)}
@@ -134,7 +134,7 @@
     .wm{flex:0 1 auto;min-width:0}
     .tb{min-height:44px;height:auto}
     .tb .wm{padding:0 10px}
-    .drw{left:0;right:0;width:100%;max-height:70dvh;z-index:95}
+    .drw{max-height:85dvh;z-index:95}
     #topActions{margin-left:auto;width:104px;min-width:0;max-width:104px;flex:0 0 104px;overflow:hidden}
     .topbar{padding:0 8px;gap:6px;overflow:hidden}
     .topbar .sp{min-width:0;flex:1}
@@ -231,15 +231,17 @@ html[data-theme="light"] body[data-zone="fleet"] .navLink.active{color:#0284c7;b
   .edge{stroke:var(--border);stroke-width:1.5;fill:none}
   .edge.hot{stroke:var(--primary);stroke-width:2}
   .errdot{fill:var(--danger)}
-  /* node detail drawer */
-  .drw{position:fixed;left:var(--drawer-left,224px);right:0;bottom:0;height:min(52dvh,560px);min-height:300px;background:var(--surface);border-top:1px solid var(--border);transform:translateY(100%);transition:transform .18s ease,z-index .01s;z-index:60;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+  /* node detail / log drawer */
+  .drw{position:absolute;left:0;right:0;bottom:0;width:100%;height:min(52dvh,560px);min-height:220px;max-height:100%;background:var(--surface);border-top:1px solid var(--border);transform:translateY(100%);transition:transform .18s ease;z-index:60;display:flex;flex-direction:column;box-shadow:var(--shadow)}
   .drw.open{transform:none}
-  .drwHd{padding:10px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-family:var(--font-mono)}
-  .drwHd b{font-size:12px}
-  .drwHd .x{margin-left:auto;cursor:pointer;color:var(--muted);border:none;background:none;font:14px var(--font-mono)}
-  .drwHd .x:hover{color:var(--text)}
-  .drwBody{flex:1;overflow:auto;padding:12px 18px}
-
+  .drw.maximized{height:100%!important;top:0!important;border-top:none}
+  .drwResizer{position:absolute;top:-4px;left:0;right:0;height:8px;cursor:ns-resize;z-index:10}
+  .drwResizer:hover,.drwResizer.active{background:var(--primary);opacity:.4}
+  .drwHd{padding:8px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-family:var(--font-mono);flex-shrink:0}
+  .drwHd b{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .drwHd .x{cursor:pointer;color:var(--muted);border:none;background:none;font:13px var(--font-mono);padding:2px 6px;border-radius:3px}
+  .drwHd .x:hover{color:var(--text);background:var(--surface2)}
+  .drwBody{flex:1;overflow:auto;padding:10px 16px}
   /* burger + drawer menu */
   .burger{display:none;width:36px;height:36px;border:1px solid var(--border);background:transparent;border-radius:4px;cursor:pointer;flex-direction:column;gap:4px;align-items:center;justify-content:center;flex-shrink:0;transition:background .12s}
   .burger span{display:block;width:16px;height:2px;background:var(--text)}
@@ -555,12 +557,18 @@ html[data-theme="light"] body[data-zone="fleet"] .navLink.active{color:#0284c7;b
         <h1 id="title">Overview</h1><span class="crumb" id="crumb"></span><span class="sp"></span><span class="updatedAgo" id="updAgo"></span>
       </header>
       <main id="view"></main>
+      <div class="drw" id="drw">
+        <div class="drwResizer" id="drwResizer" title="Drag to resize drawer height"></div>
+        <div class="drwHd" id="drwHd">
+          <b id="drwT"></b>
+          <div id="drwActions" style="margin-left:auto;display:flex;align-items:center;gap:6px"></div>
+          <button class="x" id="drwMaxBtn" onclick="toggleDrwMax()" title="Maximize / Restore drawer" aria-label="Maximize drawer">[⛶]</button>
+          <button class="x" onclick="closeDrw()" aria-label="Close details">[x]</button>
+        </div>
+        <div class="drwBody" id="drwBody"></div>
+      </div>
     </div>
   </div>
-</div>
-<div class="drw" id="drw">
-  <div class="drwHd" id="drwHd"><b id="drwT"></b><button class="x" onclick="closeDrw()" aria-label="Close details">[x]</button></div>
-  <div class="drwBody" id="drwBody"></div>
 </div>
 <div class="msg" id="msg"></div>
 
@@ -913,15 +921,72 @@ window.pickTopicNav=function(name){
   location.hash=h;
 };
 /* node detail drawer (topologi) */
-function openDrw(title,innerHtml){ $('#drwT').textContent=title; $('#drwBody').innerHTML=innerHtml; document.getElementById('drw').classList.add('open'); }
-function closeDrw(){ document.getElementById('drw').classList.remove('open'); }
+/* node detail / log drawer */
+function openDrw(title,innerHtml){
+  setupDrwResizer();
+  $('#drwT').textContent=title;
+  $('#drwBody').innerHTML=innerHtml;
+  const d=document.getElementById('drw');
+  d.classList.remove('maximized');
+  const btn=document.getElementById('drwMaxBtn');
+  if(btn){btn.textContent='[⛶]';btn.title='Maximize drawer';}
+  d.classList.add('open');
+}
+function closeDrw(){
+  const d=document.getElementById('drw');
+  if(d){d.classList.remove('open');d.classList.remove('maximized');}
+  const act=document.getElementById('drwActions');
+  if(act)act.innerHTML='';
+  const btn=document.getElementById('drwMaxBtn');
+  if(btn){btn.textContent='[⛶]';btn.title='Maximize drawer';}
+}
 window.closeDrw=closeDrw;
+window.toggleDrwMax=function(){
+  const d=document.getElementById('drw');
+  if(!d)return;
+  const isMax=d.classList.toggle('maximized');
+  const btn=document.getElementById('drwMaxBtn');
+  if(btn){btn.textContent=isMax?'[−]':'[⛶]';btn.title=isMax?'Restore drawer':'Maximize drawer';}
+};
+function setupDrwResizer(){
+  const resizer=document.getElementById('drwResizer');
+  if(!resizer||resizer._bound)return;
+  resizer._bound=true;
+  let startY=0,startH=0;
+  function onMove(e){
+    const clientY=e.touches?e.touches[0].clientY:e.clientY;
+    const parentH=document.querySelector('.content')?.clientHeight||window.innerHeight;
+    const newH=Math.max(180,Math.min(parentH-40,startH+(startY-clientY)));
+    const d=document.getElementById('drw');
+    d.style.height=newH+'px';
+    d.classList.remove('maximized');
+    const btn=document.getElementById('drwMaxBtn');
+    if(btn){btn.textContent='[⛶]';btn.title='Maximize drawer';}
+  }
+  function onUp(){
+    window.removeEventListener('mousemove',onMove);
+    window.removeEventListener('mouseup',onUp);
+    window.removeEventListener('touchmove',onMove);
+    window.removeEventListener('touchend',onUp);
+    document.getElementById('drwResizer')?.classList.remove('active');
+  }
+  function onDown(e){
+    startY=e.touches?e.touches[0].clientY:e.clientY;
+    startH=document.getElementById('drw').offsetHeight;
+    document.getElementById('drwResizer')?.classList.add('active');
+    window.addEventListener('mousemove',onMove);
+    window.addEventListener('mouseup',onUp);
+    window.addEventListener('touchmove',onMove);
+    window.addEventListener('touchend',onUp);
+  }
+  resizer.addEventListener('mousedown',onDown);
+  resizer.addEventListener('touchstart',onDown);
+}
 function nodeDrw(title,meta,tableHtml,actions){
   openDrw(title,`${meta?`<div style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:10px">${meta}</div>`:''}${tableHtml}`);
-  const hd=document.querySelector('.drwHd .x');
-  if(hd&&actions&&actions.length){
-    const btns=actions.map((a,i)=>`<button class="cbtn" onclick="${a.fn}">${esc(a.label)}</button>`).join('');
-    hd.insertAdjacentHTML('beforebegin',btns);
+  const act=document.getElementById('drwActions');
+  if(act&&actions&&actions.length){
+    act.innerHTML=actions.map(a=>`<button class="cbtn" onclick="${a.fn}">${esc(a.label)}</button>`).join('');
   }
 }
 function fallbackCopy(t){
@@ -3682,17 +3747,70 @@ window.removeContainer=async function(id, name, serverId, isRunning){
 };
 
 window.viewContainerLogs=async function(id, name, serverId){
+  state._fleetLogsState = { id, name, serverId, rawLines: [], filter: '' };
+  await refreshFleetLogs();
+};
+async function refreshFleetLogs(){
+  const s = state._fleetLogsState;
+  if(!s || !s.id) return;
   try{
-    const q = serverId ? '?server_id=' + encodeURIComponent(serverId) + '&tail=100' : '?tail=100';
-    const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(id) + '/logs' + q);
-    const lines = res.lines || [];
-    const body = lines.length ? renderLogLines(lines) : '<div class="muted" style="padding:12px">(no log output captured)</div>';
-    const wrap = `<div style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:10px 0">${body}</div>`;
-    nodeDrw('Logs: ' + (name || id), 'Last ' + lines.length + ' lines', wrap, []);
+    const q = s.serverId ? '?server_id=' + encodeURIComponent(s.serverId) + '&tail=150' : '?tail=150';
+    const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(s.id) + '/logs' + q);
+    s.rawLines = res.lines || [];
+    renderFleetLogsDrawer();
   }catch(e){
     toast('Failed to load logs: ' + e.message);
   }
-};
+}
+window.refreshFleetLogs = refreshFleetLogs;
+
+function filterFleetLogs(val){
+  if(!state._fleetLogsState) return;
+  state._fleetLogsState.filter = String(val || '');
+  renderFleetLogsDrawer(true);
+}
+window.filterFleetLogs = filterFleetLogs;
+
+function copyFleetLogs(btn){
+  const s = state._fleetLogsState;
+  if(!s) return;
+  const text = (s.rawLines || []).join('\n');
+  copyText2(text, btn);
+}
+window.copyFleetLogs = copyFleetLogs;
+
+function renderFleetLogsDrawer(keepScroll){
+  const s = state._fleetLogsState;
+  if(!s) return;
+  const lines = s.rawLines || [];
+  const q = (s.filter || '').toLowerCase();
+  const filtered = q ? lines.filter(l => String(l).toLowerCase().includes(q)) : lines;
+  const countLabel = q ? `${filtered.length} of ${lines.length} lines` : `Last ${lines.length} lines`;
+  const body = filtered.length ? renderLogLines(filtered) : `<div class="muted" style="padding:14px;text-align:center">${q ? 'No log lines match filter.' : '(no log output captured)'}</div>`;
+  const wrap = `<div id="fleetLogWrap" style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:8px 0;max-width:100%;overflow-x:hidden">${body}</div>`;
+
+  const actions = [
+    { html: `<input id="drwLogQ" placeholder="Filter..." value="${esc(s.filter||'')}" oninput="filterFleetLogs(this.value)" style="height:22px;padding:2px 8px;font:11px var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:3px;color:var(--text);width:130px" aria-label="Filter container logs">` },
+    { html: `<button class="cbtn" onclick="copyFleetLogs(this)">Copy</button>` },
+    { html: `<button class="cbtn" onclick="refreshFleetLogs()">Refresh</button>` }
+  ];
+
+  openDrw('Logs: ' + (s.name || s.id), `<div style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:8px">${esc(countLabel)}</div>${wrap}`);
+  const act = document.getElementById('drwActions');
+  if(act){
+    act.innerHTML = actions.map(a => a.html).join('');
+    const inp = document.getElementById('drwLogQ');
+    if(inp && q && document.activeElement && document.activeElement.id === 'drwLogQ'){
+      inp.focus();
+      inp.selectionStart = inp.selectionEnd = inp.value.length;
+    }
+  }
+  if(!keepScroll){
+    const drwB = document.getElementById('drwBody');
+    if(drwB) drwB.scrollTop = drwB.scrollHeight;
+  }
+}
+
 function renderLogLines(lines){
   return lines.map((raw, i) => {
     const parsed = parseLogLine(String(raw || ''));
@@ -3701,30 +3819,54 @@ function renderLogLines(lines){
       : parsed.lvl === 'INFO' ? '<span class="badge b-green">INFO</span>'
       : parsed.lvl === 'DEBUG' ? '<span class="badge muted">DEBUG</span>'
       : parsed.lvl ? '<span class="badge muted">' + esc(parsed.lvl) + '</span>' : '';
-    return '<div style="display:flex;gap:8px;padding:2px 12px;overflow-wrap:anywhere;word-break:normal;white-space:pre-wrap">'
-      + '<span class="muted" style="flex:0 0 28px;text-align:right;user-select:none">' + (i + 1) + '</span>'
+    return '<div style="display:flex;gap:8px;padding:2px 12px;max-width:100%;min-width:0">'
+      + '<span class="muted" style="flex:0 0 34px;min-width:34px;text-align:right;user-select:none">' + (i + 1) + '</span>'
       + (parsed.ts ? '<span class="muted" style="flex:0 0 auto">' + esc(parsed.ts) + '</span>' : '')
       + (badge ? '<span style="flex:0 0 auto">' + badge + '</span>' : '')
-      + '<span style="flex:1 1 auto;min-width:0">' + esc(parsed.msg) + '</span></div>';
+      + '<span style="flex:1 1 auto;min-width:0;overflow-wrap:anywhere;word-break:break-word;white-space:pre-wrap">' + esc(parsed.msg) + '</span></div>';
   }).join('');
 }
+
 function parseLogLine(line){
-  const s = line.trim();
+  let s = String(line || '').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
   if(s.startsWith('{') && s.endsWith('}')){
     try{
       const o = JSON.parse(s);
-      return {ts: shortTs(o.time || o.timestamp || o.ts || ''), lvl: String(o.level || o.lvl || o.severity || '').toUpperCase(), msg: String(o.msg || o.message || o.log || line)};
+      const ts = o.time || o.timestamp || o.ts || '';
+      const lvl = String(o.level || o.lvl || o.severity || '').toUpperCase();
+      const msg = o.msg || o.message || o.log || line;
+      return {ts: shortTs(ts), lvl, msg: String(msg)};
     }catch(e){}
   }
-  const m = line.match(/^(time=(\S+)\s+)?(level=([A-Za-z]+)\s+)?(.*)$/);
-  return {ts: shortTs(m && m[2] ? m[2] : ''), lvl: (m && m[4] ? m[4] : '').toUpperCase(), msg: m ? m[5] : line};
-}
-function shortTs(ts){
-  ts = String(ts || '');
-  if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(ts)) return ts.slice(11, 19);
-  return ts.length > 24 ? ts.slice(0, 24) : ts;
+  let ts = '', lvl = '', msg = s;
+  const mBracket = msg.match(/^\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}|\d{1,2}:\d{2}:\d{2}(?:\.\d+)?)\]\s*(.*)$/);
+  if(mBracket){
+    ts = shortTs(mBracket[1]);
+    msg = mBracket[2];
+  }else{
+    const mIso = msg.match(/^(\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s*(.*)$/);
+    if(mIso){ ts = shortTs(mIso[1]); msg = mIso[2]; }
+  }
+  const mLvlFmt = msg.match(/\blevel=([A-Za-z]+)\b/i);
+  if(mLvlFmt){
+    lvl = mLvlFmt[1].toUpperCase();
+  }else{
+    const mPrefLvl = msg.match(/^\[?(INFO|WARN|WARNING|ERROR|FATAL|DEBUG|TRACE)\]?:?\s*(.*)$/i);
+    if(mPrefLvl){ lvl = mPrefLvl[1].toUpperCase(); msg = mPrefLvl[2]; }
+  }
+  if(!ts){
+    const mTimeFmt = msg.match(/\btime="?([^"\s]+)"?/i);
+    if(mTimeFmt) ts = shortTs(mTimeFmt[1]);
+  }
+  return {ts, lvl, msg};
 }
 
+function shortTs(ts){
+  ts = String(ts || '').trim();
+  if(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(ts)) return ts.slice(11, 19);
+  if(/^\[?\d{1,2}:\d{2}:\d{2}\]?$/.test(ts)) return ts.replace(/[\[\]]/g, '');
+  return ts.length > 24 ? ts.slice(0, 24) : ts;
+}
 window.goFleetContainers=function(serverId){
   state.fleetServerFilter=serverId||'';
   goView('fleet-containers');
