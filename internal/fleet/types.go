@@ -78,6 +78,8 @@ type AuditEvent struct {
 type Envelope struct {
 	ProtocolVersion int    `json:"protocol_version"`
 	MessageID       string `json:"message_id"`
+	AgentID         string `json:"agent_id,omitempty"`
+	Direction       string `json:"direction,omitempty"`
 	IssuedAt        int64  `json:"issued_at"`
 	Expiry          int64  `json:"expiry"`
 	Op              string `json:"op"`
