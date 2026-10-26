@@ -1265,6 +1265,7 @@ async function waitFleetContainerGone(cid, serverId, timeoutMs){
   return false;
 }
 window.goView=async function(v,sub){
+  try{ closeDrw(); }catch(e){}
   if(v.startsWith('fleet-')){
     const subName=v.replace(/^fleet-/,'');
     state.zone='fleet';
