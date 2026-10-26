@@ -194,6 +194,9 @@ type HTTPStreamTransport struct {
 	pollInterval time.Duration
 	minBackoff   time.Duration
 	maxBackoff   time.Duration
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
 }
 
 func NewHTTPStreamTransport(client *http.Client, serverURL, agentID, secret string) *HTTPStreamTransport {
@@ -218,6 +221,7 @@ func NewHTTPStreamTransportWithConfig(cfg HTTPStreamTransportConfig) *HTTPStream
 	if cfg.MaxBackoff <= 0 {
 		cfg.MaxBackoff = 30 * time.Second
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	t := &HTTPStreamTransport{
 		client:       cfg.Client,
 		serverURL:    strings.TrimRight(cfg.ServerURL, "/"),
@@ -228,79 +232,87 @@ func NewHTTPStreamTransportWithConfig(cfg HTTPStreamTransportConfig) *HTTPStream
 		pollInterval: cfg.PollInterval,
 		minBackoff:   cfg.MinBackoff,
 		maxBackoff:   cfg.MaxBackoff,
+		ctx:          ctx,
+		cancel:       cancel,
 	}
-	t.startPollLoop()
+	t.wg.Add(1)
+	go t.pollLoop()
 	return t
 }
 
 func (t *HTTPStreamTransport) startPollLoop() {
-	go func() {
-		currentBackoff := t.minBackoff
-		if currentBackoff <= 0 {
-			currentBackoff = 500 * time.Millisecond
+	t.wg.Add(1)
+	go t.pollLoop()
+}
+
+func (t *HTTPStreamTransport) pollLoop() {
+	defer t.wg.Done()
+
+	currentBackoff := t.minBackoff
+	if currentBackoff <= 0 {
+		currentBackoff = 500 * time.Millisecond
+	}
+
+	for {
+		select {
+		case <-t.closeCh:
+			return
+		default:
 		}
 
-		for {
+		envs, err := t.pollOnce()
+		if err != nil {
+			backoff := currentBackoff
+			maxB := t.maxBackoff
+			if maxB <= 0 {
+				maxB = 30 * time.Second
+			}
+			currentBackoff *= 2
+			if currentBackoff > maxB {
+				currentBackoff = maxB
+			}
+
 			select {
 			case <-t.closeCh:
 				return
-			default:
+			case <-time.After(backoff):
+				continue
 			}
+		}
 
-			envs, err := t.pollOnce()
-			if err != nil {
-				backoff := currentBackoff
-				maxB := t.maxBackoff
-				if maxB <= 0 {
-					maxB = 30 * time.Second
-				}
-				currentBackoff *= 2
-				if currentBackoff > maxB {
-					currentBackoff = maxB
-				}
+		minB := t.minBackoff
+		if minB <= 0 {
+			minB = 500 * time.Millisecond
+		}
+		currentBackoff = minB
 
+		if len(envs) > 0 {
+			for _, env := range envs {
 				select {
 				case <-t.closeCh:
 					return
-				case <-time.After(backoff):
-					continue
+				case t.inbound <- env:
 				}
 			}
-
-			minB := t.minBackoff
-			if minB <= 0 {
-				minB = 500 * time.Millisecond
-			}
-			currentBackoff = minB
-
-			if len(envs) > 0 {
-				for _, env := range envs {
-					select {
-					case <-t.closeCh:
-						return
-					case t.inbound <- env:
-					}
-				}
-				continue
-			}
-
-			interval := t.pollInterval
-			if interval <= 0 {
-				interval = 1 * time.Second
-			}
-
-			select {
-			case <-t.closeCh:
-				return
-			case <-time.After(interval):
-			}
+			continue
 		}
-	}()
+
+		interval := t.pollInterval
+		if interval <= 0 {
+			interval = 1 * time.Second
+		}
+
+		select {
+		case <-t.closeCh:
+			return
+		case <-time.After(interval):
+		}
+	}
 }
 
 func (t *HTTPStreamTransport) pollOnce() ([]*fleet.Envelope, error) {
 	target := fmt.Sprintf("%s/api/v1/fleet/agent/inbound?agent_id=%s", t.serverURL, url.QueryEscape(t.agentID))
-	req, err := http.NewRequest(http.MethodGet, target, nil)
+	req, err := http.NewRequestWithContext(t.ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -398,8 +410,10 @@ func (t *HTTPStreamTransport) Receive(ctx context.Context) (*fleet.Envelope, err
 
 func (t *HTTPStreamTransport) Close() error {
 	t.closeOnce.Do(func() {
+		t.cancel()
 		close(t.closeCh)
 	})
+	t.wg.Wait()
 	return nil
 }
 
