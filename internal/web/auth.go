@@ -59,7 +59,9 @@ func cookieName(secure bool) string {
 
 func (s *Server) authMiddleware(mux *http.ServeMux, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.fleetEnabled && (strings.HasPrefix(r.URL.Path, "/api/v1/fleet/") || r.URL.Path == "/api/v1/fleet") {
+		// Agent transport authenticates via HMAC/tokens at the fleet listener,
+		// not via dashboard session. Proxy still strips/forges headers.
+		if strings.HasPrefix(r.URL.Path, "/api/v1/fleet/agent/") || r.URL.Path == "/api/v1/fleet/enroll" {
 			next.ServeHTTP(w, r)
 			return
 		}
