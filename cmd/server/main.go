@@ -215,12 +215,16 @@ func main() {
 		fleetMgr := fleet.NewAgentManager(fleetReg, fleetJobs)
 		fleetProxyToken := fleet.NewProxyToken()
 		fleetUseTLS := cfg.Fleet.TLS.CertFile != "" && cfg.Fleet.TLS.KeyFile != ""
+		var fleetAuthz authz.Authorizer = authorizer
+		if !cfg.Security.Enabled {
+			fleetAuthz = authz.AllowAllAuthorizer{}
+		}
 		fleetControl := fleet.NewServer(fleet.ServerConfig{
 			Registry:     fleetReg,
 			Jobs:         fleetJobs,
 			Audit:        fleetAudit,
 			Manager:      fleetMgr,
-			Authorizer:   authorizer,
+			Authorizer:   fleetAuthz,
 			MaxBodyBytes: cfg.Network.MaxRequestSizeBytes,
 			ProxyToken:   fleetProxyToken,
 		})
