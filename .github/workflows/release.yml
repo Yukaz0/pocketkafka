@@ -40,17 +40,15 @@ jobs:
               go build -trimpath -buildvcs=true \
               -ldflags="-s -w -X main.version=${VERSION}" \
               -o "dist/pkctl-${1#linux/}" ./cmd/kctl
-          done
           ./dist/pocketkafka-linux-amd64 about
-          sha256sum dist/* > dist/SHA256SUMS.txt
 
       - name: Attest binaries
-        uses: actions/attest-build-provenance@4fdf19e1f805bfb15b9f4ddf3fdea42746ab3cbb # v3.2.0
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v2.3.0
         with:
           subject-path: 'dist/pocketkafka-*, dist/pkctl-*'
 
       - name: SBOM
-        uses: anchore/sbom-action@66cbf4bc1f1c0de65bc221b6bb0ad6c436e572f # v0.24.3
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           path: .
           format: cyclonedx-json
@@ -59,12 +57,17 @@ jobs:
           dependency-snapshot: false
 
       - name: Attest SBOM
-        uses: actions/attest-build-provenance@4fdf19e1f805bfb15b9f4ddf3fdea42746ab3cbb # v3.2.0
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v2.3.0
         with:
           subject-path: 'dist/pocketkafka-sbom.cdx.json'
 
+      - name: Checksum everything
+        run: |
+          sha256sum dist/* > dist/SHA256SUMS.txt
+          cat dist/SHA256SUMS.txt
+
       - name: Publish release
-        uses: softprops/action-gh-release@a8aa24558716657a3569683d25cc497352d654182 # v2.3.3
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2.3.3
         with:
           files: |
             dist/pocketkafka-linux-amd64
