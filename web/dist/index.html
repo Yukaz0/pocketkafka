@@ -923,6 +923,11 @@ window.pickTopicNav=function(name){
 /* node detail drawer (topologi) */
 /* node detail / log drawer */
 function openDrw(title,innerHtml,keepMaximized){
+  if(!title.startsWith('Logs:') && state._fleetLogsState && state._fleetLogsState.autoTimer){
+    clearInterval(state._fleetLogsState.autoTimer);
+    state._fleetLogsState.autoTimer = null;
+    state._fleetLogsState.autoRefresh = false;
+  }
   setupDrwResizer();
   $('#drwT').textContent=title;
   $('#drwBody').innerHTML=innerHtml;
@@ -3968,7 +3973,7 @@ window.filterFleetLogLevel = function(lvl){
   updateFleetLogsBody(true);
 };
 
-async function refreshFleetLogs(){
+async function refreshFleetLogs(keepScroll){
   const s = state._fleetLogsState;
   if(!s) return;
   try{
@@ -3999,7 +4004,7 @@ async function refreshFleetLogs(){
       const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(s.id) + '/logs' + q);
       s.rawLines = (res.lines || []).map(line => ({ container: '', line }));
     }
-    updateFleetLogsBody(false);
+    updateFleetLogsBody(!!keepScroll);
   }catch(e){
     toast('Failed to load logs: ' + e.message);
   }
@@ -4069,13 +4074,14 @@ function updateFleetLogsBody(keepScroll){
   const levelTag = targetLevel !== 'all' ? ` [${targetLevel.toUpperCase()}]` : '';
   const countLabel = (q || targetLevel !== 'all') ? `${filtered.length} of ${rawEntries.length} lines${levelTag}` : `Last ${rawEntries.length} lines`;
 
+  const drwB = document.getElementById('drwBody');
+  const wasAtBottom = drwB ? (drwB.scrollHeight - drwB.scrollTop - drwB.clientHeight < 60) : false;
+
   if(metaEl) metaEl.textContent = countLabel;
   wrapEl.innerHTML = filtered.length ? renderLogLines(filtered) : `<div class="muted" style="padding:14px;text-align:center">${(q || targetLevel !== 'all') ? 'No log lines match filter criteria.' : '(no log output captured)'}</div>`;
 
-  const drwB = document.getElementById('drwBody');
   if(drwB){
-    const isAtBottom = (drwB.scrollHeight - drwB.scrollTop - drwB.clientHeight) < 60;
-    if(!keepScroll || isAtBottom){
+    if(!keepScroll || wasAtBottom){
       drwB.scrollTop = drwB.scrollHeight;
     }
   }
@@ -4269,11 +4275,11 @@ function renderBrokerLogsBody(keepScroll){
   const levelTag = targetLevel !== 'all' ? ` [${targetLevel.toUpperCase()}]` : '';
   const countLabel = (q || targetLevel !== 'all') ? `${filtered.length} of ${rawEntries.length} lines${levelTag}` : `Last ${rawEntries.length} lines`;
 
+  const wasAtBottom = (out.scrollHeight - out.scrollTop - out.clientHeight) < 60;
   if(meta) meta.textContent = countLabel;
   out.innerHTML = filtered.length ? renderLogLines(filtered) : `<div class="muted" style="padding:16px;text-align:center">${(q || targetLevel !== 'all') ? 'No broker logs match filter criteria.' : 'Log buffer is empty.'}</div>`;
 
-  const isAtBottom = (out.scrollHeight - out.scrollTop - out.clientHeight) < 60;
-  if(!keepScroll || isAtBottom){
+  if(!keepScroll || wasAtBottom){
     out.scrollTop = out.scrollHeight;
   }
 }
