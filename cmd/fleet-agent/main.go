@@ -23,8 +23,8 @@ import (
 
 	"github.com/Yukaz0/pocketkafka/internal/fleet"
 )
-var version = "dev"
 
+var version = "dev"
 
 type AgentState struct {
 	AgentID  string `json:"agent_id"`

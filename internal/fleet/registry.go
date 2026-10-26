@@ -234,7 +234,6 @@ func (r *Registry) ConsumeToken(token string) (*Agent, error) {
 		}
 	}
 
-
 	rawBytes := make([]byte, 32)
 	if _, err := rand.Read(rawBytes); err != nil {
 		return nil, fmt.Errorf("fleet: generate secret: %w", err)
