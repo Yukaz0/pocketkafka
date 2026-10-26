@@ -43,12 +43,12 @@ func NewProxyToken() string {
 
 // ServerConfig holds dependencies for FleetServer.
 type ServerConfig struct {
-	Registry        *Registry
-	Jobs            *Jobs
-	Audit           *Audit
-	Manager         *AgentManager
-	Authorizer      authz.Authorizer
-	MaxBodyBytes    int64
+	Registry     *Registry
+	Jobs         *Jobs
+	Audit        *Audit
+	Manager      *AgentManager
+	Authorizer   authz.Authorizer
+	MaxBodyBytes int64
 	// ProxyToken authenticates the dashboard reverse proxy to this listener.
 	// Generated per process; direct requests without it are rejected.
 	ProxyToken      string
@@ -147,19 +147,8 @@ func generateRequestID() string {
 }
 
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		ip := strings.TrimSpace(parts[0])
-		if ip != "" {
-			return ip
-		}
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		ip := strings.TrimSpace(xri)
-		if ip != "" {
-			return ip
-		}
-	}
+	// RemoteAddr only: X-Forwarded-For / X-Real-IP are client-controlled on
+	// the direct fleet listener and must not feed rate-limit keys.
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {
 		return host
@@ -682,7 +671,6 @@ func (s *FleetServer) dispatchJobToAgent(serverID string, job *Job) {
 	}
 }
 
-
 func (s *FleetServer) handleContainerLogs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -885,4 +873,5 @@ func (s *FleetServer) handleAgentEnvelope(w http.ResponseWriter, r *http.Request
 		s.writeError(w, r, http.StatusBadRequest, ErrCodeBadRequest, err.Error())
 		return
 	}
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

@@ -21,7 +21,7 @@ ConfigurationDirectory=fleet-agent
 
 ExecStart=/usr/local/bin/fleet-agent \
     -server=${FLEET_SERVER_URL} \
-    -state=/var/lib/fleet-agent/agent-state.json \
+    -state=${FLEET_STATE_PATH} \
     -docker-socket=${FLEET_DOCKER_SOCKET} \
     ${EXTRA_FLAGS}
 
