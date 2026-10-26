@@ -11,10 +11,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -170,24 +173,191 @@ func loadOrEnroll(ctx context.Context, client *http.Client, serverURL, token, st
 	return state, nil
 }
 
+type HTTPStreamTransportConfig struct {
+	Client       *http.Client
+	ServerURL    string
+	AgentID      string
+	Secret       string
+	PollInterval time.Duration
+	MinBackoff   time.Duration
+	MaxBackoff   time.Duration
+}
+
 type HTTPStreamTransport struct {
-	client    *http.Client
-	serverURL string
-	agentID   string
-	secret    string
-	inbound   chan *fleet.Envelope
-	closeCh   chan struct{}
+	client       *http.Client
+	serverURL    string
+	agentID      string
+	secret       string
+	inbound      chan *fleet.Envelope
+	closeCh      chan struct{}
+	closeOnce    sync.Once
+	pollInterval time.Duration
+	minBackoff   time.Duration
+	maxBackoff   time.Duration
 }
 
 func NewHTTPStreamTransport(client *http.Client, serverURL, agentID, secret string) *HTTPStreamTransport {
-	return &HTTPStreamTransport{
-		client:    client,
-		serverURL: strings.TrimRight(serverURL, "/"),
-		agentID:   agentID,
-		secret:    secret,
-		inbound:   make(chan *fleet.Envelope, 32),
-		closeCh:   make(chan struct{}),
+	return NewHTTPStreamTransportWithConfig(HTTPStreamTransportConfig{
+		Client:       client,
+		ServerURL:    serverURL,
+		AgentID:      agentID,
+		Secret:       secret,
+		PollInterval: 1 * time.Second,
+		MinBackoff:   500 * time.Millisecond,
+		MaxBackoff:   30 * time.Second,
+	})
+}
+
+func NewHTTPStreamTransportWithConfig(cfg HTTPStreamTransportConfig) *HTTPStreamTransport {
+	if cfg.PollInterval <= 0 {
+		cfg.PollInterval = 1 * time.Second
 	}
+	if cfg.MinBackoff <= 0 {
+		cfg.MinBackoff = 500 * time.Millisecond
+	}
+	if cfg.MaxBackoff <= 0 {
+		cfg.MaxBackoff = 30 * time.Second
+	}
+	t := &HTTPStreamTransport{
+		client:       cfg.Client,
+		serverURL:    strings.TrimRight(cfg.ServerURL, "/"),
+		agentID:      cfg.AgentID,
+		secret:       cfg.Secret,
+		inbound:      make(chan *fleet.Envelope, 32),
+		closeCh:      make(chan struct{}),
+		pollInterval: cfg.PollInterval,
+		minBackoff:   cfg.MinBackoff,
+		maxBackoff:   cfg.MaxBackoff,
+	}
+	t.startPollLoop()
+	return t
+}
+
+func (t *HTTPStreamTransport) startPollLoop() {
+	go func() {
+		currentBackoff := t.minBackoff
+		if currentBackoff <= 0 {
+			currentBackoff = 500 * time.Millisecond
+		}
+
+		for {
+			select {
+			case <-t.closeCh:
+				return
+			default:
+			}
+
+			envs, err := t.pollOnce()
+			if err != nil {
+				backoff := currentBackoff
+				maxB := t.maxBackoff
+				if maxB <= 0 {
+					maxB = 30 * time.Second
+				}
+				currentBackoff *= 2
+				if currentBackoff > maxB {
+					currentBackoff = maxB
+				}
+
+				select {
+				case <-t.closeCh:
+					return
+				case <-time.After(backoff):
+					continue
+				}
+			}
+
+			minB := t.minBackoff
+			if minB <= 0 {
+				minB = 500 * time.Millisecond
+			}
+			currentBackoff = minB
+
+			if len(envs) > 0 {
+				for _, env := range envs {
+					select {
+					case <-t.closeCh:
+						return
+					case t.inbound <- env:
+					}
+				}
+				continue
+			}
+
+			interval := t.pollInterval
+			if interval <= 0 {
+				interval = 1 * time.Second
+			}
+
+			select {
+			case <-t.closeCh:
+				return
+			case <-time.After(interval):
+			}
+		}
+	}()
+}
+
+func (t *HTTPStreamTransport) pollOnce() ([]*fleet.Envelope, error) {
+	target := fmt.Sprintf("%s/api/v1/fleet/agent/inbound?agent_id=%s", t.serverURL, url.QueryEscape(t.agentID))
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().Unix()
+	mac := fleet.ComputeHMAC(t.secret, fleet.DirectionAgentToControl, "poll", "", now, t.agentID)
+	req.Header.Set("X-Fleet-Agent-ID", t.agentID)
+	req.Header.Set("X-Fleet-Timestamp", strconv.FormatInt(now, 10))
+	req.Header.Set("X-Fleet-HMAC", mac)
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("inbound poll rejected (%d): %s", resp.StatusCode, string(b))
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 || bytes.Equal(body, []byte("null")) || bytes.Equal(body, []byte("{}")) || bytes.Equal(body, []byte("[]")) {
+		return nil, nil
+	}
+
+	if body[0] == '[' {
+		var envs []*fleet.Envelope
+		if err := json.Unmarshal(body, &envs); err != nil {
+			return nil, err
+		}
+		var valid []*fleet.Envelope
+		for _, e := range envs {
+			if e != nil {
+				valid = append(valid, e)
+			}
+		}
+		return valid, nil
+	}
+
+	var env fleet.Envelope
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil, err
+	}
+	if env.MessageID == "" && env.Op == "" {
+		return nil, nil
+	}
+	return []*fleet.Envelope{&env}, nil
 }
 
 func (t *HTTPStreamTransport) Send(env *fleet.Envelope) error {
@@ -227,11 +397,9 @@ func (t *HTTPStreamTransport) Receive(ctx context.Context) (*fleet.Envelope, err
 }
 
 func (t *HTTPStreamTransport) Close() error {
-	select {
-	case <-t.closeCh:
-	default:
+	t.closeOnce.Do(func() {
 		close(t.closeCh)
-	}
+	})
 	return nil
 }
 

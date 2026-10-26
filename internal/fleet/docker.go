@@ -149,7 +149,7 @@ func (f *FakeDocker) Inspect(ctx context.Context, idOrName string) (*ContainerIn
 		c, ok = f.containers[strings.TrimPrefix(idOrName, "/")]
 	}
 	if !ok {
-		return nil, fmt.Errorf("container %q not found", idOrName)
+		return nil, fmt.Errorf("container %q not found: %w", idOrName, ErrNotFound)
 	}
 	cp := *c
 	return &cp, nil
@@ -165,7 +165,7 @@ func (f *FakeDocker) Start(ctx context.Context, idOrName string) error {
 		c, ok = f.containers[strings.TrimPrefix(idOrName, "/")]
 	}
 	if !ok {
-		return fmt.Errorf("container %q not found", idOrName)
+		return fmt.Errorf("container %q not found: %w", idOrName, ErrNotFound)
 	}
 	c.State.Running = true
 	c.State.Status = "running"
@@ -182,7 +182,7 @@ func (f *FakeDocker) Stop(ctx context.Context, idOrName string, timeoutSeconds i
 		c, ok = f.containers[strings.TrimPrefix(idOrName, "/")]
 	}
 	if !ok {
-		return fmt.Errorf("container %q not found", idOrName)
+		return fmt.Errorf("container %q not found: %w", idOrName, ErrNotFound)
 	}
 	c.State.Running = false
 	c.State.Status = "exited"
@@ -199,7 +199,7 @@ func (f *FakeDocker) Restart(ctx context.Context, idOrName string, timeoutSecond
 		c, ok = f.containers[strings.TrimPrefix(idOrName, "/")]
 	}
 	if !ok {
-		return fmt.Errorf("container %q not found", idOrName)
+		return fmt.Errorf("container %q not found: %w", idOrName, ErrNotFound)
 	}
 	c.State.Running = true
 	c.State.Status = "running"
@@ -210,6 +210,14 @@ func (f *FakeDocker) Logs(ctx context.Context, idOrName string, tailLines int) (
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, fmt.Sprintf("logs:%s:%d", idOrName, tailLines))
+
+	_, ok := f.containers[idOrName]
+	if !ok {
+		_, ok = f.containers[strings.TrimPrefix(idOrName, "/")]
+	}
+	if !ok {
+		return "", fmt.Errorf("container %q not found: %w", idOrName, ErrNotFound)
+	}
 
 	if l, ok := f.logs[idOrName]; ok {
 		return l, nil
@@ -441,14 +449,31 @@ func decodeDockerMultiplexedStream(r io.Reader) (string, error) {
 	var buf bytes.Buffer
 	header := make([]byte, 8)
 
+	first := true
 	for {
-		_, err := io.ReadFull(r, header)
+		n, err := io.ReadFull(r, header)
 		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if first {
+				buf.Write(header[:n])
+				return buf.String(), nil
+			}
+			if errors.Is(err, io.ErrUnexpectedEOF) {
+				buf.Write(header[:n])
 				break
 			}
 			return buf.String(), err
 		}
+
+		if header[0] > 2 || header[1] != 0 || header[2] != 0 || header[3] != 0 {
+			buf.Write(header)
+			_, _ = io.Copy(&buf, r)
+			return buf.String(), nil
+		}
+		first = false
+
 		frameSize := binary.BigEndian.Uint32(header[4:8])
 		if frameSize == 0 {
 			continue
@@ -457,12 +482,14 @@ func decodeDockerMultiplexedStream(r io.Reader) (string, error) {
 			frameSize = 10 << 20
 		}
 		frame := make([]byte, frameSize)
-		_, err = io.ReadFull(r, frame)
-		if err != nil {
-			buf.Write(frame)
-			break
+		rn, rErr := io.ReadFull(r, frame)
+		buf.Write(frame[:rn])
+		if rErr != nil {
+			if errors.Is(rErr, io.EOF) || errors.Is(rErr, io.ErrUnexpectedEOF) {
+				break
+			}
+			return buf.String(), rErr
 		}
-		buf.Write(frame)
 	}
 	return buf.String(), nil
 }

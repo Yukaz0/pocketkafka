@@ -266,7 +266,7 @@ func (a *AgentRunner) Run(ctx context.Context) error {
 func (a *AgentRunner) executeJob(ctx context.Context, job JobDispatchMessage) {
 	a.sendJobResult(JobResultMessage{
 		JobID:  job.JobID,
-		Status: JobStatus("accepted"),
+		Status: JobStatusAccepted,
 	}, OpJobAccepted)
 
 	a.sendJobResult(JobResultMessage{
@@ -446,6 +446,8 @@ func (m *AgentManager) HandleInboundEnvelope(env *Envelope) error {
 	}
 
 	switch env.Op {
+	case OpJobAccepted:
+		// Agent acknowledged job reception
 	case OpJobRunning:
 		if m.jobs != nil {
 			var res JobResultMessage
