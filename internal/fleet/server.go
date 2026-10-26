@@ -2,7 +2,9 @@ package fleet
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,27 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/authz"
 )
 
+// ProxyPrincipalHeader carries the authenticated principal from the dashboard
+// reverse proxy to the fleet listener. It must never be trusted from a direct
+// client connection: the proxy strips any client-sent value and sets it only
+// after session authentication, alongside ProxyTokenHeader.
+const ProxyPrincipalHeader = "X-Pocketkafka-Principal"
+
+// ProxyTokenHeader is a per-process random token shared only between the
+// dashboard proxy and the fleet listener. Direct requests without it are
+// rejected even on loopback, so a client that reaches the fleet port
+// cannot forge a principal header.
+const ProxyTokenHeader = "X-Pocketkafka-Fleet-Proxy"
+
+// NewProxyToken generates a per-process token shared between the dashboard
+func NewProxyToken() string {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("fleet: cannot generate proxy token: " + err.Error())
+	}
+	return hex.EncodeToString(b[:])
+}
+
 // ServerConfig holds dependencies for FleetServer.
 type ServerConfig struct {
 	Registry     *Registry
@@ -24,9 +47,10 @@ type ServerConfig struct {
 	Manager      *AgentManager
 	Authorizer   authz.Authorizer
 	MaxBodyBytes int64
+	// ProxyToken authenticates the dashboard reverse proxy to this listener.
+	// Generated per process; direct requests without it are rejected.
+	ProxyToken string
 }
-
-// FleetServer runs the isolated HTTP mux for fleet management and agent transport.
 type FleetServer struct {
 	mu           sync.RWMutex
 	mux          *http.ServeMux
@@ -36,6 +60,7 @@ type FleetServer struct {
 	manager      *AgentManager
 	authorizer   authz.Authorizer
 	maxBodyBytes int64
+	proxyToken   string
 
 	agentChannels map[string]*ChannelTransport
 }
@@ -60,6 +85,7 @@ func NewFleetServer(cfg ServerConfig) *FleetServer {
 		manager:       cfg.Manager,
 		authorizer:    cfg.Authorizer,
 		maxBodyBytes:  maxBytes,
+		proxyToken:    cfg.ProxyToken,
 		agentChannels: make(map[string]*ChannelTransport),
 	}
 
@@ -99,30 +125,42 @@ func (s *FleetServer) wrap(h http.HandlerFunc) http.HandlerFunc {
 		if s.maxBodyBytes > 0 && r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, s.maxBodyBytes)
 		}
+		if !strings.HasPrefix(r.URL.Path, "/api/v1/fleet/agent/") {
+			if s.proxyToken == "" || !validProxyToken(r, s.proxyToken) {
+				slog.Error("fleet: rejected direct request without proxy token", "path", r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":"forbidden"}`))
+				return
+			}
+		}
 		h(w, r)
 	}
 }
 
 func (s *FleetServer) principalFromRequest(r *http.Request) string {
-	if p := r.Header.Get("X-Pocketkafka-Principal"); p != "" {
+	if p := r.Header.Get(ProxyPrincipalHeader); p != "" {
 		return strings.TrimSpace(p)
-	}
-	if p := r.Header.Get("X-Remote-User"); p != "" {
-		return strings.TrimSpace(p)
-	}
-	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-		return strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
-	}
-	if user, _, ok := r.BasicAuth(); ok {
-		return user
 	}
 	return authz.AnonymPrincipal
+}
+
+func validProxyToken(r *http.Request, want string) bool {
+	got := r.Header.Get(ProxyTokenHeader)
+	if got == "" || want == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
 func (s *FleetServer) checkAuthz(w http.ResponseWriter, r *http.Request, op authz.Operation, resType, resName string) (string, bool) {
 	principal := s.principalFromRequest(r)
 	if s.authorizer == nil {
-		return principal, true
+		slog.Error("fleet: authorizer missing, denying request", "path", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden: authorizer not configured"})
+		return principal, false
 	}
 	res := authz.Resource{Type: resType, Name: resName}
 	if err := s.authorizer.Authorize(principal, op, res); err != nil {
@@ -429,7 +467,9 @@ func (s *FleetServer) handleContainerAction(action string) http.HandlerFunc {
 			ServerID string `json:"server_id"`
 		}
 		if r.Body != nil && r.ContentLength > 0 {
-			_ = s.readJSON(w, r, &req)
+			if !s.readJSON(w, r, &req) {
+				return
+			}
 		}
 		serverID := req.ServerID
 		if serverID == "" {
@@ -671,6 +711,14 @@ func (s *FleetServer) handleAgentEnvelope(w http.ResponseWriter, r *http.Request
 
 	if s.manager == nil {
 		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "manager not configured"})
+		return
+	}
+
+	// Verify HMAC statelessly BEFORE allocating any per-agent state: an
+	// anonymous POST with a forged AgentID must not grow agentChannels.
+	gate := NewVerifier("", time.Minute, DirectionAgentToControl).WithRegistry(s.registry)
+	if err := gate.Verify(&env); err != nil {
+		s.writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		return
 	}
 

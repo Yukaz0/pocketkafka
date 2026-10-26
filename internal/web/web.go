@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -72,8 +73,10 @@ type Server struct {
 	gatewayListen   string
 	schemaRegListen string
 
-	fleetEnabled bool
-	fleetListen  string
+	fleetEnabled    bool
+	fleetListen     string
+	fleetProxyToken string
+	fleetUseTLS     bool
 
 	cfg config.Config
 
@@ -134,17 +137,19 @@ func (s *Server) WithSchemaRegistryListen(listen string) *Server {
 	s.schemaRegListen = listen
 	return s
 }
-
 func (s *Server) WithConfig(cfg config.Config) *Server {
 	s.cfg = cfg
 	s.fleetEnabled = cfg.Fleet.Enabled
 	s.fleetListen = cfg.Fleet.Listen
+	s.fleetUseTLS = cfg.Fleet.TLS.CertFile != "" && cfg.Fleet.TLS.KeyFile != ""
 	return s
 }
 
-func (s *Server) WithFleet(enabled bool, listen string) *Server {
+func (s *Server) WithFleet(enabled bool, listen, proxyToken string, useTLS bool) *Server {
 	s.fleetEnabled = enabled
 	s.fleetListen = listen
+	s.fleetProxyToken = proxyToken
+	s.fleetUseTLS = useTLS
 	return s
 }
 
@@ -235,11 +240,18 @@ func (s *Server) canList(principal, resourceType string) bool {
 
 func (s *Server) authorizeAPI(mux *http.ServeMux, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.authorize || !isAPIPath(r.URL.Path) || apiPublicPath(r.URL.Path) || strings.HasPrefix(r.URL.Path, "/api/v1/fleet/") || r.URL.Path == "/api/v1/fleet" {
+		if !s.authorize || !isAPIPath(r.URL.Path) || apiPublicPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
 		if s.clusterTokenPresented(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Fleet routes are authenticated by authMiddleware (session/bearer) above;
+		// granular authorization happens in the fleet listener via the
+		// proxy-injected principal. Forward without a dashboard ACL rule.
+		if strings.HasPrefix(r.URL.Path, "/api/v1/fleet/") || r.URL.Path == "/api/v1/fleet" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -336,17 +348,21 @@ func (s *Server) routes() *http.ServeMux {
 	s.route(mux, "/api/v1/target/{name}/{path...}", s.handleClusterTarget)
 
 	if s.fleetEnabled {
-		u := fleetTargetURL(s.fleetListen)
+		u := fleetTargetURL(s.fleetListen, s.fleetUseTLS)
 		proxy := httputil.NewSingleHostReverseProxy(u)
+		if s.fleetUseTLS {
+			proxy.Transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
+		}
 		origDirector := proxy.Director
 		proxy.Director = func(req *http.Request) {
 			origDirector(req)
+			req.Header.Del("X-Pocketkafka-Principal")
+			req.Header.Del("X-Remote-User")
+			req.Header.Del("X-Pocketkafka-Fleet-Proxy")
 			if p := s.requestPrincipal(req); p != "" {
 				req.Header.Set("X-Pocketkafka-Principal", p)
 			}
-		}
-		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-			writeErr(w, http.StatusBadGateway, "fleet gateway error: "+err.Error())
+			req.Header.Set("X-Pocketkafka-Fleet-Proxy", s.fleetProxyToken)
 		}
 		mux.Handle("/api/v1/fleet/", proxy)
 		mux.Handle("/api/v1/fleet", proxy)
@@ -358,7 +374,7 @@ func (s *Server) routes() *http.ServeMux {
 	return mux
 }
 
-func fleetTargetURL(listen string) *url.URL {
+func fleetTargetURL(listen string, useTLS bool) *url.URL {
 	host := strings.TrimSpace(listen)
 	if host == "" {
 		host = "127.0.0.1:18090"
@@ -366,13 +382,16 @@ func fleetTargetURL(listen string) *url.URL {
 	if strings.HasPrefix(host, ":") {
 		host = "127.0.0.1" + host
 	}
-	u, err := url.Parse("http://" + host)
+	scheme := "http"
+	if useTLS {
+		scheme = "https"
+	}
+	u, err := url.Parse(scheme + "://" + host)
 	if err != nil {
-		u, _ = url.Parse("http://127.0.0.1:18090")
+		u, _ = url.Parse(scheme + "://127.0.0.1:18090")
 	}
 	return u
 }
-
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.Write([]byte(s.metrics.Render(s.store, s.gm, s.clusterID)))

@@ -213,6 +213,8 @@ func main() {
 			fleetAudit.SetRetention(cfg.Fleet.RetentionDays, cfg.Fleet.RetentionEntries)
 		}
 		fleetMgr := fleet.NewAgentManager(fleetReg, fleetJobs)
+		fleetProxyToken := fleet.NewProxyToken()
+		fleetUseTLS := cfg.Fleet.TLS.CertFile != "" && cfg.Fleet.TLS.KeyFile != ""
 		fleetControl := fleet.NewServer(fleet.ServerConfig{
 			Registry:     fleetReg,
 			Jobs:         fleetJobs,
@@ -220,8 +222,9 @@ func main() {
 			Manager:      fleetMgr,
 			Authorizer:   authorizer,
 			MaxBodyBytes: cfg.Network.MaxRequestSizeBytes,
+			ProxyToken:   fleetProxyToken,
 		})
-		fleetUseTLS := cfg.Fleet.TLS.CertFile != "" && cfg.Fleet.TLS.KeyFile != ""
+		ws.WithFleet(cfg.Fleet.Enabled, cfg.Fleet.Listen, fleetProxyToken, fleetUseTLS)
 		var fleetTLSConf *tls.Config
 		if fleetUseTLS {
 			cert, err := tls.LoadX509KeyPair(cfg.Fleet.TLS.CertFile, cfg.Fleet.TLS.KeyFile)
