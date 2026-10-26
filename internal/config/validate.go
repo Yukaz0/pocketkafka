@@ -78,6 +78,9 @@ func bindTargets(c *Config) []bindTarget {
 	if c.Security.TLS.Enabled || c.Security.TLS.HTTP || c.Security.TLS.MQTT {
 		out = append(out, bindTarget{"security.tls.listen", c.Security.TLS.Listen})
 	}
+	if c.Fleet.Enabled {
+		out = append(out, bindTarget{"fleet.listen", c.Fleet.Listen})
+	}
 	return out
 }
 
@@ -147,6 +150,7 @@ func (c *Config) Validate() error {
 	validateTiered(c, add)
 	validateExposure(c, add)
 	validateSecurity(c, add)
+	validateFleet(c, add)
 
 	if len(problems) == 0 {
 		return nil
@@ -457,4 +461,45 @@ func validHostPort(addr string) bool {
 		return false
 	}
 	return strings.TrimSpace(port) != ""
+}
+
+func validateFleet(c *Config, add func(string, ...interface{})) {
+	if !c.Fleet.Enabled {
+		return
+	}
+	if strings.TrimSpace(c.Fleet.Listen) == "" {
+		add("fleet.listen: address must not be empty when fleet is enabled")
+		return
+	}
+	if !validHostPort(c.Fleet.Listen) {
+		add("fleet.listen: %q is not a valid host:port address", c.Fleet.Listen)
+		return
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(c.Fleet.Listen))
+	if err != nil {
+		return
+	}
+	if !IsLoopbackHost(host) && !c.Security.AllowInsecurePublic {
+		if strings.TrimSpace(c.Fleet.TLS.CertFile) == "" || strings.TrimSpace(c.Fleet.TLS.KeyFile) == "" {
+			add("fleet.listen: binds %s (not loopback) requires fleet.tls cert_file and key_file; configure TLS or set security.allow_insecure_public=true", c.Fleet.Listen)
+		}
+	}
+	if (c.Fleet.TLS.CertFile != "" && c.Fleet.TLS.KeyFile == "") || (c.Fleet.TLS.CertFile == "" && c.Fleet.TLS.KeyFile != "") {
+		add("fleet.tls: both cert_file and key_file are required when TLS is configured")
+	}
+	if unresolvedEnv(c.Fleet.TLS.CertFile) {
+		add("fleet.tls.cert_file: %q references an unset environment variable", c.Fleet.TLS.CertFile)
+	}
+	if unresolvedEnv(c.Fleet.TLS.KeyFile) {
+		add("fleet.tls.key_file: %q references an unset environment variable", c.Fleet.TLS.KeyFile)
+	}
+	if c.Fleet.HeartbeatTimeout < 0 {
+		add("fleet.heartbeat_timeout: must be >= 0 (got %d)", c.Fleet.HeartbeatTimeout)
+	}
+	if c.Fleet.RetentionDays < 0 {
+		add("fleet.retention_days: must be >= 0 (got %d)", c.Fleet.RetentionDays)
+	}
+	if c.Fleet.RetentionEntries < 0 {
+		add("fleet.retention_entries: must be >= 0 (got %d)", c.Fleet.RetentionEntries)
+	}
 }
