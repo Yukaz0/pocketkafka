@@ -321,6 +321,14 @@ func normalizeResourceType(t string) (string, error) {
 		return ResourceGroup, nil
 	case ResourceCluster:
 		return ResourceCluster, nil
+	case ResourceFleetServer:
+		return ResourceFleetServer, nil
+	case ResourceFleetContainer:
+		return ResourceFleetContainer, nil
+	case ResourceFleetJob:
+		return ResourceFleetJob, nil
+	case ResourceFleetAudit:
+		return ResourceFleetAudit, nil
 	case wildcard, "":
 		return wildcard, nil
 	default:
@@ -341,7 +349,7 @@ func containsOperation(ops []string, op Operation) bool {
 			return true
 		}
 		for _, granted := range impliedOperations(Operation(o)) {
-			if granted == op {
+			if strings.EqualFold(string(granted), string(op)) {
 				return true
 			}
 		}

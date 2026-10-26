@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/authz"
 	"github.com/Yukaz0/pocketkafka/internal/config"
 	"github.com/Yukaz0/pocketkafka/internal/coordinator"
+	"github.com/Yukaz0/pocketkafka/internal/fleet"
 	"github.com/Yukaz0/pocketkafka/internal/gateway"
 	"github.com/Yukaz0/pocketkafka/internal/metrics"
 	"github.com/Yukaz0/pocketkafka/internal/ratelimit"
@@ -67,6 +71,9 @@ type Server struct {
 
 	gatewayListen   string
 	schemaRegListen string
+
+	fleetEnabled bool
+	fleetListen  string
 
 	cfg config.Config
 
@@ -130,6 +137,14 @@ func (s *Server) WithSchemaRegistryListen(listen string) *Server {
 
 func (s *Server) WithConfig(cfg config.Config) *Server {
 	s.cfg = cfg
+	s.fleetEnabled = cfg.Fleet.Enabled
+	s.fleetListen = cfg.Fleet.Listen
+	return s
+}
+
+func (s *Server) WithFleet(enabled bool, listen string) *Server {
+	s.fleetEnabled = enabled
+	s.fleetListen = listen
 	return s
 }
 
@@ -220,7 +235,7 @@ func (s *Server) canList(principal, resourceType string) bool {
 
 func (s *Server) authorizeAPI(mux *http.ServeMux, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.authorize || !isAPIPath(r.URL.Path) || apiPublicPath(r.URL.Path) {
+		if !s.authorize || !isAPIPath(r.URL.Path) || apiPublicPath(r.URL.Path) || strings.HasPrefix(r.URL.Path, "/api/v1/fleet/") || r.URL.Path == "/api/v1/fleet" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -319,7 +334,43 @@ func (s *Server) routes() *http.ServeMux {
 	s.route(mux, "POST /api/v1/clusters/test", s.handleTestCluster)
 	s.route(mux, "DELETE /api/v1/clusters/{name}", s.handleDeleteCluster)
 	s.route(mux, "/api/v1/target/{name}/{path...}", s.handleClusterTarget)
+
+	if s.fleetEnabled {
+		u := fleetTargetURL(s.fleetListen)
+		proxy := httputil.NewSingleHostReverseProxy(u)
+		origDirector := proxy.Director
+		proxy.Director = func(req *http.Request) {
+			origDirector(req)
+			if p := s.requestPrincipal(req); p != "" {
+				req.Header.Set("X-Pocketkafka-Principal", p)
+			}
+		}
+		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			writeErr(w, http.StatusBadGateway, "fleet gateway error: "+err.Error())
+		}
+		mux.Handle("/api/v1/fleet/", proxy)
+		mux.Handle("/api/v1/fleet", proxy)
+	} else {
+		disabled := fleet.NewDisabledHandler()
+		mux.Handle("/api/v1/fleet/", disabled)
+		mux.Handle("/api/v1/fleet", disabled)
+	}
 	return mux
+}
+
+func fleetTargetURL(listen string) *url.URL {
+	host := strings.TrimSpace(listen)
+	if host == "" {
+		host = "127.0.0.1:18090"
+	}
+	if strings.HasPrefix(host, ":") {
+		host = "127.0.0.1" + host
+	}
+	u, err := url.Parse("http://" + host)
+	if err != nil {
+		u, _ = url.Parse("http://127.0.0.1:18090")
+	}
+	return u
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -348,11 +399,12 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{
-		"product":  "pocketkafka",
-		"vendor":   "Muhammad Jafar Ikbal (Yukaz0)",
-		"upstream": "https://github.com/Yukaz0/pocketkafka",
-		"license":  "MIT",
-		"version":  s.version,
+		"product":      "pocketkafka",
+		"vendor":       "Muhammad Jafar Ikbal (Yukaz0)",
+		"upstream":     "https://github.com/Yukaz0/pocketkafka",
+		"license":      "MIT",
+		"version":      s.version,
+		"fleetEnabled": s.fleetEnabled,
 	})
 }
 

@@ -21,11 +21,12 @@ const (
 	OpRead     Operation = "Read"
 	OpWrite    Operation = "Write"
 	OpAdmin    Operation = "Admin"
+	OpControl  Operation = "Control"
 )
 
 // KnownOperations lists every operation an ACL rule may name, in the order the
 // UI presents them.
-var KnownOperations = []Operation{OpDescribe, OpRead, OpWrite, OpAdmin}
+var KnownOperations = []Operation{OpDescribe, OpRead, OpWrite, OpAdmin, OpControl}
 
 // impliedOperations returns the operations a grant of granted confers. Kafka
 // semantics: Admin covers everything, Write covers Describe (a producer must
@@ -33,7 +34,9 @@ var KnownOperations = []Operation{OpDescribe, OpRead, OpWrite, OpAdmin}
 func impliedOperations(granted Operation) []Operation {
 	switch granted {
 	case OpAdmin:
-		return []Operation{OpAdmin, OpRead, OpWrite, OpDescribe}
+		return []Operation{OpAdmin, OpRead, OpWrite, OpDescribe, OpControl}
+	case OpControl:
+		return []Operation{OpControl, OpDescribe}
 	case OpWrite:
 		return []Operation{OpWrite, OpDescribe}
 	case OpRead:
@@ -41,7 +44,20 @@ func impliedOperations(granted Operation) []Operation {
 	case OpDescribe:
 		return []Operation{OpDescribe}
 	default:
-		return []Operation{granted}
+		switch strings.ToLower(string(granted)) {
+		case "admin":
+			return []Operation{OpAdmin, OpRead, OpWrite, OpDescribe, OpControl}
+		case "control":
+			return []Operation{OpControl, OpDescribe}
+		case "write":
+			return []Operation{OpWrite, OpDescribe}
+		case "read":
+			return []Operation{OpRead, OpDescribe}
+		case "describe":
+			return []Operation{OpDescribe}
+		default:
+			return []Operation{granted}
+		}
 	}
 }
 
@@ -66,16 +82,22 @@ type Resource struct {
 
 // Resource types.
 const (
-	ResourceTopic   = "topic"
-	ResourceGroup   = "group"
-	ResourceCluster = "cluster"
+	ResourceTopic          = "topic"
+	ResourceGroup          = "group"
+	ResourceCluster        = "cluster"
+	ResourceFleetServer    = "fleet_server"
+	ResourceFleetContainer = "fleet_container"
+	ResourceFleetJob       = "fleet_job"
+	ResourceFleetAudit     = "fleet_audit"
 )
 
 // KnownResourceType reports whether t names a resource type an ACL rule can
 // target (or "*" for any).
 func KnownResourceType(t string) bool {
-	switch t {
+	switch strings.ToLower(strings.TrimSpace(t)) {
 	case ResourceTopic, ResourceGroup, ResourceCluster, wildcard:
+		return true
+	case ResourceFleetServer, ResourceFleetContainer, ResourceFleetJob, ResourceFleetAudit:
 		return true
 	}
 	return false

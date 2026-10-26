@@ -357,11 +357,13 @@ type AgentManager struct {
 }
 
 type ControlSession struct {
-	agentID   string
-	serverID  string
-	transport AgentTransport
-	verifier  *Verifier
-	secret    string
+	agentID       string
+	serverID      string
+	transport     AgentTransport
+	verifier      *Verifier
+	secret        string
+	containers    []ContainerSummary
+	lastHeartbeat time.Time
 }
 
 func NewAgentManager(registry *Registry, jobs *Jobs) *AgentManager {
@@ -404,6 +406,18 @@ func (m *AgentManager) UnregisterSession(agentID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessions, agentID)
+}
+
+// ListContainers returns all containers reported by connected agents.
+func (m *AgentManager) ListContainers() []ContainerSummary {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var out []ContainerSummary
+	for _, sess := range m.sessions {
+		out = append(out, sess.containers...)
+	}
+	return out
 }
 
 func (m *AgentManager) DispatchJob(ctx context.Context, agentID string, job *Job) error {
@@ -454,6 +468,14 @@ func (m *AgentManager) HandleInboundEnvelope(env *Envelope) error {
 	}
 
 	switch env.Op {
+	case OpHeartbeat:
+		var hb HeartbeatMessage
+		if err := json.Unmarshal(env.Payload, &hb); err == nil {
+			m.mu.Lock()
+			sess.containers = hb.Containers
+			sess.lastHeartbeat = time.Now()
+			m.mu.Unlock()
+		}
 	case OpJobAccepted:
 		// Agent acknowledged job reception
 	case OpJobRunning:

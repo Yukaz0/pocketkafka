@@ -239,6 +239,20 @@ func (r *Registry) ConsumeToken(token string) (*Agent, error) {
 		EnrolledAt: now,
 	}
 	r.agents[agentID] = ag
+	if srv, ok := r.servers[e.ServerID]; !ok {
+		r.servers[e.ServerID] = &Server{
+			ID:        e.ServerID,
+			Name:      e.ServerID,
+			Status:    "online",
+			AgentID:   agentID,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+	} else {
+		srv.AgentID = agentID
+		srv.Status = "online"
+		srv.UpdatedAt = now
+	}
 	if err := r.persistLocked(); err != nil {
 		return nil, err
 	}
@@ -262,6 +276,72 @@ func (r *Registry) Revoke(agentID string) error {
 	ag.Revoked = true
 	ag.RevokedAt = time.Now()
 	return r.persistLocked()
+}
+
+// RevokeServer revokes all active agents belonging to serverID and marks server revoked.
+func (r *Registry) RevokeServer(serverID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	found := false
+	now := time.Now()
+	for _, a := range r.agents {
+		if a.ServerID == serverID && !a.Revoked {
+			a.Revoked = true
+			a.RevokedAt = now
+			found = true
+		}
+	}
+	if srv, ok := r.servers[serverID]; ok {
+		srv.Status = "revoked"
+		srv.UpdatedAt = now
+		found = true
+	}
+	if !found {
+		return fmt.Errorf("fleet: server %q not found: %w", serverID, ErrNotFound)
+	}
+	return r.persistLocked()
+}
+
+// ListServers returns all registered servers sorted by ID.
+func (r *Registry) ListServers() []*Server {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make([]*Server, 0, len(r.servers))
+	for _, s := range r.servers {
+		cp := *s
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// GetServer returns a server by ID.
+func (r *Registry) GetServer(serverID string) (*Server, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	s, ok := r.servers[serverID]
+	if !ok {
+		return nil, false
+	}
+	cp := *s
+	return &cp, true
+}
+
+// ListEnrollments returns copies of all enrollment tokens.
+func (r *Registry) ListEnrollments() []*Enrollment {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make([]*Enrollment, 0, len(r.enrollments))
+	for _, e := range r.enrollments {
+		cp := *e
+		out = append(out, &cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out
 }
 
 // Lookup finds an agent by ID.
