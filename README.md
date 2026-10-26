@@ -25,7 +25,7 @@
 
 </div>
 
-PocketKafka is a from-scratch implementation of the Apache Kafka binary wire protocol and a modern commit-log storage engine. It packs a **high-performance Kafka Broker**, an **embedded Control Center UI**, a **Confluent-compatible Schema Registry**, **HTTP REST & MQTT Gateways**, **Log Compaction**, **S3 Tiered Storage**, and **SASL/SCRAM + TLS Security** into a **single static binary under 30MB**.
+PocketKafka is a from-scratch implementation of the Apache Kafka binary wire protocol and a modern commit-log storage engine. It packs a **high-performance Kafka Broker**, an **embedded Control Center UI**, a **Confluent API-compatible Schema Registry subset (AVRO/JSON; PROTOBUF rejected, no compatibility checking — see hardening notes)**, **HTTP REST & MQTT Gateways**, **Log Compaction**, **S3 Tiered Storage**, and **SASL/SCRAM + TLS Security** into a **single static binary under 30MB**.
 
 `go.mod` has **zero third-party dependencies**.
 
@@ -39,7 +39,7 @@ PocketKafka is a from-scratch implementation of the Apache Kafka binary wire pro
 | **Idle Memory Footprint** | **< 60 MB** | ~1.5 GB+ (JVM) | ~512 MB - 1 GB |
 | **Docker Image Size** | **< 29 MB** | ~600 MB+ | ~300 MB |
 | **Embedded Web UI** | **Yes (Control Center, :8080)** | ❌ Needs extra container | Optional Console |
-| **Built-in Schema Registry** | **Yes (Port 8081)** | ❌ Needs `cp-schema-registry` | Built-in |
+| **Built-in Schema Registry** | **Subset (Port 8081)** | ❌ Needs `cp-schema-registry` | Built-in |
 | **HTTP REST & MQTT Gateways**| **Yes (:8082 / :1883)** | ❌ Needs separate proxies | ❌ Needs separate proxies |
 | **External Dependencies** | **Zero (`go.mod` is clean)** | Java, ZooKeeper/KRaft | C++ libs |
 | **CGO / `librdkafka` Required**| **No (Pure Go)** | N/A | N/A |
@@ -54,7 +54,7 @@ All services are baked into a single binary and boot in milliseconds:
 | :--- | :---: | :--- |
 | **Kafka Wire Protocol** | `9092` / `29092` | Core broker listener (`PLAINTEXT` / internal network) |
 | **Embedded Web UI** | `8080` | Control Center dashboard with grouped navigation, health monitoring, live tail, and message inspector |
-| **Schema Registry** | `8081` | Confluent-compatible Avro / Protobuf / JSON schema registry |
+| **Schema Registry** | `8081` | Confluent API-compatible subset: AVRO/JSON syntax-checked, PROTOBUF rejected, no compatibility checking |
 | **HTTP REST Proxy** | `8082` | Publish and consume messages over standard HTTP POST/GET |
 | **MQTT 3.1.1 Bridge** | `1883` | Direct IoT sensor telemetry bridged to Kafka topics |
 | **TLS / SSL** | `9093` | Optional encrypted listener |
@@ -166,7 +166,9 @@ func main() {
 }
 ```
 
-### 2. Python (`kafka-python` or `confluent-kafka`)
+### 2. Python (`kafka-python` or `confluent-kafka`) — planned, not yet verified
+
+> External-client support is tracked in [`test/interop/compatibility.yaml`](test/interop/compatibility.yaml). Snippets below are the target API; only the Go SDK and REST/MQTT paths are verified today.
 
 ```python
 from kafka import KafkaProducer, KafkaConsumer
@@ -175,7 +177,7 @@ producer = KafkaProducer(bootstrap_servers='localhost:9092')
 producer.send('orders', b'{"item":"phone","price":800}')
 ```
 
-### 3. Node.js (`kafkajs`)
+### 3. Node.js (`kafkajs`) — planned, not yet verified
 
 ```javascript
 const { Kafka } = require('kafkajs');
@@ -244,7 +246,7 @@ pocketkafka/
 │   ├── handler/            # Core Kafka API handlers (0..42) + dispatcher
 │   ├── storage/            # Commit log, sparse index, compaction, S3 tiered storage
 │   ├── coordinator/        # Consumer group coordinator, offsets (snapshot + WAL)
-│   ├── schemaregistry/     # Embedded Confluent-compatible subset, persisted
+│   ├── schemaregistry/     # Embedded registry subset (AVRO/JSON; PROTOBUF rejected), persisted
 │   ├── gateway/            # HTTP REST proxy & MQTT 3.1.1 bridge
 │   ├── authz/              # Shared ACL store + Authorizer (all ingresses)
 │   ├── httpauth/           # HTTP authentication/authorization middleware
