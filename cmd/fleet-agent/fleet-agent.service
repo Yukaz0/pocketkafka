@@ -1,0 +1,41 @@
+[Unit]
+Description=PocketKafka Fleet Agent
+Documentation=https://github.com/Yukaz0/pocketkafka/blob/main/FLEET_RUNBOOK.md
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Optional environment configurations
+EnvironmentFile=-/etc/default/fleet-agent
+EnvironmentFile=-/etc/fleet-agent/agent.env
+
+# Directory isolation & persistence
+WorkingDirectory=/var/lib/fleet-agent
+StateDirectory=fleet-agent
+ConfigurationDirectory=fleet-agent
+
+ExecStart=/usr/local/bin/fleet-agent \
+    -server=${FLEET_SERVER_URL} \
+    -state=${FLEET_STATE_PATH} \
+    -docker-socket=${FLEET_DOCKER_SOCKET} \
+    ${EXTRA_FLAGS}
+
+Restart=always
+RestartSec=5s
+LimitNOFILE=65536
+KillMode=mixed
+TimeoutStopSec=30s
+
+# Sandboxing
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

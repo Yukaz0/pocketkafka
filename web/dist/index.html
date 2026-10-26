@@ -169,6 +169,16 @@
 .brokerPicker select:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
 @media(max-width:520px){.brokerPicker{gap:4px;padding:0 5px}.brokerPicker select{width:112px;font-size:10px}}
 @media(max-width:360px){.brokerPicker select{width:86px}}
+.zoneSwitcher{display:inline-flex;align-items:center;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:2px;gap:2px;margin:auto 8px}
+.zoneBtn{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border:0;background:transparent;color:var(--muted);font:500 12px var(--font-ui);border-radius:3px;cursor:pointer;white-space:nowrap}
+.zoneBtn:hover{color:var(--text);background:var(--surface2)}
+.zoneBtn.active{background:var(--surface);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.zoneBtn:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+body[data-zone="fleet"]{--fleet-accent:#0ea5e9}
+body[data-zone="fleet"] .appNavHead i{background:#0ea5e9}
+body[data-zone="fleet"] .navLink.active{color:#38bdf8;background:rgba(14,165,233,.12);border-color:var(--border)}
+html[data-theme="light"] body[data-zone="fleet"] .navLink.active{color:#0284c7;background:rgba(2,132,199,.10)}
+@media(max-width:760px){.zoneSwitcher{margin:auto 4px}.zoneBtn{padding:2px 7px;font-size:11px}}
   .chip2 i{width:6px;height:6px;border-radius:50%;background:var(--live);display:inline-block}
   .ws{flex:1;display:flex;min-height:0}
   .content{flex:1;display:flex;flex-direction:column;min-width:0}
@@ -506,7 +516,11 @@
 </head>
 <body>
 <div class="tb">
-  <div class="wm" onclick="goView('overview')" title="PocketKafka Overview"><img src="/favicon.svg" alt="" width="20" height="20">pocketkafka</div>
+  <div class="wm" onclick="goZoneRoot()" title="PocketKafka"><img src="/favicon.svg" alt="" width="20" height="20">pocketkafka</div>
+  <div class="zoneSwitcher" id="zoneSwitcher" role="tablist" aria-label="Control Zone" style="display:none">
+    <button role="tab" id="zoneBtnKafka" class="zoneBtn active" aria-selected="true" onclick="switchZone('kafka')">Kafka</button>
+    <button role="tab" id="zoneBtnFleet" class="zoneBtn" aria-selected="false" onclick="switchZone('fleet')">Fleet</button>
+  </div>
   <div class="brokerPicker"><label for="activeClusterSelect">Broker</label><select id="activeClusterSelect" aria-label="Broker" onchange="switchActiveCluster(this.value)"><option value="local">local (this broker)</option></select></div>
   <div class="chips">
     <span class="chip2" id="chipBroker"><i></i>broker -</span>
@@ -570,10 +584,12 @@ const I={
   archive:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v5H4zM6 9v11h12V9M10 13h4"/></svg>',
   gear:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="m19 13 2 1-2 4-2-1a8 8 0 0 1-2 1l-.3 2h-5L9 18a8 8 0 0 1-2-1l-2 1-2-4 2-1v-2l-2-1 2-4 2 1a8 8 0 0 1 2-1l.3-2h5L15 6a8 8 0 0 1 2 1l2-1 2 4-2 1z"/></svg>',
   sun:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
-  moon:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>'
+  moon:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>',
+  box:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+  terminal:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>'
 };
 
-const state={view:'overview',settingsTab:'general',theme:'dark',sidebarCollapsed:false,cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,activeCluster:localStorage.getItem('pk_active_cluster')||'local',targetGeneration:0,targetRequests:new Set(),targetSwitching:false,groupLagWarn:Number(localStorage.getItem('pk_group_lag_warn'))||1000000000,alarmsDismissed:new Set((()=>{try{return JSON.parse(localStorage.getItem('pk_alarms_dismissed')||'[]');}catch(e){return [];}})()),
+const state={zone:'kafka',fleetEnabled:false,fleetStatus:null,fleetServers:[],fleetContainers:[],fleetJobs:[],fleetAudit:[],fleetEnrollments:[],fleetServerFilter:'',fleetStateFilter:'all',fleetSearch:'',fleetJobStatusFilter:'all',fleetAuditSearch:'',view:'overview',settingsTab:'general',theme:'dark',sidebarCollapsed:false,cluster:null,topics:[],groups:[],schemas:[],topic:null,partition:'all',decoder:'auto',msgs:[],tail:false,ws:null,group:null,search:'',fromTs:'',toTs:'',auth:null,activeCluster:localStorage.getItem('pk_active_cluster')||'local',targetGeneration:0,targetRequests:new Set(),targetSwitching:false,groupLagWarn:Number(localStorage.getItem('pk_group_lag_warn'))||1000000000,alarmsDismissed:new Set((()=>{try{return JSON.parse(localStorage.getItem('pk_alarms_dismissed')||'[]');}catch(e){return [];}})()),
   integrations:null, integrationsError:'',
   brokerCfg:null, brokerCfgError:'',
   /* pengaturan persisten */
@@ -620,7 +636,7 @@ function unsupportedPanel(view){
   return `<div class="card" role="status"><h3>Unavailable for ${esc(activeClusterLabel())}</h3><p class="muted" style="margin-top:8px">${esc(reason)}</p>${back}</div>`;
 }
 function targetSwitchingPanel(){return `<div class="card" role="status" aria-live="polite"><h3>Switching broker</h3><p class="muted" style="margin-top:8px">Loading ${esc(activeClusterLabel())}. Data from the previous broker has been cleared.</p></div>`;}
-const LOCAL_API_PATH=/^\/api\/v1\/(?:auth(?:\/|$)|clusters(?:\/|$)|health\/clusters(?:\/|$))/;
+const LOCAL_API_PATH=/^\/api\/v1\/(?:auth(?:\/|$)|clusters(?:\/|$)|health\/clusters(?:\/|$)|info(?:\/|$)|fleet(?:\/|$))/;
 function kafkaCapabilityFor(path,method){
   const u=new URL(path,location.href),p=u.pathname,m=(method||'GET').toUpperCase();
   if(p==='/api/v1/cluster'&&m==='GET')return 'cluster';
@@ -699,8 +715,44 @@ function fmtPctOpt(v){return isNum(v)?v.toFixed(1)+'%':'n/a';}
 function rel(t){const d=Math.max(0,Date.now()-t);if(d<1000)return 'now';if(d<60000)return Math.floor(d/1000)+'s ago';if(d<3600000)return Math.floor(d/60000)+'m ago';return Math.floor(d/3600000)+'h ago';}
 function online(s){s=(s||'').toLowerCase();return s==='stable'||s==='green';}
 
+async function loadInfo(){
+  try{
+    const info=await apiLocal('/api/v1/info');
+    state.fleetEnabled=!!(info&&info.fleetEnabled);
+    if(info&&info.version)state.version=info.version;
+  }catch(e){
+    state.fleetEnabled=false;
+  }
+}
+async function refreshFleetView(){
+  if(!state.fleetEnabled)return;
+  const tasks=[
+    apiLocal('/api/v1/fleet/status').then(d=>{state.fleetStatus=d;}).catch(()=>{}),
+    apiLocal('/api/v1/fleet/servers').then(d=>{state.fleetServers=(d&&d.servers)||[];}).catch(()=>{})
+  ];
+  if(state.view==='fleet-containers'){
+    tasks.push(apiLocal('/api/v1/fleet/containers').then(d=>{state.fleetContainers=(d&&d.containers)||[];}).catch(()=>{}));
+  }
+  if(state.view==='fleet-jobs'){
+    tasks.push(apiLocal('/api/v1/fleet/jobs').then(d=>{state.fleetJobs=(d&&d.jobs)||[];}).catch(()=>{}));
+  }
+  if(state.view==='fleet-audit'){
+    tasks.push(apiLocal('/api/v1/fleet/audit-events').then(d=>{state.fleetAudit=(d&&d.events)||[];}).catch(()=>{}));
+  }
+  if(state.view==='fleet-settings'){
+    tasks.push(apiLocal('/api/v1/fleet/enrollments').then(d=>{state.fleetEnrollments=(d&&d.enrollments)||[];}).catch(()=>{}));
+  }
+  await Promise.allSettled(tasks);
+}
 async function refresh(){
   const generation=state.targetGeneration;
+  await loadInfo();
+  if(state.zone==='fleet'){
+    if(state.fleetEnabled)await refreshFleetView();
+    state.lastRefresh=Date.now();
+    updAgo();
+    return;
+  }
   const tasks=[api('/api/v1/cluster').then(d=>state.cluster=d).catch(()=>{}),
     api('/api/v1/topics').then(d=>state.topics=d||[]).catch(()=>{}),
     api('/api/v1/groups').then(d=>state.groups=d||[]).catch(()=>{}),
@@ -713,34 +765,64 @@ async function refresh(){
 }
 function hasTargetCapability(cap){if(state.activeCluster==='local')return true;const target=activeTargetEntry();if(!target)return false;if((target.kind||'').toLowerCase()!=='kafka')return true;return (target.capabilities||[]).includes(cap);}
 
+function isReducedMotion(){
+  return window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
 /* dinamis: auto-refresh berkala + indikator "updated Xs ago" */
 function updAgo(){
   const el=document.getElementById('updAgo');
   if(!el||!state.lastRefresh)return;
+  if(isReducedMotion()){
+    el.textContent='polling paused (reduced-motion)';
+    el.title='Auto-refresh disabled by prefers-reduced-motion';
+    return;
+  }
   const s=Math.max(0,Math.floor((Date.now()-state.lastRefresh)/1000));
   el.textContent='updated '+s+'s ago';
   el.title='Auto-refresh: '+(state.refreshMs/1000)+'s';
 }
 setInterval(updAgo,1000);
-function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden){ await refresh(); const connActive=state.view==='connections'||(state.view==='settings'&&state.settingsTab==='connections'); if(connActive&&!patchConnections())render(); if(state.view==='metrics')loadThroughput(); } scheduleRefresh(); },state.refreshMs); }
+function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden&&!isReducedMotion()){ await refresh(); if(state.zone==='fleet'){ render(); } else { const connActive=state.view==='connections'||(state.view==='settings'&&state.settingsTab==='connections'); if(connActive&&!patchConnections())render(); if(state.view==='metrics')loadThroughput(); } } scheduleRefresh(); },state.refreshMs); }
 function skel(w){return '<span class="skel" style="width:'+(w||60)+'px"></span>';}
 scheduleRefresh();
 
 function buildNav(){
   const nav=document.getElementById('navItems'); if(!nav)return;
-  const groups=[['core',''],['more','More Tools']];
-  nav.innerHTML=groups.map(([group,label])=>{
-    const items=navItems.filter(item=>item[3]===group);
-    if(!items.length)return '';
-    const collapsible=group==='more';
-    const collapsed=collapsible&&state.navGroupsCollapsed[group];
-    const heading=label?`<button class="navGroupToggle" id="navGroupToggle-${group}" type="button" onclick="toggleNavGroup('${group}')" aria-label="Toggle ${esc(label)} navigation" aria-expanded="${collapsed?'false':'true'}" aria-controls="navGroup-${group}"><span>${esc(label)}</span><span class="navGroupChevron" aria-hidden="true"></span></button>`:'';
-    const links=items.map(([key,name,icon])=>{
-      const unavailable=navUnavailableReason(key);
-      return `<button class="navLink ${state.view===key?'active':''}" type="button" ${unavailable?'disabled aria-disabled="true" title="'+esc(unavailable)+'"':'onclick="goView(\''+key+'\')"'} ${state.view===key?'aria-current="page"':''}><span>${icon}</span><span class="navText">${esc(name)}</span></button>`;
+  const headText=document.querySelector('.appNavHead span');
+  if(state.zone==='fleet'){
+    if(headText)headText.textContent='Fleet Host Control';
+    const fleetNavItems=[
+      ['fleet-servers','Servers',I.server],
+      ['fleet-containers','Containers',I.box],
+      ['fleet-jobs','Jobs',I.terminal],
+      ['fleet-audit','Audit Logs',I.shield],
+      ['fleet-settings','Settings',I.gear]
+    ];
+    nav.innerHTML=`<section class="navGroup" aria-label="Fleet Navigation">
+      <div class="navGroupLinks">
+        ${fleetNavItems.map(([key,name,icon])=>`
+          <button class="navLink ${state.view===key?'active':''}" type="button" onclick="goView('${key}')" ${state.view===key?'aria-current="page"':''}>
+            <span>${icon}</span><span class="navText">${esc(name)}</span>
+          </button>
+        `).join('')}
+      </div>
+    </section>`;
+  }else{
+    if(headText)headText.textContent='Control center';
+    const groups=[['core',''],['more','More Tools']];
+    nav.innerHTML=groups.map(([group,label])=>{
+      const items=navItems.filter(item=>item[3]===group);
+      if(!items.length)return '';
+      const collapsible=group==='more';
+      const collapsed=collapsible&&state.navGroupsCollapsed[group];
+      const heading=label?`<button class="navGroupToggle" id="navGroupToggle-${group}" type="button" onclick="toggleNavGroup('${group}')" aria-label="Toggle ${esc(label)} navigation" aria-expanded="${collapsed?'false':'true'}" aria-controls="navGroup-${group}"><span>${esc(label)}</span><span class="navGroupChevron" aria-hidden="true"></span></button>`:'';
+      const links=items.map(([key,name,icon])=>{
+        const unavailable=navUnavailableReason(key);
+        return `<button class="navLink ${state.view===key?'active':''}" type="button" ${unavailable?'disabled aria-disabled="true" title="'+esc(unavailable)+'"':'onclick="goView(\''+key+'\')"'} ${state.view===key?'aria-current="page"':''}><span>${icon}</span><span class="navText">${esc(name)}</span></button>`;
+      }).join('');
+      return `<section class="navGroup ${collapsed?'is-collapsed':''}" aria-label="${label||'Primary'}">${heading}<div class="navGroupLinks" ${label?`id="navGroup-${group}"`:''}>${links}</div></section>`;
     }).join('');
-    return `<section class="navGroup ${collapsed?'is-collapsed':''}" aria-label="${label||'Primary'}">${heading}<div class="navGroupLinks" ${label?`id="navGroup-${group}"`:''}>${links}</div></section>`;
-  }).join('');
+  }
   const navEl=document.getElementById('appNav');
   navEl.classList.toggle('collapsed',!!state.sidebarCollapsed);
   const toggle=document.getElementById('navToggle');
@@ -1022,20 +1104,39 @@ function currentHash(){
 }
 function applyHash(){
   const [view,parts]=currentHash();
-  if(view==='clusters'||view==='connections'||view==='security'){
+  if(view==='fleet'){
+    state.zone='fleet';
+    const sub=parts[0]||'servers';
+    const validFleetSubs=['servers','containers','jobs','audit','settings'];
+    const activeSub=validFleetSubs.includes(sub)?sub:'servers';
+    state.view='fleet-'+activeSub;
+    state.fleetSub=activeSub;
+    state.fleetTarget=parts[1]||null;
+    if(location.hash!=='#/fleet/'+activeSub){
+      history.replaceState(null,'','#/fleet/'+activeSub);
+    }
+    if(state.fleetEnabled){
+      refresh().then(()=>render());
+    }
+  }else if(view==='clusters'||view==='connections'||view==='security'){
+    state.zone='kafka';
     state.view='settings';
     state.settingsTab=view;
     history.replaceState(null,'','#/settings/'+view);
   }else if(view==='settings'){
+    state.zone='kafka';
     state.view='settings';
     state.settingsTab=parts[0]||'general';
   }else{
+    state.zone='kafka';
     state.view=view;
   }
-  if(state.view!=='databrowser'){state.topic=null;state.partition='all';state.off=null;}
-  else{state.topic=parts[0]||null;state.partition=parts[1]||'all';state.off=parts[2]||null;}
-  state.group=state.view==='groups'?(parts[0]||null):null;
-  state.topicDetail=state.view==='topics'?(parts[0]||null):null;
+  if(state.zone==='kafka'){
+    if(state.view!=='databrowser'){state.topic=null;state.partition='all';state.off=null;}
+    else{state.topic=parts[0]||null;state.partition=parts[1]||'all';state.off=parts[2]||null;}
+    state.group=state.view==='groups'?(parts[0]||null):null;
+    state.topicDetail=state.view==='topics'?(parts[0]||null):null;
+  }
   render();
 }
 window.addEventListener('hashchange',applyHash);
@@ -1054,19 +1155,42 @@ function render(){
   try{
     const scroller=$('#view'),keepScroll=(scroller&&window.__renderedView===state.view)?scroller.scrollTop:0;
     updateBrokerPicker();buildNav();buildTList();buildStatusbar();updateChips();
+    const zoneSwitcherEl=document.getElementById('zoneSwitcher');
+    if(zoneSwitcherEl){
+      zoneSwitcherEl.style.display=state.fleetEnabled?'inline-flex':'none';
+      const bK=document.getElementById('zoneBtnKafka'),bF=document.getElementById('zoneBtnFleet');
+      if(bK){bK.classList.toggle('active',state.zone==='kafka');bK.setAttribute('aria-selected',String(state.zone==='kafka'));}
+      if(bF){bF.classList.toggle('active',state.zone==='fleet');bF.setAttribute('aria-selected',String(state.zone==='fleet'));}
+    }
+    document.body.dataset.zone=state.zone;
     const unavailableNav=navUnavailableReason(state.view),localOnlyView=['clusters','settings','security'].includes(state.view);
-    const topicPane=document.getElementById('plist'),topicBtn=document.getElementById('topicBtn'),browsing=state.view==='databrowser'&&!unavailableNav;
+    const topicPane=document.getElementById('plist'),topicBtn=document.getElementById('topicBtn'),browsing=state.zone==='kafka'&&state.view==='databrowser'&&!unavailableNav;
     if(topicPane){topicPane.hidden=!browsing;if(!browsing)topicPane.classList.remove('mobileOpen');}
     if(topicBtn){topicBtn.hidden=!browsing;topicBtn.setAttribute('aria-expanded',String(browsing&&topicPane.classList.contains('mobileOpen')));}
-    const item=navItems.find(([k])=>k===state.view);
-    $('#title').textContent=item?item[1]:(state.view==='settings'?'Settings':'Overview');
-    const tabLabels={general:'General',clusters:'Clusters',connections:'Connections',security:'Security & ACL'};
-    $('#crumb').textContent=state.view==='databrowser'&&state.topic?('/ '+state.topic):(state.view==='groups'&&state.group?('/ '+state.group):(state.view==='settings'&&state.settingsTab&&state.settingsTab!=='general'?('/ '+(tabLabels[state.settingsTab]||state.settingsTab)):''));
-    const isConnActive=state.view==='connections'||(state.view==='settings'&&(state.settingsTab==='connections'||state.settingsTab==='general'||state.settingsTab==='clusters'));
-    $('#topActions').innerHTML=(state.view==='overview'||isConnActive?`<button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="refreshAll()">Refresh</button>`:
-      state.view==='databrowser'?`<button class="btn" style="padding:5px 12px;font-size:12px" onclick="goView('connections')">Connections</button>`:'');
+    
+    if(state.zone==='fleet'){
+      const fleetTitles={'fleet-servers':'Servers','fleet-containers':'Containers','fleet-jobs':'Jobs','fleet-audit':'Audit Logs','fleet-settings':'Fleet Settings'};
+      const curTitle=fleetTitles[state.view]||'Fleet';
+      $('#title').textContent=curTitle;
+      $('#crumb').textContent=state.fleetEnabled?('Fleet / '+curTitle):'Fleet / Disabled';
+      $('#topActions').innerHTML=state.fleetEnabled?(`<button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="refreshAll()">Refresh</button>`+(state.view==='fleet-servers'?`<button class="btn" style="padding:5px 12px;font-size:12px" onclick="openEnrollModal()">+ Enroll Server</button>`:'')):'';
+    }else{
+      const item=navItems.find(([k])=>k===state.view);
+      $('#title').textContent=item?item[1]:(state.view==='settings'?'Settings':'Overview');
+      const tabLabels={general:'General',clusters:'Clusters',connections:'Connections',security:'Security & ACL'};
+      $('#crumb').textContent=state.view==='databrowser'&&state.topic?('Kafka / Topics / '+state.topic):(state.view==='groups'&&state.group?('Kafka / Groups / '+state.group):(state.view==='settings'&&state.settingsTab&&state.settingsTab!=='general'?('Kafka / Settings / '+(tabLabels[state.settingsTab]||state.settingsTab)):('Kafka / '+(item?item[1]:'Overview'))));
+      const isConnActive=state.view==='connections'||(state.view==='settings'&&(state.settingsTab==='connections'||state.settingsTab==='general'||state.settingsTab==='clusters'));
+      $('#topActions').innerHTML=(state.view==='overview'||isConnActive?`<button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="refreshAll()">Refresh</button>`:
+        state.view==='databrowser'?`<button class="btn" style="padding:5px 12px;font-size:12px" onclick="goView('connections')">Connections</button>`:'');
+    }
     const v=$('#view');
     if(state.auth&&state.auth.enabled&&!state.auth.authenticated){v.innerHTML=viewLogin();bindLogin();}
+    else if(state.zone==='fleet'&&!state.fleetEnabled)v.innerHTML=viewFleetDisabled();
+    else if(state.view==='fleet-servers')v.innerHTML=viewFleetServers();
+    else if(state.view==='fleet-containers')v.innerHTML=viewFleetContainers();
+    else if(state.view==='fleet-jobs')v.innerHTML=viewFleetJobs();
+    else if(state.view==='fleet-audit')v.innerHTML=viewFleetAudit();
+    else if(state.view==='fleet-settings')v.innerHTML=viewFleetSettings();
     else if(state.targetSwitching&&!['clusters','settings'].includes(state.view))v.innerHTML=targetSwitchingPanel();
     else if(isTargetUnavailable()&&!localOnlyView)v.innerHTML=targetUnavailablePanel();
     else if(unavailableNav&&!localOnlyView)v.innerHTML=unsupportedPanel(state.view);
@@ -1097,6 +1221,20 @@ function render(){
 async function refreshAll(){await refresh();render();}
 window.refreshAll=refreshAll;
 window.goView=async function(v,sub){
+  if(v.startsWith('fleet-')){
+    const subName=v.replace(/^fleet-/,'');
+    state.zone='fleet';
+    state.view=v;
+    state.fleetSub=subName;
+    const h='#/fleet/'+subName;
+    if(location.hash!==h)location.hash=h;
+    if(state.fleetEnabled){
+      await refresh();
+    }
+    render();
+    return;
+  }
+  state.zone='kafka';
   if(v==='clusters'||v==='connections'||v==='security'){
     state.view='settings';
     state.settingsTab=v;
@@ -1126,6 +1264,30 @@ window.goView=async function(v,sub){
   if(location.hash!==h)location.hash=h;
   await refresh();
   render();
+};
+window.switchZone=async function(z){
+  if(z==='fleet'){
+    state.zone='fleet';
+    const sub=(state.view&&state.view.startsWith('fleet-'))?state.view.replace(/^fleet-/,''):'servers';
+    const target='fleet-'+sub;
+    state.view=target;
+    state.fleetSub=sub;
+    const h='#/fleet/'+sub;
+    if(location.hash!==h)location.hash=h;
+    if(state.fleetEnabled)await refresh();
+    render();
+  }else{
+    state.zone='kafka';
+    state.view='overview';
+    const h='#/overview';
+    if(location.hash!==h)location.hash=h;
+    await refresh();
+    render();
+  }
+};
+window.goZoneRoot=function(){
+  if(state.zone==='fleet')switchZone('fleet');
+  else switchZone('kafka');
 };
 
 /* Fitur 12: login */
@@ -1650,13 +1812,15 @@ window.askConfirm=function(opts){
     let done=false;
     const onKey=e=>{ if(e.key==='Escape')finish(false); };
     const finish=v=>{ if(done)return; done=true; document.removeEventListener('keydown',onKey); closeOverlay(); resolve(v); };
-    const typeHtml=typeToConfirm?`<label style="margin-top:10px">Type "${esc(typeToConfirm)}" to confirm</label><input id="confirmType" autocomplete="off">`:'';
-    const html=`<div class="overlay"><div class="modal"><h3>${esc(title)}</h3><div class="muted" style="margin:8px 0">${esc(body)}</div>${typeHtml}<div style="margin-top:14px;display:flex;gap:8px"><button class="btn ${danger?'danger':''}" id="confirmOk"${typeToConfirm?' disabled aria-disabled="true"':''}>${esc(confirmLabel)}</button><button class="btn ghost" id="confirmCancel">Cancel</button></div></div></div>`;
+    const typeHtml=typeToConfirm?`<label style="margin-top:10px" for="confirmType">Type <strong>${esc(typeToConfirm)}</strong> to confirm</label><input id="confirmType" autocomplete="off" aria-required="true">`:'';
+    const html=`<div class="overlay"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle"><h3 id="confirmTitle">${esc(title)}</h3><div class="muted" style="margin:8px 0">${esc(body)}</div>${typeHtml}<div style="margin-top:14px;display:flex;gap:8px"><button class="btn ${danger?'danger':''}" id="confirmOk"${typeToConfirm?' disabled aria-disabled="true"':''}>${esc(confirmLabel)}</button><button class="btn ghost" id="confirmCancel">Cancel</button></div></div></div>`;
     document.body.insertAdjacentHTML('beforeend',html);
     const overlay=document.querySelector('.overlay'),okBtn=document.getElementById('confirmOk'),cancelBtn=document.getElementById('confirmCancel'),input=document.getElementById('confirmType');
     if(typeToConfirm){
       const updateOk=()=>{ const match=input.value===typeToConfirm; okBtn.disabled=!match; if(match)okBtn.removeAttribute('aria-disabled'); else okBtn.setAttribute('aria-disabled','true'); };
-      input.addEventListener('input',updateOk); input.focus();
+      input.addEventListener('input',updateOk);
+      input.addEventListener('keydown',e=>{ if(e.key==='Enter'&&input.value===typeToConfirm)finish(true); });
+      input.focus();
     } else { cancelBtn.focus(); }
     okBtn.addEventListener('click',()=>{ if(typeToConfirm&&input.value!==typeToConfirm)return; finish(true); });
     cancelBtn.addEventListener('click',()=>finish(false));
@@ -2846,6 +3010,612 @@ window.deleteCluster=async function(name){
   }catch(e){ toast('Error: '+e.message); }
 };
 
+/* ========================================================
+   PocketKafka Fleet UI (Zona Host & Remote Agent Management)
+   ======================================================== */
+
+function fleetStatusBadge(status, label){
+  const s = (status || '').toLowerCase();
+  const text = label || (s.charAt(0).toUpperCase() + s.slice(1));
+  if(s === 'online' || s === 'running' || s === 'succeeded' || s === 'success'){
+    return `<span class="badge b-green" style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span>${esc(text)}</span></span>`;
+  }
+  if(s === 'stale' || s === 'paused' || s === 'queued' || s === 'accepted'){
+    return `<span class="badge b-amber" style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>${esc(text)}</span></span>`;
+  }
+  if(s === 'revoked'){
+    return `<span class="badge muted" style="display:inline-flex;align-items:center;gap:4px;border-color:var(--danger-line);color:var(--danger-text)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg><span>${esc(text)}</span></span>`;
+  }
+  if(s === 'offline' || s === 'failed' || s === 'critical' || s === 'error'){
+    return `<span class="badge b-red" style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><span>${esc(text)}</span></span>`;
+  }
+  if(s === 'exited' || s === 'stopped'){
+    return `<span class="badge muted" style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg><span>${esc(text)}</span></span>`;
+  }
+  if(s === 'restarting'){
+    return `<span class="badge b-purple" style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>${esc(text)}</span></span>`;
+  }
+  return `<span class="badge muted" style="display:inline-flex;align-items:center;gap:4px"><span>${esc(text)}</span></span>`;
+}
+
+function serverStatusInfo(s){
+  if((s.status||'').toLowerCase()==='revoked') return { status: 'revoked', label: 'Revoked' };
+  const updated = s.updated_at ? new Date(s.updated_at).getTime() : 0;
+  if(!updated) return { status: 'offline', label: 'Offline' };
+  const diff = Date.now() - updated;
+  if(diff < 90000) return { status: 'online', label: 'Online' };
+  if(diff < 300000) return { status: 'stale', label: 'Stale' };
+  return { status: 'offline', label: 'Offline' };
+}
+
+function viewFleetDisabled(){
+  return `<div class="card" style="max-width:640px;margin:40px auto;padding:28px">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+      <div style="width:40px;height:40px;border-radius:4px;background:var(--warn-soft);color:var(--warn);display:flex;align-items:center;justify-content:center">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+      </div>
+      <div>
+        <h3 style="font-size:17px;margin-bottom:4px">Fleet Management Disabled</h3>
+        <span class="badge b-amber">Subsystem Inactive</span>
+      </div>
+    </div>
+    <p class="muted" style="margin-bottom:12px;line-height:1.6">
+      The Fleet subsystem is currently disabled on this PocketKafka broker (<code>fleet.enabled: false</code>). Host server enrollment, container orchestration, and remote agent management are turned off.
+    </p>
+    <p class="muted" style="margin-bottom:20px;font-size:12px">
+      To enable Fleet management, configure <code>fleet.enabled: true</code> in your broker configuration and restart the broker.
+    </p>
+    <div style="display:flex;gap:10px">
+      <button class="btn" onclick="switchZone('kafka')">Back to Kafka Overview</button>
+      <button class="btn ghost" onclick="goView('settings')">Broker Settings</button>
+    </div>
+  </div>`;
+}
+
+function viewFleetServers(){
+  const srvs = state.fleetServers || [];
+  const onlineCount = srvs.filter(s => serverStatusInfo(s).status === 'online').length;
+  const staleCount = srvs.filter(s => serverStatusInfo(s).status === 'stale').length;
+  const offlineCount = srvs.filter(s => serverStatusInfo(s).status === 'offline').length;
+  const revokedCount = srvs.filter(s => (s.status||'').toLowerCase() === 'revoked').length;
+  const q = (state.fleetSearch || '').toLowerCase();
+  const filtered = srvs.filter(s => !q || (s.id||'').toLowerCase().includes(q) || (s.name||'').toLowerCase().includes(q) || (s.host||'').toLowerCase().includes(q) || (s.agent_id||'').toLowerCase().includes(q));
+
+  const stats = `<div class="overviewFacts" style="margin-bottom:16px">
+    <div class="overviewFact"><dt>Enrolled Hosts</dt><dd>${srvs.length}</dd></div>
+    <div class="overviewFact"><dt>Online</dt><dd style="color:var(--success)">${onlineCount}</dd></div>
+    <div class="overviewFact"><dt>Stale / Offline</dt><dd style="color:var(--warn)">${staleCount + offlineCount}</dd></div>
+    <div class="overviewFact"><dt>Revoked</dt><dd style="color:var(--muted)">${revokedCount}</dd></div>
+  </div>`;
+
+  const toolbar = `<div class="card" style="margin-bottom:16px;padding:12px">
+    <div class="row" style="gap:10px;justify-content:space-between;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;align-items:center;flex:1;max-width:380px">
+        <input placeholder="Filter hosts by name, ID, or IP..." value="${esc(state.fleetSearch||'')}" oninput="state.fleetSearch=this.value;render()" style="width:100%" aria-label="Filter servers">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="openEnrollModal()">+ Enroll Server</button>
+        <button class="btn ghost" onclick="refreshAll()">Refresh</button>
+      </div>
+    </div>
+  </div>`;
+
+  const rows = filtered.map(s => {
+    const st = serverStatusInfo(s);
+    const badge = fleetStatusBadge(st.status, st.label);
+    const updated = s.updated_at ? new Date(s.updated_at).getTime() : 0;
+    const hbText = updated ? rel(updated) : 'never';
+    const hbFull = updated ? new Date(updated).toISOString() : '-';
+    const enrolled = s.created_at ? new Date(s.created_at).toLocaleDateString() : '-';
+    const isRevoked = st.status === 'revoked';
+    const revokeBtn = isRevoked
+      ? `<span class="badge muted">Revoked</span>`
+      : `<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="revokeServer('${esc(s.id)}')">Revoke</button>`;
+    const containerLink = `<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="goFleetContainers('${esc(s.id)}')">Containers</button>`;
+
+    return `<tr>
+      <td class="mono" style="font-weight:600">${esc(s.name || s.id)}</td>
+      <td>${badge}</td>
+      <td class="mono">${esc(s.host || 'local-socket')}</td>
+      <td class="mono" style="font-size:11px;color:var(--muted)">${esc(s.agent_id ? s.agent_id.slice(0,12)+'...' : '-')}</td>
+      <td title="${esc(hbFull)}">${esc(hbText)}</td>
+      <td class="muted" style="font-size:11px">${esc(enrolled)}</td>
+      <td><div class="clRowActions">${containerLink}${revokeBtn}</div></td>
+    </tr>`;
+  }).join('');
+
+  const table = tableScroll(`<table><thead><tr>
+    <th>Server Host / ID</th><th>Status</th><th>Endpoint</th><th>Agent ID</th><th>Last Heartbeat</th><th>Enrolled</th><th>Actions</th>
+  </tr></thead><tbody>
+    ${rows || '<tr><td colspan="7" class="muted" style="padding:28px;text-align:center">No servers match filter. Enroll a server to manage host containers.</td></tr>'}
+  </tbody></table>`);
+
+  return `<div>${pageHeader('Fleet Servers', 'Managed host nodes with fleet-agent and Docker Engine daemon.')}
+    ${stats}
+    ${toolbar}
+    <div class="card" style="padding:0">${table}</div>
+  </div>`;
+}
+
+function viewFleetContainers(){
+  const srvs = state.fleetServers || [];
+  const cnts = state.fleetContainers || [];
+  const sFilter = state.fleetServerFilter || '';
+  const stFilter = state.fleetStateFilter || 'all';
+  const q = (state.fleetSearch || '').toLowerCase();
+
+  const filtered = cnts.filter(c => {
+    if(sFilter && c.server_id && c.server_id !== sFilter) return false;
+    const st = (c.state || '').toLowerCase();
+    if(stFilter === 'running' && st !== 'running') return false;
+    if(stFilter === 'exited' && st !== 'exited' && st !== 'stopped') return false;
+    if(stFilter === 'paused' && st !== 'paused') return false;
+    if(q){
+      const name = (c.names && c.names[0]) ? c.names[0].toLowerCase() : (c.id||'').toLowerCase();
+      const img = (c.image || '').toLowerCase();
+      if(!name.includes(q) && !img.includes(q) && !(c.id||'').toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
+  const runningCount = cnts.filter(c => (c.state||'').toLowerCase() === 'running').length;
+  const exitedCount = cnts.filter(c => (c.state||'').toLowerCase() === 'exited' || (c.state||'').toLowerCase() === 'stopped').length;
+  const pausedCount = cnts.filter(c => (c.state||'').toLowerCase() === 'paused').length;
+
+  const stats = `<div class="overviewFacts" style="margin-bottom:16px">
+    <div class="overviewFact"><dt>Total Containers</dt><dd>${cnts.length}</dd></div>
+    <div class="overviewFact"><dt>Running</dt><dd style="color:var(--success)">${runningCount}</dd></div>
+    <div class="overviewFact"><dt>Exited / Stopped</dt><dd style="color:var(--muted)">${exitedCount}</dd></div>
+    <div class="overviewFact"><dt>Paused</dt><dd style="color:var(--warn)">${pausedCount}</dd></div>
+  </div>`;
+
+  const srvOpts = `<option value="">All Servers (${srvs.length})</option>` + srvs.map(s => `<option value="${esc(s.id)}" ${sFilter===s.id?'selected':''}>${esc(s.name||s.id)}</option>`).join('');
+
+  const toolbar = `<div class="card" style="margin-bottom:16px;padding:12px">
+    <div class="row" style="gap:10px;justify-content:space-between;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label for="cntServerSel" class="muted" style="font-size:11px">Server</label>
+        <select id="cntServerSel" style="width:auto" onchange="state.fleetServerFilter=this.value;render()">${srvOpts}</select>
+        <label for="cntStateSel" class="muted" style="font-size:11px">State</label>
+        <select id="cntStateSel" style="width:auto" onchange="state.fleetStateFilter=this.value;render()">
+          <option value="all" ${stFilter==='all'?'selected':''}>All States</option>
+          <option value="running" ${stFilter==='running'?'selected':''}>Running</option>
+          <option value="exited" ${stFilter==='exited'?'selected':''}>Exited / Stopped</option>
+          <option value="paused" ${stFilter==='paused'?'selected':''}>Paused</option>
+        </select>
+        <input placeholder="Search container or image..." value="${esc(state.fleetSearch||'')}" oninput="state.fleetSearch=this.value;render()" style="max-width:240px" aria-label="Search containers">
+      </div>
+      <button class="btn ghost" onclick="refreshAll()">Refresh</button>
+    </div>
+  </div>`;
+
+  const rows = filtered.map(c => {
+    const rawName = (c.names && c.names[0]) ? c.names[0].replace(/^\//, '') : c.id;
+    const isRunning = (c.state || '').toLowerCase() === 'running';
+    const badge = fleetStatusBadge(c.state, c.status || c.state);
+    const shortId = (c.id || '').slice(0, 12);
+    const srvId = c.server_id || (srvs.length === 1 ? srvs[0].id : '');
+    const srvLabel = srvId || 'unknown';
+    const noSrv = srvId === '';
+
+    const actions = isRunning
+      ? `<button class="btn ghost" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="restartContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Restart</button>
+         <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="stopContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Stop</button>`
+      : `<button class="btn" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="startContainer('${esc(c.id)}','${esc(srvId)}')">Start</button>`;
+
+    const logsBtn = `<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="viewContainerLogs('${esc(c.id)}','${esc(rawName)}')">Logs</button>`;
+
+    return `<tr>
+      <td class="mono">
+        <div style="font-weight:600">${esc(rawName)}</div>
+        <div class="muted" style="font-size:10px">${esc(shortId)}</div>
+      </td>
+      <td class="mono" style="font-size:11px;color:var(--muted)">${esc(srvLabel)}</td>
+      <td class="mono" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.image||'')}">${esc(c.image || '-')}</td>
+      <td>${badge}</td>
+      <td class="mono" style="font-size:10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.command||'')}">${esc(c.command || '-')}</td>
+      <td><div class="clRowActions">${actions}${logsBtn}</div></td>
+    </tr>`;
+  }).join('');
+
+  const table = tableScroll(`<table><thead><tr>
+    <th>Container Name / ID</th><th>Host Server</th><th>Image</th><th>State / Status</th><th>Command</th><th>Actions</th>
+  </tr></thead><tbody>
+    ${rows || '<tr><td colspan="6" class="muted" style="padding:28px;text-align:center">No containers found. Ensure a fleet-agent is connected.</td></tr>'}
+  </tbody></table>`);
+
+  return `<div>${pageHeader('Containers', 'Docker containers across connected fleet host nodes.')}
+    ${stats}
+    ${toolbar}
+    <div class="card" style="padding:0">${table}</div>
+  </div>`;
+}
+
+function viewFleetJobs(){
+  const jobs = state.fleetJobs || [];
+  const statusFilter = state.fleetJobStatusFilter || 'all';
+  const q = (state.fleetJobSearch || '').toLowerCase();
+
+  const filtered = jobs.filter(j => {
+    const st = (j.status || '').toLowerCase();
+    if(statusFilter === 'active' && !(st==='queued'||st==='accepted'||st==='running')) return false;
+    if(statusFilter === 'succeeded' && st !== 'succeeded') return false;
+    if(statusFilter === 'failed' && st !== 'failed') return false;
+    if(q){
+      if(!(j.id||'').toLowerCase().includes(q) && !(j.action||'').toLowerCase().includes(q) && !(j.target||'').toLowerCase().includes(q) && !(j.server_id||'').toLowerCase().includes(q) && !(j.actor||'').toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
+  const activeCount = jobs.filter(j => {
+    const st = (j.status||'').toLowerCase();
+    return st === 'queued' || st === 'accepted' || st === 'running';
+  }).length;
+  const succCount = jobs.filter(j => (j.status||'').toLowerCase() === 'succeeded').length;
+  const failCount = jobs.filter(j => (j.status||'').toLowerCase() === 'failed').length;
+
+  const stats = `<div class="overviewFacts" style="margin-bottom:16px">
+    <div class="overviewFact"><dt>Total Dispatched Jobs</dt><dd>${jobs.length}</dd></div>
+    <div class="overviewFact"><dt>Active / Running</dt><dd style="color:var(--primary-text)">${activeCount}</dd></div>
+    <div class="overviewFact"><dt>Succeeded</dt><dd style="color:var(--success)">${succCount}</dd></div>
+    <div class="overviewFact"><dt>Failed</dt><dd style="color:var(--danger-text)">${failCount}</dd></div>
+  </div>`;
+
+  const toolbar = `<div class="card" style="margin-bottom:16px;padding:12px">
+    <div class="row" style="gap:10px;justify-content:space-between;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label for="jobStatusSel" class="muted" style="font-size:11px">Status</label>
+        <select id="jobStatusSel" style="width:auto" onchange="state.fleetJobStatusFilter=this.value;render()">
+          <option value="all" ${statusFilter==='all'?'selected':''}>All Jobs</option>
+          <option value="active" ${statusFilter==='active'?'selected':''}>Active (Queued/Running)</option>
+          <option value="succeeded" ${statusFilter==='succeeded'?'selected':''}>Succeeded</option>
+          <option value="failed" ${statusFilter==='failed'?'selected':''}>Failed</option>
+        </select>
+        <input placeholder="Filter by job ID, target, host..." value="${esc(state.fleetJobSearch||'')}" oninput="state.fleetJobSearch=this.value;render()" style="max-width:240px" aria-label="Search jobs">
+      </div>
+      <button class="btn ghost" onclick="refreshAll()">Refresh</button>
+    </div>
+  </div>`;
+
+  const rows = filtered.map(j => {
+    const badge = fleetStatusBadge(j.status);
+    const shortId = (j.id || '').slice(0, 8);
+    const created = j.created_at ? rel(new Date(j.created_at).getTime()) : '-';
+    let duration = '-';
+    if(j.completed_at && (j.started_at || j.created_at)){
+      const start = new Date(j.started_at || j.created_at).getTime();
+      const end = new Date(j.completed_at).getTime();
+      duration = ((end - start) / 1000).toFixed(2) + 's';
+    } else if(j.status === 'running' && j.started_at){
+      duration = 'running (' + rel(new Date(j.started_at).getTime()) + ')';
+    }
+
+    const err = j.error ? `<div class="mono" style="color:var(--danger-text);font-size:11px;margin-top:2px">${esc(j.error)}</div>` : '';
+
+    return `<tr>
+      <td class="mono" title="${esc(j.id)}"><strong>${esc(shortId)}</strong></td>
+      <td><span class="chip mono">${esc(j.action || '-')}</span></td>
+      <td class="mono" style="font-size:11px">${esc(j.target || '-')}</td>
+      <td class="mono" style="font-size:11px;color:var(--muted)">${esc(j.server_id || '-')}</td>
+      <td>${badge}${err}</td>
+      <td class="mono" style="font-size:11px">${esc(j.actor || '-')}</td>
+      <td class="muted" style="font-size:11px">${esc(created)}</td>
+      <td class="mono" style="font-size:11px">${esc(duration)}</td>
+    </tr>`;
+  }).join('');
+
+  const table = tableScroll(`<table><thead><tr>
+    <th>Job ID</th><th>Action</th><th>Target</th><th>Host Server</th><th>Status</th><th>Actor</th><th>Created</th><th>Duration</th>
+  </tr></thead><tbody>
+    ${rows || '<tr><td colspan="8" class="muted" style="padding:28px;text-align:center">No background jobs found.</td></tr>'}
+  </tbody></table>`);
+
+  return `<div>${pageHeader('Async Jobs', 'Container lifecycle tasks dispatched to remote fleet agents.')}
+    ${stats}
+    ${toolbar}
+    <div class="card" style="padding:0">${table}</div>
+  </div>`;
+}
+
+function viewFleetAudit(){
+  const events = state.fleetAudit || [];
+  const q = (state.fleetAuditSearch || '').toLowerCase();
+  const filtered = events.filter(e => {
+    if(!q) return true;
+    return (e.actor||'').toLowerCase().includes(q) ||
+           (e.action||'').toLowerCase().includes(q) ||
+           (e.target||'').toLowerCase().includes(q) ||
+           (e.result||'').toLowerCase().includes(q) ||
+           (e.detail||'').toLowerCase().includes(q);
+  });
+
+  const stats = `<div class="overviewFacts" style="margin-bottom:16px">
+    <div class="overviewFact"><dt>Total Audit Events</dt><dd>${events.length}</dd></div>
+    <div class="overviewFact"><dt>Success / Accepted</dt><dd style="color:var(--success)">${events.filter(e=>e.result==='success'||e.result==='accepted').length}</dd></div>
+    <div class="overviewFact"><dt>Failed / Rejected</dt><dd style="color:var(--danger-text)">${events.filter(e=>e.result==='failed'||e.result==='rejected').length}</dd></div>
+    <div class="overviewFact"><dt>Retention Window</dt><dd style="font-size:14px;color:var(--muted)">30 days / 10k</dd></div>
+  </div>`;
+
+  const toolbar = `<div class="card" style="margin-bottom:16px;padding:12px">
+    <div class="row" style="gap:10px;justify-content:space-between;flex-wrap:wrap">
+      <input placeholder="Filter audit events by actor, action, target..." value="${esc(state.fleetAuditSearch||'')}" oninput="state.fleetAuditSearch=this.value;render()" style="max-width:320px" aria-label="Search audit events">
+      <button class="btn ghost" onclick="refreshAll()">Refresh</button>
+    </div>
+  </div>`;
+
+  const rows = filtered.map(e => {
+    const ts = e.time ? new Date(e.time).toISOString().replace('T',' ').slice(0,19) : '-';
+    const badge = fleetStatusBadge(e.result);
+    return `<tr>
+      <td class="mono" style="font-size:11px;color:var(--muted)">${esc(ts)}</td>
+      <td class="mono" style="font-weight:600">${esc(e.actor || '-')}</td>
+      <td><span class="chip mono">${esc(e.action || '-')}</span></td>
+      <td class="mono" style="font-size:11px">${esc(e.target || '-')}</td>
+      <td>${badge}</td>
+      <td class="mono" style="font-size:11px;color:var(--muted)">${esc(e.correlation_id ? e.correlation_id.slice(0,8)+'...' : '-')}</td>
+      <td style="font-size:11px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.detail||'')}">${esc(e.detail || '-')}</td>
+    </tr>`;
+  }).join('');
+
+  const table = tableScroll(`<table><thead><tr>
+    <th>Timestamp</th><th>Actor</th><th>Action</th><th>Target</th><th>Result</th><th>Correlation ID</th><th>Details</th>
+  </tr></thead><tbody>
+    ${rows || '<tr><td colspan="7" class="muted" style="padding:28px;text-align:center">No audit events recorded yet.</td></tr>'}
+  </tbody></table>`);
+
+  return `<div>${pageHeader('Fleet Audit Log', 'Append-only audit trail with correlation IDs and metadata sanitization.')}
+    ${stats}
+    ${toolbar}
+    <div class="card" style="padding:0">${table}</div>
+  </div>`;
+}
+
+function viewFleetSettings(){
+  const st = state.fleetStatus || {};
+  const enrs = state.fleetEnrollments || [];
+
+  const statusCard = `<div class="card" style="margin-bottom:16px">
+    <div class="kicker">Subsystem</div>
+    <h3 style="margin-bottom:14px">Fleet Controller Status</h3>
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <span>Operational State</span>
+      <span class="badge b-green">ACTIVE (in-process mux)</span>
+    </div>
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <span>Enrolled Host Servers</span>
+      <span class="mono">${st.servers ?? 0}</span>
+    </div>
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <span>Connected Agents</span>
+      <span class="mono">${st.agents ?? 0}</span>
+    </div>
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <span>Active Jobs</span>
+      <span class="mono">${st.active_jobs ?? 0}</span>
+    </div>
+    <div class="row" style="justify-content:space-between">
+      <span>Audit Retention</span>
+      <span class="mono">30 days / 10,000 entries</span>
+    </div>
+  </div>`;
+
+  const enrRows = enrs.map(e => {
+    const tok = esc(((e.token_prefix || e.token || '').slice(0, 10))) + '...';
+    const isUsed = !!e.used;
+    const isExpired = e.expires_at && (new Date(e.expires_at).getTime() < Date.now());
+    let badge = '<span class="badge b-green">ACTIVE</span>';
+    if(isUsed) badge = '<span class="badge muted">USED</span>';
+    else if(isExpired) badge = '<span class="badge b-amber">EXPIRED</span>';
+
+    const exp = e.expires_at ? rel(new Date(e.expires_at).getTime()) : '-';
+
+    return `<tr>
+      <td class="mono">${tok}</td>
+      <td class="mono">${esc(e.server_id || '-')}</td>
+      <td>${badge}</td>
+      <td class="muted" style="font-size:11px">${esc(exp)}</td>
+    </tr>`;
+  }).join('');
+
+  const enrCard = `<div class="card" style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div>
+        <div class="kicker">Security & Onboarding</div>
+        <h3>Enrollment Tokens</h3>
+      </div>
+      <button class="btn" onclick="openEnrollModal()">+ Issue Token</button>
+    </div>
+    <div class="tableScroll"><table><thead><tr>
+      <th>Token Prefix</th><th>Server ID</th><th>Status</th><th>Expires</th>
+    </tr></thead><tbody>
+      ${enrRows || '<tr><td colspan="4" class="muted" style="padding:16px;text-align:center">No active enrollment tokens.</td></tr>'}
+    </tbody></table></div>
+  </div>`;
+
+  const quickstart = `<div class="card">
+    <div class="kicker">Documentation</div>
+    <h3 style="margin-bottom:10px">Agent Quickstart</h3>
+    <p class="muted" style="font-size:12px;margin-bottom:12px;line-height:1.6">
+      PocketKafka Fleet uses a lightweight daemon (<code>fleet-agent</code>) installed on target host nodes (Linux or WSL) to communicate with this controller over outbound TLS with HMAC mutual authentication and Docker Engine socket integration.
+    </p>
+    <div style="font-size:11px;font-family:var(--font-mono);background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;line-height:1.7">
+      <div style="color:var(--muted)"># 1. Issue token above, then run on the target host:</div>
+      <div>fleet-agent --token &lt;token&gt; --server &lt;server-id&gt;</div>
+    </div>
+  </div>`;
+
+  return `<div>${pageHeader('Fleet Settings', 'Subsystem health, enrollment tokens, and agent configuration.')}
+    ${statusCard}
+    ${enrCard}
+    ${quickstart}
+  </div>`;
+}
+
+window.openEnrollModal=function(){
+  const html=`<div class="overlay"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="enrollTitle" style="max-width:540px">
+    <h3 id="enrollTitle">Enroll New Server</h3>
+    <p class="muted" style="margin:6px 0 14px;font-size:12px">Generate a single-use token to register a fleet-agent on a host.</p>
+    <label for="enrollServerId">Server ID / Host Name</label>
+    <input id="enrollServerId" placeholder="e.g. srv-prod-node-1" autocomplete="off" required>
+    <div style="height:10px"></div>
+    <label for="enrollDuration">Token Expiration</label>
+    <select id="enrollDuration">
+      <option value="15m" selected>15 minutes</option>
+      <option value="1h">1 hour</option>
+      <option value="24h">24 hours</option>
+      <option value="72h">3 days</option>
+    </select>
+    <div id="enrollResult" style="display:none;margin-top:14px;padding:12px;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px">
+      <div style="font-weight:600;font-size:11px;color:var(--success);margin-bottom:6px">Token Generated Successfully</div>
+      <div class="muted" style="font-size:11px;margin-bottom:6px">Run this command on your host:</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input id="enrollCmd" class="mono" style="font-size:11px" readonly>
+        <button class="btn ghost" style="padding:6px 10px;font-size:11px" onclick="copyEnrollCmd()">Copy</button>
+      </div>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn" id="enrollSubmitBtn" onclick="doCreateEnrollment()">Generate Token</button>
+      <button class="btn ghost" onclick="closeOverlay()">Close</button>
+    </div>
+  </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  document.getElementById('enrollServerId')?.focus();
+};
+
+window.doCreateEnrollment=async function(){
+  const srvId = (document.getElementById('enrollServerId')?.value||'').trim();
+  const dur = document.getElementById('enrollDuration')?.value || '15m';
+  if(!srvId){ toast('Server ID is required'); return; }
+  try{
+    const res = await apiLocal('/api/v1/fleet/enrollments', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ server_id: srvId, duration: dur })
+    });
+    const cmd = `fleet-agent --token ${res.token} --server ${res.server_id}`;
+    const cmdInput = document.getElementById('enrollCmd');
+    if(cmdInput) cmdInput.value = cmd;
+    const resDiv = document.getElementById('enrollResult');
+    if(resDiv) resDiv.style.display = 'block';
+    const subBtn = document.getElementById('enrollSubmitBtn');
+    if(subBtn) subBtn.style.display = 'none';
+    toast('Enrollment token issued');
+    await refresh();
+  }catch(e){
+    toast('Enrollment failed: ' + e.message);
+  }
+};
+
+window.copyEnrollCmd=function(){
+  const inp = document.getElementById('enrollCmd');
+  if(inp){
+    navigator.clipboard?.writeText(inp.value);
+    toast('Command copied to clipboard');
+  }
+};
+
+window.revokeServer=async function(id){
+  if(!id) return;
+  const ok = await askConfirm({
+    title: 'Revoke Server Credentials',
+    body: 'Revoking server "'+id+'" will immediately disconnect the agent and revoke all associated credentials. This action cannot be undone.',
+    confirmLabel: 'Revoke Server',
+    danger: true,
+    typeToConfirm: id
+  });
+  if(!ok) return;
+  try{
+    await apiLocal('/api/v1/fleet/servers/' + encodeURIComponent(id) + '/revoke', { method: 'POST' });
+    toast('Server "'+id+'" revoked');
+    await refresh();
+    render();
+  }catch(e){
+    toast('Revoke failed: ' + e.message);
+  }
+};
+
+window.startContainer=async function(id, serverId){
+  try{
+    const q = serverId ? '?server_id=' + encodeURIComponent(serverId) : '';
+    const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(id) + '/start' + q, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ server_id: serverId })
+    });
+    toast('Start container job accepted: ' + (res.job_id || ''));
+    await refresh();
+    render();
+  }catch(e){
+    toast('Start container failed: ' + e.message);
+  }
+};
+
+window.stopContainer=async function(id, name, serverId){
+  const targetName = (name && name !== '-') ? name : id;
+  const ok = await askConfirm({
+    title: 'Stop Container',
+    body: 'Stopping container "'+targetName+'" on host server "'+(serverId||'-')+'".',
+    confirmLabel: 'Stop Container',
+    danger: true,
+    typeToConfirm: targetName
+  });
+  if(!ok) return;
+  try{
+    const q = serverId ? '?server_id=' + encodeURIComponent(serverId) : '';
+    const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(id) + '/stop' + q, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ server_id: serverId })
+    });
+    toast('Stop container job accepted: ' + (res.job_id || ''));
+    await refresh();
+    render();
+  }catch(e){
+    toast('Stop container failed: ' + e.message);
+  }
+};
+
+window.restartContainer=async function(id, name, serverId){
+  const targetName = (name && name !== '-') ? name : id;
+  const ok = await askConfirm({
+    title: 'Restart Container',
+    body: 'Restarting container "'+targetName+'" on host server "'+(serverId||'-')+'".',
+    confirmLabel: 'Restart Container',
+    danger: true,
+    typeToConfirm: targetName
+  });
+  if(!ok) return;
+  try{
+    const q = serverId ? '?server_id=' + encodeURIComponent(serverId) : '';
+    const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(id) + '/restart' + q, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ server_id: serverId })
+    });
+    toast('Restart container job accepted: ' + (res.job_id || ''));
+    await refresh();
+    render();
+  }catch(e){
+    toast('Restart container failed: ' + e.message);
+  }
+};
+
+window.viewContainerLogs=async function(id, name){
+  try{
+    const res = await apiLocal('/api/v1/fleet/containers/' + encodeURIComponent(id) + '/logs?tail=100');
+    const lines = (res.lines || []).join('\n') || '(no log output captured)';
+    const body = `<div style="font-family:var(--font-mono);font-size:11.5px;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;max-height:450px;overflow:auto;white-space:pre-wrap;word-break:break-all">${esc(lines)}</div>`;
+    nodeDrw('Logs: ' + (name || id), 'Last 100 lines', body, []);
+  }catch(e){
+    toast('Failed to load logs: ' + e.message);
+  }
+};
+
+window.goFleetContainers=function(serverId){
+  state.fleetServerFilter=serverId||'';
+  goView('fleet-containers');
+};
+
 /* Broker logs viewer */
 function viewLogs(){ return `<div>${pageHeader('Broker Logs','Review recent broker log entries by severity.')}<div class="card"><div class="kicker">Diagnostics</div><h3 style="margin-bottom:10px">Broker Logs</h3>
   <div class="row" style="margin-bottom:10px"><select id="logLvl" style="width:auto" onchange="loadLogs()"><option value="">Semua level</option><option value="warn">Warn ke atas</option><option value="err">Error saja</option></select><button class="btn ghost" onclick="loadLogs()">Refresh</button><span class="updatedAgo">ring 500 baris terakhir</span></div>
@@ -2864,6 +3634,13 @@ function palItems(){
   items.push({label:'Clusters',run:()=>goView('clusters'),hint:'settings'});
   items.push({label:'Connections',run:()=>goView('connections'),hint:'settings'});
   items.push({label:'Security & ACL',run:()=>goView('security'),hint:'settings'});
+  if(state.fleetEnabled){
+    items.push({label:'Fleet: Servers',run:()=>goView('fleet-servers'),hint:'fleet'});
+    items.push({label:'Fleet: Containers',run:()=>goView('fleet-containers'),hint:'fleet'});
+    items.push({label:'Fleet: Jobs',run:()=>goView('fleet-jobs'),hint:'fleet'});
+    items.push({label:'Fleet: Audit Logs',run:()=>goView('fleet-audit'),hint:'fleet'});
+    items.push({label:'Fleet: Settings',run:()=>goView('fleet-settings'),hint:'fleet'});
+  }
   (state.topics||[]).forEach(t=>items.push({label:t.name,run:()=>{state.topic=t.name;goView('databrowser').then(()=>loadMsgs());},hint:'topic'}));
   (state.groups||[]).forEach(g=>items.push({label:g.name,run:()=>{goView('groups').then(()=>openGroup(g.name));},hint:'group'}));
   return items;
@@ -2981,7 +3758,7 @@ document.addEventListener('visibilitychange',()=>{
   else bindView();
 });
 initTheme();
-(async function(){await loadClusterList();await refresh();if(!location.hash)history.replaceState(null,'','#/overview');applyHash();state.initialized=true;})();
+(async function(){await loadClusterList();await loadInfo();await refresh();if(!location.hash)history.replaceState(null,'','#/overview');applyHash();state.initialized=true;})();
 </script>
 </body>
 </html>

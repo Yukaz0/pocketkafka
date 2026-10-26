@@ -59,6 +59,10 @@ func cookieName(secure bool) string {
 
 func (s *Server) authMiddleware(mux *http.ServeMux, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.fleetEnabled && (strings.HasPrefix(r.URL.Path, "/api/v1/fleet/") || r.URL.Path == "/api/v1/fleet") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if !s.authEnabled {
 			next.ServeHTTP(w, r)
 			return

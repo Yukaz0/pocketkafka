@@ -234,6 +234,30 @@ type TLS struct {
 	MQTT bool `yaml:"mqtt"`
 }
 
+// FleetTLS configures TLS certificates for the Fleet manager listener.
+type FleetTLS struct {
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+	// CAFile trusts the fleet listener certificate (self-signed deployments).
+	// Empty falls back to system roots; when the listener serves its own
+	// CertFile, that certificate is trusted automatically.
+	CAFile string `yaml:"ca_file"`
+	// ServerName overrides the TLS ServerName the dashboard proxy uses.
+	// Empty derives from the listen host (wildcard binds dial loopback).
+	ServerName string `yaml:"server_name"`
+}
+
+// Fleet configures the agent fleet management subsystem.
+type Fleet struct {
+	Enabled          bool     `yaml:"enabled"`
+	Listen           string   `yaml:"listen"`
+	TLS              FleetTLS `yaml:"tls"`
+	SecretKey        string   `yaml:"secret_key"`
+	HeartbeatTimeout int      `yaml:"heartbeat_timeout"`
+	RetentionDays    int      `yaml:"retention_days"`
+	RetentionEntries int      `yaml:"retention_entries"`
+}
+
 // Config is the root configuration document.
 type Config struct {
 	Broker              Broker            `yaml:"broker"`
@@ -249,6 +273,7 @@ type Config struct {
 	Gateway             Gateway           `yaml:"gateway"`
 	MQTT                MQTT              `yaml:"mqtt"`
 	Security            Security          `yaml:"security"`
+	Fleet               Fleet             `yaml:"fleet"`
 }
 
 // Default returns a Config populated with the documented default values.
@@ -304,6 +329,13 @@ func Default() Config {
 		Security: Security{
 			RequireTLSForPlain: true,
 			TLS:                TLS{Listen: "127.0.0.1:9093"},
+		},
+		Fleet: Fleet{
+			Enabled:          false,
+			Listen:           "127.0.0.1:18090",
+			HeartbeatTimeout: 30,
+			RetentionDays:    30,
+			RetentionEntries: 10000,
 		},
 	}
 }
@@ -431,6 +463,16 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.Security.TLS.MinVersion, os.Getenv("KAFKA_TLS_MIN_VERSION"))
 	setBool(&cfg.Security.TLS.HTTP, os.Getenv("KAFKA_TLS_HTTP"))
 	setBool(&cfg.Security.TLS.MQTT, os.Getenv("KAFKA_TLS_MQTT"))
+	setBool(&cfg.Fleet.Enabled, os.Getenv("KAFKA_FLEET_ENABLED"))
+	setStr(&cfg.Fleet.Listen, os.Getenv("KAFKA_FLEET_LISTEN"))
+	setStr(&cfg.Fleet.TLS.CertFile, os.Getenv("KAFKA_FLEET_TLS_CERT_FILE"))
+	setStr(&cfg.Fleet.TLS.KeyFile, os.Getenv("KAFKA_FLEET_TLS_KEY_FILE"))
+	setStr(&cfg.Fleet.TLS.CAFile, os.Getenv("KAFKA_FLEET_TLS_CA_FILE"))
+	setStr(&cfg.Fleet.TLS.ServerName, os.Getenv("KAFKA_FLEET_TLS_SERVER_NAME"))
+	setStr(&cfg.Fleet.SecretKey, os.Getenv("KAFKA_FLEET_SECRET_KEY"))
+	setInt(&cfg.Fleet.HeartbeatTimeout, os.Getenv("KAFKA_FLEET_HEARTBEAT_TIMEOUT"))
+	setInt(&cfg.Fleet.RetentionDays, os.Getenv("KAFKA_FLEET_RETENTION_DAYS"))
+	setInt(&cfg.Fleet.RetentionEntries, os.Getenv("KAFKA_FLEET_RETENTION_ENTRIES"))
 }
 
 // setList splits a comma separated environment value into dst.

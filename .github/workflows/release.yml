@@ -40,12 +40,17 @@ jobs:
               go build -trimpath -buildvcs=true \
               -ldflags="-s -w -X main.version=${VERSION}" \
               -o "dist/pkctl-${1#linux/}" ./cmd/kctl
+            CGO_ENABLED=0 GOOS=linux GOARCH="${1#linux/}" \
+              go build -trimpath -buildvcs=true \
+              -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "dist/fleet-agent-linux-${1#linux/}" ./cmd/fleet-agent
+          done
           ./dist/pocketkafka-linux-amd64 about
-
+          ./dist/fleet-agent-linux-amd64 -version
       - name: Attest binaries
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v2.3.0
         with:
-          subject-path: 'dist/pocketkafka-*, dist/pkctl-*'
+          subject-path: 'dist/pocketkafka-*, dist/pkctl-*, dist/fleet-agent-*'
 
       - name: SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
@@ -74,5 +79,7 @@ jobs:
             dist/pocketkafka-linux-arm64
             dist/pkctl-amd64
             dist/pkctl-arm64
+            dist/fleet-agent-linux-amd64
+            dist/fleet-agent-linux-arm64
             dist/SHA256SUMS.txt
             dist/pocketkafka-sbom.cdx.json

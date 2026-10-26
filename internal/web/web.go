@@ -1,12 +1,20 @@
 package web
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +22,7 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/authz"
 	"github.com/Yukaz0/pocketkafka/internal/config"
 	"github.com/Yukaz0/pocketkafka/internal/coordinator"
+	"github.com/Yukaz0/pocketkafka/internal/fleet"
 	"github.com/Yukaz0/pocketkafka/internal/gateway"
 	"github.com/Yukaz0/pocketkafka/internal/metrics"
 	"github.com/Yukaz0/pocketkafka/internal/ratelimit"
@@ -67,6 +76,13 @@ type Server struct {
 
 	gatewayListen   string
 	schemaRegListen string
+
+	fleetEnabled    bool
+	fleetListen     string
+	fleetProxyToken string
+	fleetUseTLS     bool
+	fleetTLSCA      string
+	fleetTLSServer  string
 
 	cfg config.Config
 
@@ -127,9 +143,23 @@ func (s *Server) WithSchemaRegistryListen(listen string) *Server {
 	s.schemaRegListen = listen
 	return s
 }
-
 func (s *Server) WithConfig(cfg config.Config) *Server {
 	s.cfg = cfg
+	s.fleetEnabled = cfg.Fleet.Enabled
+	s.fleetListen = cfg.Fleet.Listen
+	s.fleetUseTLS = cfg.Fleet.TLS.CertFile != "" && cfg.Fleet.TLS.KeyFile != ""
+	s.fleetTLSCA = cfg.Fleet.TLS.CAFile
+	s.fleetTLSServer = cfg.Fleet.TLS.ServerName
+	return s
+}
+
+func (s *Server) WithFleet(enabled bool, listen, proxyToken string, useTLS bool, caFile, serverName string) *Server {
+	s.fleetEnabled = enabled
+	s.fleetListen = listen
+	s.fleetProxyToken = proxyToken
+	s.fleetUseTLS = useTLS
+	s.fleetTLSCA = caFile
+	s.fleetTLSServer = serverName
 	return s
 }
 
@@ -228,6 +258,13 @@ func (s *Server) authorizeAPI(mux *http.ServeMux, next http.Handler) http.Handle
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Fleet routes are authenticated by authMiddleware (session/bearer) above;
+		// granular authorization happens in the fleet listener via the
+		// proxy-injected principal. Forward without a dashboard ACL rule.
+		if strings.HasPrefix(r.URL.Path, "/api/v1/fleet/") || r.URL.Path == "/api/v1/fleet" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		_, pattern := mux.Handler(r)
 		rule, ok := lookupRule(pattern)
 		if !ok {
@@ -319,9 +356,94 @@ func (s *Server) routes() *http.ServeMux {
 	s.route(mux, "POST /api/v1/clusters/test", s.handleTestCluster)
 	s.route(mux, "DELETE /api/v1/clusters/{name}", s.handleDeleteCluster)
 	s.route(mux, "/api/v1/target/{name}/{path...}", s.handleClusterTarget)
+
+	if s.fleetEnabled {
+		u := fleetTargetURL(s.fleetListen, s.fleetUseTLS)
+		proxy := httputil.NewSingleHostReverseProxy(u)
+		if s.fleetUseTLS {
+			tlsConf, err := fleetProxyTLS(s.fleetTLSCA, s.fleetTLSServer, u)
+			if err != nil {
+				slog.Error("fleet: proxy TLS config invalid", "error", err)
+				mux.Handle("/api/v1/fleet/", fleet.NewDisabledHandler())
+				mux.Handle("/api/v1/fleet", fleet.NewDisabledHandler())
+				return mux
+			}
+			proxy.Transport = &http.Transport{TLSClientConfig: tlsConf}
+		}
+		origDirector := proxy.Director
+		proxy.Director = func(req *http.Request) {
+			origDirector(req)
+			req.Header.Del("X-Pocketkafka-Principal")
+			req.Header.Del("X-Remote-User")
+			req.Header.Del("X-Pocketkafka-Fleet-Proxy")
+			if p := s.requestPrincipal(req); p != "" {
+				req.Header.Set("X-Pocketkafka-Principal", p)
+			}
+			req.Header.Set("X-Pocketkafka-Fleet-Proxy", s.fleetProxyToken)
+		}
+		mux.Handle("/api/v1/fleet/", proxy)
+		mux.Handle("/api/v1/fleet", proxy)
+	} else {
+		disabled := fleet.NewDisabledHandler()
+		mux.Handle("/api/v1/fleet/", disabled)
+		mux.Handle("/api/v1/fleet", disabled)
+	}
 	return mux
 }
 
+func fleetTargetURL(listen string, useTLS bool) *url.URL {
+	host := strings.TrimSpace(listen)
+	if host == "" {
+		host = "127.0.0.1:18090"
+	}
+	if h, p, err := net.SplitHostPort(host); err == nil {
+		if h == "" || h == "0.0.0.0" || h == "::" {
+			host = net.JoinHostPort("127.0.0.1", p)
+		}
+	} else if strings.HasPrefix(host, ":") {
+		host = "127.0.0.1" + host
+	}
+	scheme := "http"
+	if useTLS {
+		scheme = "https"
+	}
+	u, err := url.Parse(scheme + "://" + host)
+	if err != nil {
+		u, _ = url.Parse(scheme + "://127.0.0.1:18090")
+	}
+	return u
+}
+
+// fleetProxyTLS builds the TLS config the dashboard proxy uses to reach the
+// fleet listener. Wildcard binds are dialed via loopback (see fleetTargetURL);
+// ServerName defaults to the dialed host unless fleet.tls.server_name is set.
+// Trust order: fleet.tls.ca_file, else the listener's own cert_file, else
+// system roots. A self-signed listener cert without ca_file therefore works
+// only when the proxy can read that same cert_file.
+func fleetProxyTLS(caFile, serverName string, u *url.URL) (*tls.Config, error) {
+	conf := &tls.Config{MinVersion: tls.VersionTLS12}
+	host := u.Hostname()
+	if serverName != "" {
+		conf.ServerName = serverName
+	} else if host != "" {
+		conf.ServerName = host
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if caFile != "" {
+		pem, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("fleet: read ca_file: %w", err)
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("fleet: ca_file has no valid certificates")
+		}
+	}
+	conf.RootCAs = pool
+	return conf, nil
+}
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.Write([]byte(s.metrics.Render(s.store, s.gm, s.clusterID)))
@@ -348,11 +470,12 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{
-		"product":  "pocketkafka",
-		"vendor":   "Muhammad Jafar Ikbal (Yukaz0)",
-		"upstream": "https://github.com/Yukaz0/pocketkafka",
-		"license":  "MIT",
-		"version":  s.version,
+		"product":      "pocketkafka",
+		"vendor":       "Muhammad Jafar Ikbal (Yukaz0)",
+		"upstream":     "https://github.com/Yukaz0/pocketkafka",
+		"license":      "MIT",
+		"version":      s.version,
+		"fleetEnabled": s.fleetEnabled,
 	})
 }
 

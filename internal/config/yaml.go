@@ -358,4 +358,18 @@ func applyYAML(cfg *Config, m map[string]interface{}) {
 			cfg.Security.TLS.MQTT = getBool(t, "mqtt", cfg.Security.TLS.MQTT)
 		}
 	}
+	if f := asMap(m, "fleet"); f != nil {
+		cfg.Fleet.Enabled = getBool(f, "enabled", cfg.Fleet.Enabled)
+		cfg.Fleet.Listen = getString(f, "listen", cfg.Fleet.Listen)
+		cfg.Fleet.SecretKey = getString(f, "secret_key", cfg.Fleet.SecretKey)
+		cfg.Fleet.HeartbeatTimeout = getInt(f, "heartbeat_timeout", cfg.Fleet.HeartbeatTimeout)
+		cfg.Fleet.RetentionDays = getInt(f, "retention_days", cfg.Fleet.RetentionDays)
+		cfg.Fleet.RetentionEntries = getInt(f, "retention_entries", cfg.Fleet.RetentionEntries)
+		if t := asMap(f, "tls"); t != nil {
+			cfg.Fleet.TLS.CertFile = getString(t, "cert_file", cfg.Fleet.TLS.CertFile)
+			cfg.Fleet.TLS.KeyFile = getString(t, "key_file", cfg.Fleet.TLS.KeyFile)
+			cfg.Fleet.TLS.CAFile = getString(t, "ca_file", cfg.Fleet.TLS.CAFile)
+			cfg.Fleet.TLS.ServerName = getString(t, "server_name", cfg.Fleet.TLS.ServerName)
+		}
+	}
 }

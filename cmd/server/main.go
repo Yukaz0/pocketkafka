@@ -27,6 +27,7 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/config"
 	"github.com/Yukaz0/pocketkafka/internal/coordinator"
 	"github.com/Yukaz0/pocketkafka/internal/credential"
+	"github.com/Yukaz0/pocketkafka/internal/fleet"
 	"github.com/Yukaz0/pocketkafka/internal/gateway"
 	"github.com/Yukaz0/pocketkafka/internal/handler"
 	"github.com/Yukaz0/pocketkafka/internal/httpauth"
@@ -196,7 +197,58 @@ func main() {
 		}
 	}()
 
-	// MQTT Bridge (port 1883) bridging IoT topics to Kafka. When security is on
+	// Isolated Fleet server (port 18090 by default), started only when
+	// fleet.enabled is true. When disabled, the listener is not opened at all (FR-001).
+	var fleetSrv *http.Server
+	if cfg.Fleet.Enabled {
+		regPath := filepath.Join(cfg.Storage.DataDir, "__fleet_agents.json")
+		fleetReg, err := fleet.NewRegistry(regPath, cfg.Fleet.SecretKey)
+		if err != nil {
+			log.Fatalf("init fleet registry: %v", err)
+		}
+		fleetJobs := fleet.NewJobs(cfg.Storage.DataDir)
+		fleetAudit := fleet.NewAudit(cfg.Storage.DataDir)
+		if cfg.Fleet.RetentionDays > 0 || cfg.Fleet.RetentionEntries > 0 {
+			fleetJobs.SetRetention(cfg.Fleet.RetentionDays, cfg.Fleet.RetentionEntries)
+			fleetAudit.SetRetention(cfg.Fleet.RetentionDays, cfg.Fleet.RetentionEntries)
+		}
+		fleetMgr := fleet.NewAgentManager(fleetReg, fleetJobs)
+		fleetProxyToken := fleet.NewProxyToken()
+		fleetUseTLS := cfg.Fleet.TLS.CertFile != "" && cfg.Fleet.TLS.KeyFile != ""
+		var fleetAuthz authz.Authorizer = authorizer
+		if !cfg.Security.Enabled {
+			fleetAuthz = authz.AllowAllAuthorizer{}
+		}
+		fleetControl := fleet.NewServer(fleet.ServerConfig{
+			Registry:     fleetReg,
+			Jobs:         fleetJobs,
+			Audit:        fleetAudit,
+			Manager:      fleetMgr,
+			Authorizer:   fleetAuthz,
+			MaxBodyBytes: cfg.Network.MaxRequestSizeBytes,
+			ProxyToken:   fleetProxyToken,
+		})
+		if ws != nil {
+			ws.WithFleet(cfg.Fleet.Enabled, cfg.Fleet.Listen, fleetProxyToken, fleetUseTLS, cfg.Fleet.TLS.CAFile, cfg.Fleet.TLS.ServerName)
+		}
+		var fleetTLSConf *tls.Config
+		if fleetUseTLS {
+			cert, err := tls.LoadX509KeyPair(cfg.Fleet.TLS.CertFile, cfg.Fleet.TLS.KeyFile)
+			if err != nil {
+				log.Fatalf("load fleet TLS keypair: %v", err)
+			}
+			fleetTLSConf = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+		}
+		fleetSrv = newHTTPServer(cfg, cfg.Fleet.Listen, limitBody(fleetControl.Handler(), cfg.Network.MaxRequestSizeBytes), false)
+		go func() {
+			log.Printf("pocketkafka fleet server on %s", httpScheme(fleetUseTLS)+cfg.Fleet.Listen)
+			if err := serveHTTP(fleetSrv, fleetTLSConf, fleetUseTLS); err != nil && err != http.ErrServerClosed {
+				log.Printf("fleet server error: %v", err)
+			}
+		}()
+	} else {
+		log.Printf("pocketkafka fleet disabled (fleet.enabled=false)")
+	}
 	// the bridge authenticates CONNECT and authorizes publish/subscribe against
 	// the mapped Kafka topic so MQTT is not an authorization bypass.
 	mqttBridge := gateway.NewMQTTBridge(store).
@@ -265,6 +317,7 @@ func main() {
 	mqttBridge.Close()
 	stopRetention()
 	stopCompaction()
+	shutdownHTTP(fleetSrv)
 	shutdownHTTP(webSrv)
 	shutdownHTTP(gwSrv)
 	shutdownHTTP(srSrv)
