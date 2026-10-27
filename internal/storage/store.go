@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Yukaz0/pocketkafka/internal/tier"
@@ -281,13 +280,5 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) DiskUsagePct() float64 {
-	var fs syscall.Statfs_t
-	if err := syscall.Statfs(s.dir, &fs); err != nil {
-		return 0
-	}
-	if fs.Blocks == 0 {
-		return 0
-	}
-	used := float64(fs.Blocks - fs.Bfree)
-	return used / float64(fs.Blocks) * 100
+	return diskUsagePct(s.dir)
 }
