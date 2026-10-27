@@ -45,6 +45,18 @@ jobs:
               -ldflags="-s -w -X main.version=${VERSION}" \
               -o "dist/fleet-agent-linux-${1#linux/}" ./cmd/fleet-agent
           done
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+            go build -trimpath -buildvcs=true \
+            -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "dist/pocketkafka-windows-amd64.exe" ./cmd/server
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+            go build -trimpath -buildvcs=true \
+            -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "dist/pkctl-windows-amd64.exe" ./cmd/kctl
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+            go build -trimpath -buildvcs=true \
+            -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "dist/fleet-agent-windows-amd64.exe" ./cmd/fleet-agent
           ./dist/pocketkafka-linux-amd64 about
           ./dist/fleet-agent-linux-amd64 -version
       - name: Attest binaries
@@ -81,5 +93,8 @@ jobs:
             dist/pkctl-arm64
             dist/fleet-agent-linux-amd64
             dist/fleet-agent-linux-arm64
+            dist/pocketkafka-windows-amd64.exe
+            dist/pkctl-windows-amd64.exe
+            dist/fleet-agent-windows-amd64.exe
             dist/SHA256SUMS.txt
             dist/pocketkafka-sbom.cdx.json
