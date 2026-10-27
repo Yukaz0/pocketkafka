@@ -212,6 +212,8 @@ func main() {
 			fleetJobs.SetRetention(cfg.Fleet.RetentionDays, cfg.Fleet.RetentionEntries)
 			fleetAudit.SetRetention(cfg.Fleet.RetentionDays, cfg.Fleet.RetentionEntries)
 		}
+		stopFleetRetention := startFleetRetention(fleetJobs, fleetAudit, time.Hour)
+		defer stopFleetRetention()
 		fleetMgr := fleet.NewAgentManager(fleetReg, fleetJobs)
 		fleetProxyToken := fleet.NewProxyToken()
 		fleetUseTLS := cfg.Fleet.TLS.CertFile != "" && cfg.Fleet.TLS.KeyFile != ""
@@ -348,6 +350,44 @@ func startOffsetRetention(gm *coordinator.GroupManager, retentionMinutes int) fu
 			case <-t.C:
 				if n := gm.PruneOffsets(time.Now(), retention); n > 0 {
 					log.Printf("offset retention: pruned %d idle committed offsets", n)
+				}
+			}
+		}
+	}()
+	return func() { once.Do(func() { close(done) }) }
+}
+
+// startFleetRetention prunes terminal async jobs and audit logs exceeding retention limits.
+func startFleetRetention(jobs *fleet.Jobs, audit *fleet.Audit, interval time.Duration) func() {
+	if jobs == nil && audit == nil {
+		return func() {}
+	}
+	if interval <= 0 {
+		interval = time.Hour
+	}
+	done := make(chan struct{})
+	var once sync.Once
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				if jobs != nil {
+					if n, err := jobs.Prune(); err != nil {
+						log.Printf("fleet: prune jobs: %v", err)
+					} else if n > 0 {
+						log.Printf("fleet: pruned %d expired jobs", n)
+					}
+				}
+				if audit != nil {
+					if n, err := audit.Prune(); err != nil {
+						log.Printf("fleet: prune audit: %v", err)
+					} else if n > 0 {
+						log.Printf("fleet: pruned %d expired audit events", n)
+					}
 				}
 			}
 		}

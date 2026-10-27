@@ -3148,13 +3148,13 @@ function fleetStatusBadge(status, label){
   if(s === 'online' || s === 'running' || s === 'succeeded' || s === 'success'){
     return `<span class="badge b-green" style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span>${esc(text)}</span></span>`;
   }
-  if(s === 'stale' || s === 'paused' || s === 'queued' || s === 'accepted'){
+  if(s === 'stale' || s === 'paused' || s === 'queued' || s === 'accepted' || s === 'removing'){
     return `<span class="badge b-amber" style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>${esc(text)}</span></span>`;
   }
   if(s === 'revoked'){
     return `<span class="badge muted" style="display:inline-flex;align-items:center;gap:4px;border-color:var(--danger-line);color:var(--danger-text)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg><span>${esc(text)}</span></span>`;
   }
-  if(s === 'offline' || s === 'failed' || s === 'critical' || s === 'error'){
+  if(s === 'offline' || s === 'failed' || s === 'critical' || s === 'error' || s === 'dead'){
     return `<span class="badge b-red" style="display:inline-flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg><span>${esc(text)}</span></span>`;
   }
   if(s === 'exited' || s === 'stopped'){
@@ -3276,13 +3276,13 @@ function viewFleetServers(){
     const isRevoked = st.status === 'revoked';
     const revokeBtn = isRevoked
       ? `<span class="badge muted">Revoked</span>`
-      : `<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="revokeServer('${esc(s.id)}')">Revoke</button>`;
+      : `<button class="btn danger" style="padding:3px 8px;font-size:11px" data-srv="${esc(s.id)}" onclick="revokeServer(this.dataset.srv)">Revoke</button>`;
     const hostCnts = (state.fleetContainers || []).filter(c => c.server_id === s.id);
     const runCnt = hostCnts.filter(c => (c.state || '').toLowerCase() === 'running').length;
     const cntBadge = hostCnts.length
-      ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" onclick="state.fleetServerFilter='${esc(s.id)}';goView('fleet-containers')" title="View containers on this host"><b>${runCnt}</b> run / ${hostCnts.length}</button>`
+      ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" data-srv="${esc(s.id)}" onclick="state.fleetServerFilter=this.dataset.srv;goView('fleet-containers')" title="View containers on this host"><b>${runCnt}</b> run / ${hostCnts.length}</button>`
       : `<span class="muted" style="font-size:11px">0</span>`;
-    const containerLink = `<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="goFleetContainers('${esc(s.id)}')">Containers</button>`;
+    const containerLink = `<button class="btn ghost" style="padding:3px 8px;font-size:11px" data-srv="${esc(s.id)}" onclick="goFleetContainers(this.dataset.srv)">Containers</button>`;
 
     return `<tr>
       <td class="mono" style="font-weight:600">${esc(s.name || s.id)}</td>
@@ -3374,34 +3374,38 @@ function viewFleetContainers(){
     const noSrv = srvId === '';
 
     const actions = isRunning
-      ? `<button class="btn ghost" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="restartContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Restart</button>
-         <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="removeContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}',true)">Remove</button>
-         <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="stopContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Stop</button>`
-      : `<button class="btn" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="startContainer('${esc(c.id)}','${esc(srvId)}')">Start</button>
-         <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} onclick="removeContainer('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}',false)">Remove</button>`;
-
-    const logsBtn = `<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="viewContainerLogs('${esc(c.id)}','${esc(rawName)}','${esc(srvId)}')">Logs</button>`;
+      ? `<button class="btn ghost" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} data-id="${esc(c.id)}" data-name="${esc(rawName)}" data-srv="${esc(srvId)}" onclick="restartContainer(this.dataset.id,this.dataset.name,this.dataset.srv)">Restart</button>
+         <button class="btn ghost" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} data-id="${esc(c.id)}" data-name="${esc(rawName)}" data-srv="${esc(srvId)}" onclick="stopContainer(this.dataset.id,this.dataset.name,this.dataset.srv)">Stop</button>
+         <button class="btn ghost" style="padding:3px 8px;font-size:11px" data-id="${esc(c.id)}" data-name="${esc(rawName)}" data-srv="${esc(srvId)}" onclick="viewContainerLogs(this.dataset.id,this.dataset.name,this.dataset.srv)">Logs</button>
+         <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} data-id="${esc(c.id)}" data-name="${esc(rawName)}" data-srv="${esc(srvId)}" data-force="true" onclick="removeContainer(this.dataset.id,this.dataset.name,this.dataset.srv,true)">Remove</button>`
+      : `<button class="btn" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} data-id="${esc(c.id)}" data-srv="${esc(srvId)}" onclick="startContainer(this.dataset.id,this.dataset.srv)">Start</button>
+         <button class="btn ghost" style="padding:3px 8px;font-size:11px" data-id="${esc(c.id)}" data-name="${esc(rawName)}" data-srv="${esc(srvId)}" onclick="viewContainerLogs(this.dataset.id,this.dataset.name,this.dataset.srv)">Logs</button>
+         <button class="btn danger" style="padding:3px 8px;font-size:11px" ${noSrv?'disabled title="server unknown"':''} data-id="${esc(c.id)}" data-name="${esc(rawName)}" data-srv="${esc(srvId)}" data-force="false" onclick="removeContainer(this.dataset.id,this.dataset.name,this.dataset.srv,false)">Remove</button>`;
 
     return `<tr>
       <td class="mono">
-        <a href="javascript:void(0)" onclick="viewContainerInspect('${esc(c.id)}')" style="font-weight:600;color:var(--text);text-decoration:none;border-bottom:1px dashed var(--border)" title="Inspect container details">${esc(rawName)}</a>
+        <a href="javascript:void(0)" data-id="${esc(c.id)}" onclick="viewContainerInspect(this.dataset.id)" style="font-weight:600;color:var(--text);text-decoration:none;border-bottom:1px dashed var(--border)" title="Inspect container details">${esc(rawName)}</a>
         <div class="muted" style="font-size:10px">${esc(shortId)}</div>
       </td>
       <td class="mono" style="font-size:11px">
-        ${srvId ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" onclick="state.fleetServerFilter='${esc(srvId)}';render()" title="Filter containers on ${esc(srvLabel)}">${esc(srvLabel)}</button>` : `<span class="muted">${esc(srvLabel)}</span>`}
+        ${srvId ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" data-srv="${esc(srvId)}" onclick="state.fleetServerFilter=this.dataset.srv;render()" title="Filter containers on ${esc(srvLabel)}">${esc(srvLabel)}</button>` : `<span class="muted">${esc(srvLabel)}</span>`}
       </td>
       <td class="mono" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.image||'')}">${esc(c.image || '-')}</td>
       <td>${badge}</td>
       <td class="mono" style="font-size:10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.command||'')}">${esc(c.command || '-')}</td>
       <td class="mono" style="min-width:140px;max-width:320px">${renderPortBadges(c.ports)}</td>
-      <td><div class="clRowActions">${actions}${logsBtn}</div></td>
+      <td><div class="clRowActions">${actions}</div></td>
     </tr>`;
   }).join('');
+
+  const emptyMsg = cnts.length
+    ? 'No containers match filter criteria.'
+    : 'No containers found. Ensure a fleet-agent is connected.';
 
   const table = tableScroll(`<table><thead><tr>
     <th>Container Name / ID</th><th>Host Server</th><th>Image</th><th>State / Status</th><th>Command</th><th>Ports</th><th>Actions</th>
   </tr></thead><tbody>
-    ${rows || '<tr><td colspan="7" class="muted" style="padding:28px;text-align:center">No containers found. Ensure a fleet-agent is connected.</td></tr>'}
+    ${rows || '<tr><td colspan="7" class="muted" style="padding:28px;text-align:center">'+emptyMsg+'</td></tr>'}
   </tbody></table>`);
 
   return `<div>${pageHeader('Containers', 'Docker containers across connected fleet host nodes.')}
@@ -3475,7 +3479,7 @@ function viewFleetJobs(){
     return `<tr>
       <td class="mono" title="${esc(j.id)}"><strong>${esc(shortId)}</strong></td>
       <td><span class="chip mono">${esc(j.action || '-')}</span></td>
-      <td class="mono" style="font-size:11px">${j.target ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" onclick="viewContainerLogs('${esc(j.target)}','${esc(j.target)}','${esc(j.server_id||'')}')" title="View logs for ${esc(j.target)}">${esc(j.target)}</button>` : '-'}</td>
+      <td class="mono" style="font-size:11px">${j.target ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" data-target="${esc(j.target)}" data-srv="${esc(j.server_id||'')}" onclick="viewContainerLogs(this.dataset.target,this.dataset.target,this.dataset.srv)" title="View logs for ${esc(j.target)}">${esc(j.target)}</button>` : '-'}</td>
       <td class="mono" style="font-size:11px;color:var(--muted)">${esc(j.server_id || '-')}</td>
       <td>${badge}${err}</td>
       <td class="mono" style="font-size:11px">${esc(j.actor || '-')}</td>
@@ -3532,7 +3536,7 @@ function viewFleetAudit(){
       <td><span class="chip mono">${esc(e.action || '-')}</span></td>
       <td class="mono" style="font-size:11px">${esc(e.target || '-')}</td>
       <td>${badge}</td>
-      <td class="mono" style="font-size:11px">${e.correlation_id ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" onclick="state.fleetAuditSearch='${esc(e.correlation_id)}';render()" title="Filter audit events by correlation ID ${esc(e.correlation_id)}">${esc(e.correlation_id.slice(0,8))}...</button>` : '-'}</td>
+      <td class="mono" style="font-size:11px">${e.correlation_id ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" data-cid="${esc(e.correlation_id)}" onclick="state.fleetAuditSearch=this.dataset.cid;render()" title="Filter audit events by correlation ID ${esc(e.correlation_id)}">${esc(e.correlation_id.slice(0,8))}...</button>` : '-'}</td>
       <td style="font-size:11px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.detail||'')}">${esc(e.detail || '-')}</td>
     </tr>`;
   }).join('');
@@ -3636,7 +3640,8 @@ window.openEnrollModal=function(){
     <h3 id="enrollTitle">Enroll New Server</h3>
     <p class="muted" style="margin:6px 0 14px;font-size:12px">Generate a single-use token to register a fleet-agent on a host.</p>
     <label for="enrollServerId">Server ID / Host Name</label>
-    <input id="enrollServerId" placeholder="e.g. srv-prod-node-1" autocomplete="off" required>
+    <input id="enrollServerId" placeholder="e.g. srv-prod-node-1" autocomplete="off" required maxlength="64">
+    <div class="muted" style="font-size:11px;margin-top:2px">Letters, numbers, hyphens, underscores, dots only (max 64 chars).</div>
     <div style="height:10px"></div>
     <label for="enrollDuration">Token Expiration</label>
     <select id="enrollDuration">
@@ -3651,7 +3656,7 @@ window.openEnrollModal=function(){
       <div class="muted" style="font-size:11px;margin-bottom:6px">Run this command on your host:</div>
       <div style="display:flex;gap:6px;align-items:center">
         <input id="enrollCmd" class="mono" style="font-size:11px" readonly>
-        <button class="btn ghost" style="padding:6px 10px;font-size:11px" onclick="copyEnrollCmd()">Copy</button>
+        <button class="btn ghost" style="padding:6px 10px;font-size:11px" onclick="copyEnrollCmd(this)">Copy</button>
       </div>
     </div>
     <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
@@ -3667,6 +3672,10 @@ window.doCreateEnrollment=async function(){
   const srvId = (document.getElementById('enrollServerId')?.value||'').trim();
   const dur = document.getElementById('enrollDuration')?.value || '15m';
   if(!srvId){ toast('Server ID is required'); return; }
+  if(!/^[a-zA-Z0-9_.-]{1,64}$/.test(srvId)){
+    toast('Server ID must be 1-64 characters and contain only letters, numbers, hyphens, underscores, and dots');
+    return;
+  }
   try{
     const res = await apiLocal('/api/v1/fleet/enrollments', {
       method: 'POST',
@@ -3687,12 +3696,11 @@ window.doCreateEnrollment=async function(){
   }
 };
 
-window.copyEnrollCmd=function(){
+window.copyEnrollCmd=function(btn){
   const inp = document.getElementById('enrollCmd');
-  if(inp){
-    navigator.clipboard?.writeText(inp.value);
-    toast('Command copied to clipboard');
-  }
+  if(!inp) return;
+  copyText2(inp.value, btn);
+  toast('Command copied to clipboard');
 };
 
 window.revokeServer=async function(id){
@@ -3723,8 +3731,9 @@ window.startContainer=async function(id, serverId){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ server_id: serverId })
     });
-    toast('Start container job accepted: ' + (res.job_id || ''));
-    await waitFleetJobDone(res.job_id);
+    toast('Start container job dispatched...');
+    const finalJob = await waitFleetJobDone(res.job_id);
+    handleJobOutcome(finalJob, 'Start container');
     await refresh();
     render();
   }catch(e){
@@ -3736,10 +3745,9 @@ window.stopContainer=async function(id, name, serverId){
   const targetName = (name && name !== '-') ? name : id;
   const ok = await askConfirm({
     title: 'Stop Container',
-    body: 'Stopping container "'+targetName+'" on host server "'+(serverId||'-')+'".',
+    body: 'Stop container "'+targetName+'" on host server "'+(serverId||'-')+'"?',
     confirmLabel: 'Stop Container',
-    danger: true,
-    typeToConfirm: targetName
+    danger: true
   });
   if(!ok) return;
   try{
@@ -3749,8 +3757,9 @@ window.stopContainer=async function(id, name, serverId){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ server_id: serverId })
     });
-    toast('Stop container job accepted: ' + (res.job_id || ''));
-    await waitFleetJobDone(res.job_id);
+    toast('Stop container job dispatched...');
+    const finalJob = await waitFleetJobDone(res.job_id);
+    handleJobOutcome(finalJob, 'Stop container');
     await refresh();
     render();
   }catch(e){
@@ -3762,10 +3771,9 @@ window.restartContainer=async function(id, name, serverId){
   const targetName = (name && name !== '-') ? name : id;
   const ok = await askConfirm({
     title: 'Restart Container',
-    body: 'Restarting container "'+targetName+'" on host server "'+(serverId||'-')+'".',
+    body: 'Restart container "'+targetName+'" on host server "'+(serverId||'-')+'"?',
     confirmLabel: 'Restart Container',
-    danger: true,
-    typeToConfirm: targetName
+    danger: true
   });
   if(!ok) return;
   try{
@@ -3775,8 +3783,9 @@ window.restartContainer=async function(id, name, serverId){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ server_id: serverId })
     });
-    toast('Restart container job accepted: ' + (res.job_id || ''));
-    await waitFleetJobDone(res.job_id);
+    toast('Restart container job dispatched...');
+    const finalJob = await waitFleetJobDone(res.job_id);
+    handleJobOutcome(finalJob, 'Restart container');
     await refresh();
     render();
   }catch(e){
@@ -3803,8 +3812,9 @@ window.removeContainer=async function(id, name, serverId, isRunning){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ server_id: serverId, force: !!isRunning })
     });
-    toast('Remove container job accepted: ' + (res.job_id || ''));
-    await waitFleetJobDone(res.job_id);
+    toast('Remove container job dispatched...');
+    const finalJob = await waitFleetJobDone(res.job_id);
+    handleJobOutcome(finalJob, 'Remove container');
     await waitFleetContainerGone(id, serverId);
     await refresh();
     render();
@@ -3812,6 +3822,20 @@ window.removeContainer=async function(id, name, serverId, isRunning){
     toast('Remove container failed: ' + e.message);
   }
 };
+
+function handleJobOutcome(j, actionLabel){
+  if(!j){
+    toast(actionLabel + ' still running in background. Check Jobs tab.');
+    return;
+  }
+  const st = j.status || (j.job && j.job.status);
+  const errMsg = j.error || (j.job && j.job.error);
+  if(st === 'failed'){
+    toast(actionLabel + ' failed on host: ' + (errMsg || 'unknown error'));
+  } else {
+    toast(actionLabel + ' succeeded');
+  }
+}
 window.viewContainerInspect = function(id){
   const cnts = state.fleetContainers || [];
   const c = cnts.find(item => item.id === id || (item.id||'').startsWith(id));
@@ -3838,7 +3862,7 @@ window.viewContainerInspect = function(id){
       </div>
       <div style="flex:1 1 180px">
         <div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:2px">Host Server</div>
-        <button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" onclick="state.fleetServerFilter='${esc(c.server_id||'')}';closeDrw();goView('fleet-containers')">${esc(c.server_id || 'local-host')}</button>
+        <button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" data-srv="${esc(c.server_id||'')}" onclick="state.fleetServerFilter=this.dataset.srv;closeDrw();goView('fleet-containers')">${esc(c.server_id || 'local-host')}</button>
       </div>
     </div>
 
@@ -3847,7 +3871,7 @@ window.viewContainerInspect = function(id){
         <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:2px">Full Container ID</span>
         <div style="display:flex;align-items:center;gap:8px">
           <code style="font-size:11px;word-break:break-all">${esc(c.id)}</code>
-          <button class="cbtn" onclick="copyText2('${esc(c.id)}', this)">Copy</button>
+          <button class="cbtn" data-copy="${esc(c.id)}" onclick="copyText2(this.dataset.copy, this)">Copy</button>
         </div>
       </div>
       <div>
@@ -3874,11 +3898,15 @@ window.viewContainerInspect = function(id){
     </div>
   </div>`;
 
+  state._inspectCid = c.id;
+  state._inspectName = rawName;
+  state._inspectSrv = c.server_id || '';
+
   const actions = [
-    { label: 'View Logs', fn: `viewContainerLogs('${esc(c.id)}','${esc(rawName)}','${esc(c.server_id||'')}')` },
+    { label: 'View Logs', fn: `viewContainerLogs(state._inspectCid, state._inspectName, state._inspectSrv)` },
     isRunning
-      ? { label: 'Restart', fn: `restartContainer('${esc(c.id)}','${esc(rawName)}','${esc(c.server_id||'')}')` }
-      : { label: 'Start', fn: `startContainer('${esc(c.id)}','${esc(c.server_id||'')}')` }
+      ? { label: 'Restart', fn: `restartContainer(state._inspectCid, state._inspectName, state._inspectSrv)` }
+      : { label: 'Start', fn: `startContainer(state._inspectCid, state._inspectSrv)` }
   ];
 
   nodeDrw('Inspect: ' + rawName, '', body, actions);

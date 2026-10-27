@@ -503,8 +503,12 @@ func validateFleet(c *Config, add func(string, ...interface{})) {
 	if c.Fleet.RetentionEntries < 0 {
 		add("fleet.retention_entries: must be >= 0 (got %d)", c.Fleet.RetentionEntries)
 	}
-	if c.Fleet.SecretKey != "" && len(c.Fleet.SecretKey) < 16 {
-		add("fleet.secret_key: must be at least 16 characters when set")
+	if len(c.Fleet.SecretKey) < 16 {
+		if c.Fleet.SecretKey == "" {
+			add("fleet.secret_key: must be configured (at least 16 characters) when fleet is enabled")
+		} else {
+			add("fleet.secret_key: must be at least 16 characters when set (got %d)", len(c.Fleet.SecretKey))
+		}
 	}
 	if env := os.Getenv("KAFKA_FLEET_SECRET_KEY"); env != "" && len(env) < 16 {
 		add("KAFKA_FLEET_SECRET_KEY: must be at least 16 characters when set")

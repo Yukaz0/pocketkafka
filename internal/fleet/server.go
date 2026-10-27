@@ -40,6 +40,20 @@ func NewProxyToken() string {
 	}
 	return hex.EncodeToString(b[:])
 }
+func isValidServerID(id string) bool {
+	if len(id) == 0 || len(id) > 64 {
+		return false
+	}
+	for i := range id {
+		c := id[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 
 // ServerConfig holds dependencies for FleetServer.
 type ServerConfig struct {
@@ -486,11 +500,15 @@ func (s *FleetServer) handleCreateEnrollment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if strings.TrimSpace(req.ServerID) == "" {
+	req.ServerID = strings.TrimSpace(req.ServerID)
+	if req.ServerID == "" {
 		s.writeError(w, r, http.StatusBadRequest, ErrCodeBadRequest, "server_id is required")
 		return
 	}
-
+	if !isValidServerID(req.ServerID) {
+		s.writeError(w, r, http.StatusBadRequest, ErrCodeBadRequest, "server_id must be 1-64 characters and contain only letters, numbers, hyphens, underscores, and dots")
+		return
+	}
 	if s.registry == nil {
 		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, "registry not configured")
 		return

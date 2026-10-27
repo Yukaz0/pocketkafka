@@ -517,18 +517,22 @@ func (m *AgentManager) HandleInboundEnvelope(env *Envelope) error {
 		if m.jobs != nil {
 			var res JobResultMessage
 			if err := json.Unmarshal(env.Payload, &res); err == nil {
-				_ = m.jobs.Start(res.JobID)
+				if job, err := m.jobs.Get(res.JobID); err == nil && job != nil && job.ServerID == sess.serverID {
+					_ = m.jobs.Start(res.JobID)
+				}
 			}
 		}
 	case OpJobResult:
 		if m.jobs != nil {
 			var res JobResultMessage
 			if err := json.Unmarshal(env.Payload, &res); err == nil {
-				if res.Status == JobStatusSucceeded {
-					_ = m.jobs.SetResult(res.JobID, res.Result)
-					_ = m.jobs.Complete(res.JobID, JobStatusSucceeded)
-				} else if res.Status == JobStatusFailed {
-					_ = m.jobs.Complete(res.JobID, JobStatusFailed, res.Error)
+				if job, err := m.jobs.Get(res.JobID); err == nil && job != nil && job.ServerID == sess.serverID {
+					if res.Status == JobStatusSucceeded {
+						_ = m.jobs.SetResult(res.JobID, res.Result)
+						_ = m.jobs.Complete(res.JobID, JobStatusSucceeded)
+					} else if res.Status == JobStatusFailed {
+						_ = m.jobs.Complete(res.JobID, JobStatusFailed, res.Error)
+					}
 				}
 			}
 		}
