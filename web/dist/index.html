@@ -3913,6 +3913,10 @@ window.viewContainerInspect = function(id){
 };
 
 window.viewContainerLogs=async function(id, name, serverId){
+  if(state._fleetLogsState && state._fleetLogsState.autoTimer){
+    clearInterval(state._fleetLogsState.autoTimer);
+    state._fleetLogsState.autoTimer = null;
+  }
   const prevLevel = state._fleetLogsState ? state._fleetLogsState.level : 'all';
   const prevFilter = state._fleetLogsState ? state._fleetLogsState.filter : '';
   state._fleetLogsState = { mode: 'single', id, name, serverId, rawLines: [], filter: prevFilter, level: prevLevel, autoRefresh: true };
@@ -3923,6 +3927,10 @@ window.viewContainerLogs=async function(id, name, serverId){
 };
 
 window.viewAllContainersLogs=async function(){
+  if(state._fleetLogsState && state._fleetLogsState.autoTimer){
+    clearInterval(state._fleetLogsState.autoTimer);
+    state._fleetLogsState.autoTimer = null;
+  }
   const cnts = state.fleetContainers || [];
   const running = cnts.filter(c => (c.state||'').toLowerCase() === 'running');
   const prevLevel = state._fleetLogsState ? state._fleetLogsState.level : 'all';
@@ -3969,8 +3977,8 @@ function startFleetLogsAuto(){
   if(s.autoTimer){ clearInterval(s.autoTimer); s.autoTimer = null; }
   if(s.autoRefresh){
     s.autoTimer = setInterval(async () => {
-      if(!state._fleetLogsState || !state._fleetLogsState.autoRefresh){
-        if(s.autoTimer) clearInterval(s.autoTimer);
+      if(!state._fleetLogsState || state._fleetLogsState !== s || !state._fleetLogsState.autoRefresh){
+        if(s.autoTimer) { clearInterval(s.autoTimer); s.autoTimer = null; }
         return;
       }
       await refreshFleetLogs(true);
