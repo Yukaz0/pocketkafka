@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -190,7 +191,7 @@ func (a *AgentRunner) Run(ctx context.Context) error {
 		AgentID:  a.cfg.AgentID,
 		ServerID: a.cfg.ServerID,
 		Hostname: hostname,
-		OS:       "linux",
+		OS:       runtime.GOOS,
 		Version:  "1.0.0",
 	})
 	if err != nil {
