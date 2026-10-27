@@ -9,9 +9,6 @@ import (
 	"sync/atomic"
 )
 
-// Partition is a single topic-partition backed by a directory of log segments.
-// It serializes appends under a write lock while allowing concurrent reads
-// under a read lock.
 type Partition struct {
 	topic       string
 	partitionID int32
@@ -19,39 +16,27 @@ type Partition struct {
 	mu              sync.RWMutex
 	dir             string
 	activeSegment   *Segment
-	closedSegments  []*Segment // sorted ascending by base offset
-	nextOffset      int64      // Log End Offset (LEO)
-	highWatermark   int64      // HWM: offset safe for consumers to read
+	closedSegments  []*Segment
+	nextOffset      int64
+	highWatermark   int64
 	maxSegmentBytes int64
 	indexInterval   int64
 
-	// idempotence tracks per-producer sequence numbers when idempotent produce
-	// is enabled.
 	idempotence *PartitionIdempotenceTracker
 
-	// appendCh signals fetch long-polls that new data has arrived. Append
-	// closes the current channel (waking every waiter) and installs a fresh
-	// one; longPoll waits on it instead of sleep-polling the HWM.
 	appendMu sync.Mutex
 	appendCh chan struct{}
 
-	// remoteFetch downloads an object-store key (set when tiering is enabled).
 	remoteFetch func(key string) ([]byte, error)
-	// remoteDelete removes the object-store keys of an offloaded segment
-	// (set when tiering is enabled). It is best-effort: a failure never fails
-	// the retention pass that issued it.
+
 	remoteDelete func(logKey, indexKey string) error
 
-	// compacting keeps a second compaction from racing the first on one partition.
 	compacting atomic.Bool
 
-	// lastCompactMs/bytesAtCompact record the last successful compaction, so the
-	// dashboard can show how much has piled up since.
 	lastCompactMs  int64
 	bytesAtCompact int64
 }
 
-// OpenPartition opens (or creates) a partition directory and recovers its state.
 func OpenPartition(dir, topic string, partitionID int32, maxSegmentBytes, indexInterval int64) (*Partition, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create partition dir: %w", err)
@@ -74,8 +59,6 @@ func OpenPartition(dir, topic string, partitionID int32, maxSegmentBytes, indexI
 	return p, nil
 }
 
-// recover scans the partition directory, loads all segments, and restores
-// nextOffset / highWatermark. On a fresh directory it creates the first segment.
 func (p *Partition) recover() error {
 	entries, err := os.ReadDir(p.dir)
 	if err != nil {
@@ -94,7 +77,7 @@ func (p *Partition) recover() error {
 		}
 	}
 	sort.Slice(bases, func(i, j int) bool { return bases[i] < bases[j] })
-	// De-duplicate base offsets (a segment may have both a .log and a .remote).
+
 	uniq := bases[:0]
 	for i, b := range bases {
 		if i == 0 || b != bases[i-1] {
@@ -109,7 +92,7 @@ func (p *Partition) recover() error {
 		p.closedSegments = append(p.closedSegments, seg)
 	}
 	if len(p.closedSegments) > 0 {
-		// The highest-base segment becomes active; the rest stay closed.
+
 		p.activeSegment = p.closedSegments[len(p.closedSegments)-1]
 		p.closedSegments = p.closedSegments[:len(p.closedSegments)-1]
 	} else {
@@ -124,15 +107,6 @@ func (p *Partition) recover() error {
 	return nil
 }
 
-// DataWaiter returns a channel that is closed on the next Append, plus the
-// current high watermark. Fetch long-polls wait on this channel (with a
-// timeout) instead of sleep-polling the HWM, so an idle partition costs zero
-// CPU for both broker and clients.
-//
-// The channel is snapshotted before the HWM is read. Append closes the channel
-// before advancing the HWM, so a waiter that reads the HWM as unchanged is
-// guaranteed to hold a channel that the append will close; reading the HWM
-// first would let an append slip between the two reads and lose the wake.
 func (p *Partition) DataWaiter() (<-chan struct{}, int64) {
 	p.appendMu.Lock()
 	ch := p.appendCh
@@ -144,8 +118,6 @@ func (p *Partition) DataWaiter() (<-chan struct{}, int64) {
 	return ch, hwm
 }
 
-// Append writes a raw RecordBatch, assigns it the next offset, and advances the
-// LEO and HWM. It returns the assigned base offset.
 func (p *Partition) Append(raw []byte) (int64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -161,7 +133,7 @@ func (p *Partition) Append(raw []byte) (int64, error) {
 	}
 	p.nextOffset = p.activeSegment.nextOffset
 	p.highWatermark = p.nextOffset
-	// Bangunkan semua fetch long-poll yang menunggu offset ini.
+
 	p.appendMu.Lock()
 	close(p.appendCh)
 	p.appendCh = make(chan struct{})
@@ -169,17 +141,10 @@ func (p *Partition) Append(raw []byte) (int64, error) {
 	return assigned, nil
 }
 
-// AppendIdempotent validates the producer sequence for (pid, epoch, baseSeq)
-// and appends the batch only when the sequence advances by one. Duplicate
-// sequences return the previously assigned offset without persisting again.
 func (p *Partition) AppendIdempotent(pid int64, epoch int16, baseSeq int32, raw []byte) (int64, error) {
 	return p.AppendIdempotentSynced(pid, epoch, baseSeq, raw, false)
 }
 
-// AppendSynced appends a RecordBatch and, when sync is true, fsyncs the active
-// segment (log and index) before returning. The caller can then treat a
-// successful return as "this record is durable", which is the contract behind
-// flush_policy=request and sync_on_acks_all.
 func (p *Partition) AppendSynced(raw []byte, sync bool) (int64, error) {
 	off, err := p.Append(raw)
 	if err != nil {
@@ -193,16 +158,12 @@ func (p *Partition) AppendSynced(raw []byte, sync bool) (int64, error) {
 	return off, nil
 }
 
-// AppendIdempotentSynced is AppendSynced for the idempotent producer path.
 func (p *Partition) AppendIdempotentSynced(pid int64, epoch int16, baseSeq int32, raw []byte, sync bool) (int64, error) {
 	return p.idempotence.ValidateAndAppend(pid, epoch, baseSeq, func() (int64, error) {
 		return p.AppendSynced(raw, sync)
 	})
 }
 
-// Sync flushes the active segment's log and index to stable storage. It is a
-// no-op when nothing has been written since the last sync, so the interval
-// flusher does not fsync idle partitions.
 func (p *Partition) Sync() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -215,9 +176,6 @@ func (p *Partition) Sync() error {
 	return nil
 }
 
-// TruncateTo truncates the log to the given offset (inclusive of earlier data),
-// dropping all records at or after the target offset. It is used by the admin
-// reset-offset / truncate APIs.
 func (p *Partition) TruncateTo(target int64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -229,7 +187,6 @@ func (p *Partition) TruncateTo(target int64) error {
 		return nil
 	}
 
-	// Drop segments whose entire range starts at or after the target.
 	kept := p.closedSegments[:0]
 	for _, seg := range p.closedSegments {
 		if seg.baseOffset >= target {
@@ -246,7 +203,7 @@ func (p *Partition) TruncateTo(target int64) error {
 		if err := p.activeSegment.deleteFiles(); err != nil {
 			return err
 		}
-		// Reopen the newest kept segment as active (or a fresh one at target).
+
 		if len(p.closedSegments) > 0 {
 			last := p.closedSegments[len(p.closedSegments)-1]
 			p.closedSegments = p.closedSegments[:len(p.closedSegments)-1]
@@ -268,14 +225,12 @@ func (p *Partition) TruncateTo(target int64) error {
 	return nil
 }
 
-// SegmentInfo describes one on-disk log segment for the topic detail UI.
 type SegmentInfo struct {
 	BaseOffset int64
 	SizeBytes  int64
 	Remote     bool
 }
 
-// SegmentInfos returns metadata for every segment of the partition.
 func (p *Partition) SegmentInfos() []SegmentInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -291,8 +246,6 @@ func (p *Partition) SegmentInfos() []SegmentInfo {
 	return out
 }
 
-// roll closes the active segment and starts a new one at the current LEO. The
-// rolled segment stays open for reads until the partition is closed.
 func (p *Partition) roll() error {
 	p.closedSegments = append(p.closedSegments, p.activeSegment)
 	seg, err := openSegment(p.dir, p.nextOffset, p.maxSegmentBytes, p.indexInterval)
@@ -303,19 +256,11 @@ func (p *Partition) roll() error {
 	return nil
 }
 
-// Read returns raw RecordBatch bytes starting at startOffset up to maxBytes
-// along with the current high watermark. It reads across segment boundaries.
-//
-// The fast path runs under the read lock. A restoring read mutates the segment
-// struct and its file handles, so when a remote segment is in range it takes
-// the write lock, restores every remote segment in that range, and only then
-// runs the read body under that same write lock.
 func (p *Partition) Read(startOffset int64, maxBytes int32) ([]byte, int64, error) {
 	if startOffset < 0 {
 		startOffset = 0
 	}
 
-	// Phase 1 (read lock): find whether anything in range needs a restore.
 	p.mu.RLock()
 	if startOffset >= p.highWatermark {
 		hwm := p.highWatermark
@@ -336,7 +281,6 @@ func (p *Partition) Read(startOffset int64, maxBytes int32) ([]byte, int64, erro
 	}
 	p.mu.RUnlock()
 
-	// Phase 2 (write lock): restore every remote segment in range, then read.
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, seg := range p.orderedSegmentsLocked() {
@@ -349,9 +293,6 @@ func (p *Partition) Read(startOffset int64, maxBytes int32) ([]byte, int64, erro
 	return p.readLocked(startOffset, maxBytes)
 }
 
-// readLocked is the read body shared by both Read phases. It must be called
-// with p.mu held (read or write). A still-remote segment is an error: restoring
-// is only valid under the write lock, so callers must have restored in range.
 func (p *Partition) readLocked(startOffset int64, maxBytes int32) ([]byte, int64, error) {
 	segs := p.orderedSegmentsLocked()
 	idx := 0
@@ -379,9 +320,6 @@ func (p *Partition) readLocked(startOffset int64, maxBytes int32) ([]byte, int64
 	return out, p.highWatermark, nil
 }
 
-// restoreSegmentLocked downloads an offloaded segment's data and restores it.
-// It mutates the segment and its file handles, so it must only be called while
-// holding p.mu for writing.
 func (p *Partition) restoreSegmentLocked(seg *Segment) error {
 	if p.remoteFetch == nil {
 		return fmt.Errorf("remote segment %d has no fetcher configured", seg.baseOffset)
@@ -401,7 +339,6 @@ func (p *Partition) restoreSegmentLocked(seg *Segment) error {
 	return seg.restoreFrom(logData, indexData)
 }
 
-// orderedSegmentsLocked returns the segments in offset order (closed then active).
 func (p *Partition) orderedSegmentsLocked() []*Segment {
 	segs := make([]*Segment, 0, len(p.closedSegments)+1)
 	segs = append(segs, p.closedSegments...)
@@ -411,22 +348,20 @@ func (p *Partition) orderedSegmentsLocked() []*Segment {
 	return segs
 }
 
-// GetOffset returns the earliest (-2) or latest (-1) offset for the partition.
 func (p *Partition) GetOffset(target int64) (int64, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	switch target {
-	case -1: // Latest
+	case -1:
 		return p.highWatermark, nil
-	case -2: // Earliest
+	case -2:
 		return p.earliestOffsetLocked(), nil
 	default:
-		// Approximate: a timestamp we cannot index maps to the LEO.
+
 		return -1, nil
 	}
 }
 
-// earliestOffsetLocked returns the first offset available in the oldest segment.
 func (p *Partition) earliestOffsetLocked() int64 {
 	if len(p.closedSegments) > 0 {
 		return p.closedSegments[0].baseOffset
@@ -437,33 +372,26 @@ func (p *Partition) earliestOffsetLocked() int64 {
 	return p.nextOffset
 }
 
-// PartitionID returns the partition's numeric ID.
 func (p *Partition) PartitionID() int32 { return p.partitionID }
 
-// LogEndOffset returns the LEO of the partition.
 func (p *Partition) LogEndOffset() int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.nextOffset
 }
 
-// HighWatermark returns the current HWM.
 func (p *Partition) HighWatermark() int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.highWatermark
 }
 
-// EarliestOffset returns the first available offset in the partition.
 func (p *Partition) EarliestOffset() int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.earliestOffsetLocked()
 }
 
-// Durability reports how far an fsync has covered: the durable offset, the bytes
-// written past it, and when the last sync happened (0 when this process has not
-// synced the segment yet).
 func (p *Partition) Durability() (durableOffset, bytesAtRisk, lastSyncMs int64) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -477,9 +405,6 @@ func (p *Partition) Durability() (durableOffset, bytesAtRisk, lastSyncMs int64) 
 	return p.activeSegment.syncedOffset, risk, p.activeSegment.lastSyncMs
 }
 
-// CompactionDebt reports the bytes written since the last compaction and when
-// that was. It is an upper bound on what the next pass drops: records with a
-// unique key survive it.
 func (p *Partition) CompactionDebt() (bytes int64, lastCompactMs int64) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -493,14 +418,12 @@ func (p *Partition) CompactionDebt() (bytes int64, lastCompactMs int64) {
 	return 0, p.lastCompactMs
 }
 
-// SizeBytes returns the total on-disk size of the partition in bytes.
 func (p *Partition) SizeBytes() int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.totalSizeLocked()
 }
 
-// Close closes all segment file descriptors.
 func (p *Partition) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -513,10 +436,8 @@ func (p *Partition) Close() error {
 	return nil
 }
 
-// Dir returns the partition directory path.
 func (p *Partition) Dir() string { return p.dir }
 
-// Delete removes the partition directory and all its files from disk.
 func (p *Partition) Delete() error {
 	if err := p.Close(); err != nil {
 		return err

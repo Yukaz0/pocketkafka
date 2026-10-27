@@ -1,16 +1,3 @@
-// Package credential stores and verifies broker credentials without requiring
-// the plaintext password to live in the configuration file.
-//
-// Two forms are supported:
-//
-//   - a PBKDF2 password hash ("pbkdf2-sha256$…"), accepted by SASL/PLAIN and by
-//     HTTP Basic, and usable for a client that presents the password itself;
-//   - a SCRAM verifier ("scram-sha-256$…"), the salt/iterations/StoredKey/
-//     ServerKey tuple an RFC 5802 server needs, which never contains anything
-//     that lets the broker (or a reader of the file) recover the password.
-//
-// Every comparison goes through Matches or VerifySignature, both constant-time,
-// so no path leaks a password byte by byte.
 package credential
 
 import (
@@ -29,15 +16,10 @@ import (
 )
 
 const (
-	// passwordHashIterations follows the OWASP recommendation for
-	// PBKDF2-HMAC-SHA256.
 	passwordHashIterations = 210000
-	// DefaultSCRAMIterations is well above the RFC 5802 minimum of 4096: the
-	// iteration count is also the cost a client pays per connection, and a low
-	// value is a pre-authentication CPU amplification vector.
+
 	DefaultSCRAMIterations = 15000
-	// MaxIterations bounds a verifier that a config file asks us to honour, so
-	// a hostile file cannot turn authentication into a CPU denial of service.
+
 	MaxIterations = 1_000_000
 )
 
@@ -47,20 +29,17 @@ const (
 	scramPrefix    = "scram-"
 )
 
-// Mechanism describes one SCRAM hash family.
 type Mechanism struct {
 	Name    string
 	KeySize int
 	NewHash func() hash.Hash
 }
 
-// Supported SCRAM mechanisms.
 var (
 	SHA256 = Mechanism{Name: "SCRAM-SHA-256", KeySize: sha256.Size, NewHash: sha256.New}
 	SHA512 = Mechanism{Name: "SCRAM-SHA-512", KeySize: sha512.Size, NewHash: sha512.New}
 )
 
-// MechanismByName maps a SASL mechanism name to its hash family.
 func MechanismByName(name string) (Mechanism, bool) {
 	switch strings.ToUpper(strings.TrimSpace(name)) {
 	case "SCRAM-SHA-256":
@@ -71,7 +50,6 @@ func MechanismByName(name string) (Mechanism, bool) {
 	return Mechanism{}, false
 }
 
-// RandomSalt returns n cryptographically random bytes.
 func RandomSalt(n int) ([]byte, error) {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -80,9 +58,6 @@ func RandomSalt(n int) ([]byte, error) {
 	return b, nil
 }
 
-// HashPassword derives a PBKDF2-HMAC-SHA256 verifier:
-//
-//	pbkdf2-sha256$<iterations>$<base64 salt>$<base64 key>
 func HashPassword(password string) (string, error) {
 	salt, err := RandomSalt(16)
 	if err != nil {
@@ -91,8 +66,6 @@ func HashPassword(password string) (string, error) {
 	return HashPasswordWith(password, salt, passwordHashIterations)
 }
 
-// HashPasswordWith derives a verifier with an explicit salt and iteration
-// count, so a caller can reproduce a stable hash (tests, tooling).
 func HashPasswordWith(password string, salt []byte, iterations int) (string, error) {
 	if iterations < 1 || iterations > MaxIterations {
 		return "", fmt.Errorf("credential: iteration count %d out of range", iterations)
@@ -106,17 +79,12 @@ func HashPasswordWith(password string, salt []byte, iterations int) (string, err
 		base64.StdEncoding.EncodeToString(key)), nil
 }
 
-// LooksLikeHash reports whether v is one of the stored credential forms rather
-// than a plaintext password.
 func LooksLikeHash(v string) bool {
 	return strings.HasPrefix(v, passwordPrefix+"$") ||
 		strings.HasPrefix(v, sha512Prefix+"$") ||
 		strings.HasPrefix(v, scramPrefix)
 }
 
-// Matches checks a presented password against a stored credential. The stored
-// value may be a PBKDF2 hash or, for configurations that predate hashing, the
-// plaintext itself. Both paths are constant-time.
 func Matches(stored, presented string) bool {
 	if LooksLikeHash(stored) {
 		return VerifyPassword(stored, presented)
@@ -124,9 +92,6 @@ func Matches(stored, presented string) bool {
 	return subtle.ConstantTimeCompare([]byte(stored), []byte(presented)) == 1
 }
 
-// VerifyPassword checks a plaintext password against a stored PBKDF2 verifier.
-// A malformed verifier is a non-match, never an error the caller could mistake
-// for success.
 func VerifyPassword(stored, password string) bool {
 	parts := strings.Split(stored, "$")
 	if len(parts) != 4 {
@@ -160,8 +125,6 @@ func VerifyPassword(stored, password string) bool {
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
-// Verifier is the server side of one SCRAM credential: everything RFC 5802
-// needs to answer a challenge without ever holding the password.
 type Verifier struct {
 	Mechanism  Mechanism
 	Iterations int
@@ -170,7 +133,6 @@ type Verifier struct {
 	ServerKey  []byte
 }
 
-// DeriveVerifier computes the SCRAM verifier for a plaintext password.
 func DeriveVerifier(m Mechanism, password string, salt []byte, iterations int) (Verifier, error) {
 	if iterations <= 0 {
 		iterations = DefaultSCRAMIterations
@@ -195,15 +157,10 @@ func DeriveVerifier(m Mechanism, password string, salt []byte, iterations int) (
 	}, nil
 }
 
-// Signature computes HMAC(key, message) with the verifier's hash family; SCRAM
-// uses it for both the client and the server signature.
 func (v Verifier) Signature(key, message []byte) []byte {
 	return hmacSum(v.Mechanism, key, message)
 }
 
-// String renders the verifier in the configuration format:
-//
-//	scram-sha-256$<iterations>$<base64 salt>$<base64 stored key>$<base64 server key>
 func (v Verifier) String() string {
 	name := "sha-256"
 	if v.Mechanism.KeySize == sha512.Size {
@@ -215,7 +172,6 @@ func (v Verifier) String() string {
 		base64.StdEncoding.EncodeToString(v.ServerKey))
 }
 
-// ParseVerifier parses the string form produced by Verifier.String.
 func ParseVerifier(s string) (Verifier, error) {
 	parts := strings.Split(strings.TrimSpace(s), "$")
 	if len(parts) != 5 || !strings.HasPrefix(parts[0], scramPrefix) {

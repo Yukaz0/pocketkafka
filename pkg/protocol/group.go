@@ -1,15 +1,11 @@
 package protocol
 
-// FindCoordinator (Key 10), v0-v3
-
-// FindCoordinatorRequest requests the coordinator for a group.
 type FindCoordinatorRequest struct {
 	Version int16
 	Key     string
 	KeyType int8
 }
 
-// DecodeFindCoordinatorRequest parses the request body for versions up to 3.
 func DecodeFindCoordinatorRequest(version int16, body []byte) (*FindCoordinatorRequest, error) {
 	r := NewReader(body)
 	req := &FindCoordinatorRequest{Version: version}
@@ -25,7 +21,6 @@ func DecodeFindCoordinatorRequest(version int16, body []byte) (*FindCoordinatorR
 	return req, nil
 }
 
-// FindCoordinatorResponse reports the coordinator broker.
 type FindCoordinatorResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
@@ -36,7 +31,6 @@ type FindCoordinatorResponse struct {
 	Port           int32
 }
 
-// EncodeFindCoordinatorResponse serializes the response body.
 func EncodeFindCoordinatorResponse(resp *FindCoordinatorResponse) ([]byte, error) {
 	w := NewWriter(64)
 	if resp.Version >= 1 {
@@ -52,15 +46,11 @@ func EncodeFindCoordinatorResponse(resp *FindCoordinatorResponse) ([]byte, error
 	return w.Bytes(), nil
 }
 
-// JoinGroup (Key 11), v0-v6
-
-// JoinGroupRequestProtocol is a proposed rebalance protocol.
 type JoinGroupRequestProtocol struct {
 	Name     string
 	Metadata []byte
 }
 
-// JoinGroupRequest asks to join a consumer group.
 type JoinGroupRequest struct {
 	Version            int16
 	Group              string
@@ -72,7 +62,6 @@ type JoinGroupRequest struct {
 	Protocols          []JoinGroupRequestProtocol
 }
 
-// DecodeJoinGroupRequest parses the request body for versions up to 6.
 func DecodeJoinGroupRequest(version int16, body []byte) (*JoinGroupRequest, error) {
 	r := NewReader(body)
 	req := &JoinGroupRequest{Version: version}
@@ -119,14 +108,12 @@ func DecodeJoinGroupRequest(version int16, body []byte) (*JoinGroupRequest, erro
 	return req, nil
 }
 
-// JoinGroupResponseMember is another member in the group.
 type JoinGroupResponseMember struct {
 	MemberID   string
 	InstanceID *string
 	Metadata   []byte
 }
 
-// JoinGroupResponse is the result of a join request.
 type JoinGroupResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
@@ -138,7 +125,6 @@ type JoinGroupResponse struct {
 	Members        []JoinGroupResponseMember
 }
 
-// EncodeJoinGroupResponse serializes the response body.
 func EncodeJoinGroupResponse(resp *JoinGroupResponse) ([]byte, error) {
 	w := NewWriter(128)
 	if resp.Version >= 2 {
@@ -147,7 +133,7 @@ func EncodeJoinGroupResponse(resp *JoinGroupResponse) ([]byte, error) {
 	w.WriteInt16(resp.ErrorCode)
 	w.WriteInt32(resp.GenerationID)
 	if resp.Version >= 7 {
-		w.WriteNullableString(nil) // protocol_type
+		w.WriteNullableString(nil)
 		w.WriteNullableString(&resp.ProtocolName)
 	} else {
 		w.WriteString(resp.ProtocolName)
@@ -160,8 +146,7 @@ func EncodeJoinGroupResponse(resp *JoinGroupResponse) ([]byte, error) {
 		if resp.Version >= 5 {
 			w.WriteNullableString(m.InstanceID)
 		}
-		// getBytes-based decoders (e.g. sarama) reject a -1 length; write an
-		// empty byte array instead of null when a member has no metadata.
+
 		if len(m.Metadata) == 0 {
 			w.WriteInt32(0)
 		} else {
@@ -171,15 +156,11 @@ func EncodeJoinGroupResponse(resp *JoinGroupResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// SyncGroup (Key 14), v0-v4
-
-// SyncGroupRequestAssignment is the leader's assignment for one member.
 type SyncGroupRequestAssignment struct {
 	MemberID   string
 	Assignment []byte
 }
 
-// SyncGroupRequest asks to synchronize group assignments.
 type SyncGroupRequest struct {
 	Version      int16
 	Group        string
@@ -189,7 +170,6 @@ type SyncGroupRequest struct {
 	Assignments  []SyncGroupRequestAssignment
 }
 
-// DecodeSyncGroupRequest parses the request body for versions up to 4.
 func DecodeSyncGroupRequest(version int16, body []byte) (*SyncGroupRequest, error) {
 	r := NewReader(body)
 	req := &SyncGroupRequest{Version: version}
@@ -209,10 +189,10 @@ func DecodeSyncGroupRequest(version int16, body []byte) (*SyncGroupRequest, erro
 		}
 	}
 	if version >= 5 {
-		if _, err = r.ReadNullableString(); err != nil { // protocol_type
+		if _, err = r.ReadNullableString(); err != nil {
 			return nil, err
 		}
-		if _, err = r.ReadNullableString(); err != nil { // protocol_name
+		if _, err = r.ReadNullableString(); err != nil {
 			return nil, err
 		}
 	}
@@ -234,7 +214,6 @@ func DecodeSyncGroupRequest(version int16, body []byte) (*SyncGroupRequest, erro
 	return req, nil
 }
 
-// SyncGroupResponse returns the assignment for the requesting member.
 type SyncGroupResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
@@ -242,7 +221,6 @@ type SyncGroupResponse struct {
 	Assignment     []byte
 }
 
-// EncodeSyncGroupResponse serializes the response body.
 func EncodeSyncGroupResponse(resp *SyncGroupResponse) ([]byte, error) {
 	w := NewWriter(64)
 	if resp.Version >= 1 {
@@ -250,12 +228,10 @@ func EncodeSyncGroupResponse(resp *SyncGroupResponse) ([]byte, error) {
 	}
 	w.WriteInt16(resp.ErrorCode)
 	if resp.Version >= 5 {
-		w.WriteNullableString(nil) // protocol_type
-		w.WriteNullableString(nil) // protocol_name
+		w.WriteNullableString(nil)
+		w.WriteNullableString(nil)
 	}
-	// Sarama's SyncGroupResponse decoder uses getBytes, which rejects a -1
-	// (null) length with "invalid byteslice length". Encode a missing
-	// assignment as a zero-length byte array instead.
+
 	if len(resp.Assignment) == 0 {
 		w.WriteInt32(0)
 	} else {
@@ -264,9 +240,6 @@ func EncodeSyncGroupResponse(resp *SyncGroupResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// Heartbeat (Key 12), v0-v3
-
-// HeartbeatRequest keeps a group member alive.
 type HeartbeatRequest struct {
 	Version      int16
 	Group        string
@@ -275,7 +248,6 @@ type HeartbeatRequest struct {
 	InstanceID   *string
 }
 
-// DecodeHeartbeatRequest parses the request body for versions up to 3.
 func DecodeHeartbeatRequest(version int16, body []byte) (*HeartbeatRequest, error) {
 	r := NewReader(body)
 	req := &HeartbeatRequest{Version: version}
@@ -297,14 +269,12 @@ func DecodeHeartbeatRequest(version int16, body []byte) (*HeartbeatRequest, erro
 	return req, nil
 }
 
-// HeartbeatResponse reports heartbeat status.
 type HeartbeatResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
 	ErrorCode      int16
 }
 
-// EncodeHeartbeatResponse serializes the response body.
 func EncodeHeartbeatResponse(resp *HeartbeatResponse) ([]byte, error) {
 	w := NewWriter(16)
 	if resp.Version >= 1 {
@@ -314,15 +284,11 @@ func EncodeHeartbeatResponse(resp *HeartbeatResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// LeaveGroup (Key 13), v0-v3
-
-// LeaveGroupRequestMember identifies a member leaving.
 type LeaveGroupRequestMember struct {
 	MemberID   string
 	InstanceID *string
 }
 
-// LeaveGroupRequest asks to leave a group.
 type LeaveGroupRequest struct {
 	Version  int16
 	Group    string
@@ -330,7 +296,6 @@ type LeaveGroupRequest struct {
 	Members  []LeaveGroupRequestMember
 }
 
-// DecodeLeaveGroupRequest parses the request body for versions up to 3.
 func DecodeLeaveGroupRequest(version int16, body []byte) (*LeaveGroupRequest, error) {
 	r := NewReader(body)
 	req := &LeaveGroupRequest{Version: version}
@@ -358,7 +323,7 @@ func DecodeLeaveGroupRequest(version int16, body []byte) (*LeaveGroupRequest, er
 			return nil, err
 		}
 		if version >= 5 {
-			if _, err = r.ReadNullableString(); err != nil { // reason
+			if _, err = r.ReadNullableString(); err != nil {
 				return nil, err
 			}
 		}
@@ -367,7 +332,6 @@ func DecodeLeaveGroupRequest(version int16, body []byte) (*LeaveGroupRequest, er
 	return req, nil
 }
 
-// LeaveGroupResponse reports members that left.
 type LeaveGroupResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
@@ -375,13 +339,11 @@ type LeaveGroupResponse struct {
 	Members        []LeaveGroupResponseMember
 }
 
-// LeaveGroupResponseMember is the per-member leave result.
 type LeaveGroupResponseMember struct {
 	MemberID   string
 	InstanceID *string
 }
 
-// EncodeLeaveGroupResponse serializes the response body.
 func EncodeLeaveGroupResponse(resp *LeaveGroupResponse) ([]byte, error) {
 	w := NewWriter(64)
 	if resp.Version >= 1 {
@@ -394,16 +356,13 @@ func EncodeLeaveGroupResponse(resp *LeaveGroupResponse) ([]byte, error) {
 			w.WriteString(m.MemberID)
 			w.WriteNullableString(m.InstanceID)
 			if resp.Version >= 4 {
-				w.WriteInt16(ErrNone) // member error_code
+				w.WriteInt16(ErrNone)
 			}
 		}
 	}
 	return w.Bytes(), nil
 }
 
-// OffsetCommit (Key 8), v0-v7
-
-// OffsetCommitRequestPartition commits one partition offset.
 type OffsetCommitRequestPartition struct {
 	Partition   int32
 	Offset      int64
@@ -411,13 +370,11 @@ type OffsetCommitRequestPartition struct {
 	Metadata    *string
 }
 
-// OffsetCommitRequestTopic groups commit partitions by topic.
 type OffsetCommitRequestTopic struct {
 	Topic      string
 	Partitions []OffsetCommitRequestPartition
 }
 
-// OffsetCommitRequest commits consumer group offsets.
 type OffsetCommitRequest struct {
 	Version    int16
 	Group      string
@@ -427,7 +384,6 @@ type OffsetCommitRequest struct {
 	Topics     []OffsetCommitRequestTopic
 }
 
-// DecodeOffsetCommitRequest parses the request body for versions up to 7.
 func DecodeOffsetCommitRequest(version int16, body []byte) (*OffsetCommitRequest, error) {
 	r := NewReader(body)
 	req := &OffsetCommitRequest{Version: version}
@@ -444,7 +400,7 @@ func DecodeOffsetCommitRequest(version int16, body []byte) (*OffsetCommitRequest
 		}
 	}
 	if version == 1 {
-		if _, err = r.ReadInt64(); err != nil { // retention_time
+		if _, err = r.ReadInt64(); err != nil {
 			return nil, err
 		}
 	}
@@ -454,7 +410,7 @@ func DecodeOffsetCommitRequest(version int16, body []byte) (*OffsetCommitRequest
 		}
 	}
 	if version >= 2 && version <= 4 {
-		if _, err = r.ReadInt64(); err != nil { // retention_time
+		if _, err = r.ReadInt64(); err != nil {
 			return nil, err
 		}
 	}
@@ -482,7 +438,7 @@ func DecodeOffsetCommitRequest(version int16, body []byte) (*OffsetCommitRequest
 				return nil, err
 			}
 			if version == 1 {
-				if _, err = r.ReadInt64(); err != nil { // commit_timestamp
+				if _, err = r.ReadInt64(); err != nil {
 					return nil, err
 				}
 			}
@@ -501,26 +457,22 @@ func DecodeOffsetCommitRequest(version int16, body []byte) (*OffsetCommitRequest
 	return req, nil
 }
 
-// OffsetCommitResponseTopic groups commit results by topic.
 type OffsetCommitResponseTopic struct {
 	Topic      string
 	Partitions []OffsetCommitResponsePartition
 }
 
-// OffsetCommitResponsePartition is the commit result for one partition.
 type OffsetCommitResponsePartition struct {
 	Partition int32
 	ErrorCode int16
 }
 
-// OffsetCommitResponse is the result of a commit.
 type OffsetCommitResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
 	Topics         []OffsetCommitResponseTopic
 }
 
-// EncodeOffsetCommitResponse serializes the response body.
 func EncodeOffsetCommitResponse(resp *OffsetCommitResponse) ([]byte, error) {
 	w := NewWriter(128)
 	if resp.Version >= 3 {
@@ -538,22 +490,17 @@ func EncodeOffsetCommitResponse(resp *OffsetCommitResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// OffsetFetch (Key 9), v0-v6
-
-// OffsetFetchRequestTopic requests committed offsets for a topic's partitions.
 type OffsetFetchRequestTopic struct {
 	Topic      string
 	Partitions []int32
 }
 
-// OffsetFetchRequest fetches committed group offsets.
 type OffsetFetchRequest struct {
 	Version int16
 	Group   string
-	Topics  []OffsetFetchRequestTopic // nil = all topics
+	Topics  []OffsetFetchRequestTopic
 }
 
-// DecodeOffsetFetchRequest parses the request body for versions up to 6.
 func DecodeOffsetFetchRequest(version int16, body []byte) (*OffsetFetchRequest, error) {
 	r := NewReader(body)
 	req := &OffsetFetchRequest{Version: version}
@@ -566,7 +513,7 @@ func DecodeOffsetFetchRequest(version int16, body []byte) (*OffsetFetchRequest, 
 		return nil, err
 	}
 	if n < 0 {
-		return req, nil // null topics => all
+		return req, nil
 	}
 	req.Topics = make([]OffsetFetchRequestTopic, 0, n)
 	for i := 0; i < n; i++ {
@@ -580,20 +527,18 @@ func DecodeOffsetFetchRequest(version int16, body []byte) (*OffsetFetchRequest, 
 		req.Topics = append(req.Topics, t)
 	}
 	if version >= 7 {
-		if _, err = r.ReadBool(); err != nil { // require_stable
+		if _, err = r.ReadBool(); err != nil {
 			return nil, err
 		}
 	}
 	return req, nil
 }
 
-// OffsetFetchResponseTopic groups fetch results by topic.
 type OffsetFetchResponseTopic struct {
 	Topic      string
 	Partitions []OffsetFetchResponsePartition
 }
 
-// OffsetFetchResponsePartition is the fetched offset for one partition.
 type OffsetFetchResponsePartition struct {
 	Partition   int32
 	Offset      int64
@@ -602,7 +547,6 @@ type OffsetFetchResponsePartition struct {
 	ErrorCode   int16
 }
 
-// OffsetFetchResponse is the result of a fetch.
 type OffsetFetchResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
@@ -610,7 +554,6 @@ type OffsetFetchResponse struct {
 	ErrorCode      int16
 }
 
-// EncodeOffsetFetchResponse serializes the response body.
 func EncodeOffsetFetchResponse(resp *OffsetFetchResponse) ([]byte, error) {
 	w := NewWriter(128)
 	if resp.Version >= 3 {

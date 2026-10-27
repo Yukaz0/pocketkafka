@@ -1,10 +1,3 @@
-// Package protocol is a hand-written, zero external dependency implementation
-// of the Apache Kafka binary wire protocol. It provides BigEndian binary
-// readers/writers, frame slicing, a RecordBatch v2 codec with Castagnoli
-// CRC-32C, and request/response codecs for the API keys the broker supports.
-//
-// The client-side codecs are grouped by API in client_*.go files; this file
-// holds only helpers shared between them.
 package protocol
 
 func readInt64Array(r *Reader) ([]int64, error) {

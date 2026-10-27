@@ -3,7 +3,7 @@ package protocol
 func EncodeMetadataRequest(req *MetadataRequest) ([]byte, error) {
 	w := NewWriter(64)
 	if req.Topics == nil {
-		w.WriteArrayLen(-1) // all topics
+		w.WriteArrayLen(-1)
 	} else {
 		w.WriteArrayLen(len(req.Topics))
 		for _, t := range req.Topics {

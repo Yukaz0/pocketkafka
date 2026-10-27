@@ -1,6 +1,6 @@
 [Unit]
 Description=PocketKafka Fleet Agent
-Documentation=https://github.com/Yukaz0/pocketkafka/blob/main/FLEET_RUNBOOK.md
+Documentation=https://github.com/Yukaz0/pocketkafka/blob/main/docs/FLEET_RUNBOOK.md
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service

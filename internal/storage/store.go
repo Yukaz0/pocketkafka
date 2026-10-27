@@ -13,31 +13,25 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/tier"
 )
 
-// Topic groups the partitions that make up one logical topic.
 type Topic struct {
 	Name       string
 	Partitions map[int32]*Partition
 }
 
-// Store owns all topics on disk and coordinates partition lifecycle. It is the
-// central handle exposed to the protocol layer.
 type Store struct {
 	mu              sync.RWMutex
 	dir             string
 	topics          map[string]*Topic
-	compacted       map[string]bool // topics with cleanup.policy=compact
+	compacted       map[string]bool
 	maxSegmentBytes int64
 	indexInterval   int64
 	s3              *tier.S3Client
 	tierThreshold   time.Duration
 
-	// ret is the active cleanup policy, kept so a reader can report what the
-	// next retention pass would delete.
 	retentionMu sync.RWMutex
 	ret         *Retention
 }
 
-// NewStore opens (or creates) the data directory and recovers existing topics.
 func NewStore(dir string, maxSegmentBytes, indexInterval int64) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
@@ -58,7 +52,6 @@ func NewStore(dir string, maxSegmentBytes, indexInterval int64) (*Store, error) 
 	return s, nil
 }
 
-// recover loads any topics that already exist in the data directory.
 func (s *Store) recover() error {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
@@ -93,13 +86,10 @@ func (s *Store) recover() error {
 	return nil
 }
 
-// partitionDir returns the on-disk directory for a topic-partition.
 func (s *Store) partitionDir(topic string, partition int32) string {
 	return filepath.Join(s.dir, topic, fmt.Sprintf("%d", partition))
 }
 
-// ValidateTopicName checks that a topic name is safe to use as a directory name
-// and conforms to reasonable Kafka constraints.
 func ValidateTopicName(name string) error {
 	if name == "" {
 		return fmt.Errorf("topic name is empty")
@@ -118,8 +108,6 @@ func ValidateTopicName(name string) error {
 	return nil
 }
 
-// EnsureTopic creates a topic with the given partition count if it does not
-// already exist. If it exists, it is returned unchanged.
 func (s *Store) EnsureTopic(name string, partitions int) (*Topic, bool, error) {
 	if err := ValidateTopicName(name); err != nil {
 		return nil, false, err
@@ -135,7 +123,6 @@ func (s *Store) EnsureTopic(name string, partitions int) (*Topic, bool, error) {
 	return s.createLocked(name, partitions)
 }
 
-// CreateTopic creates a brand new topic, erroring if it already exists.
 func (s *Store) CreateTopic(name string, partitions int) (*Topic, error) {
 	if err := ValidateTopicName(name); err != nil {
 		return nil, err
@@ -157,7 +144,7 @@ func (s *Store) createLocked(name string, partitions int) (*Topic, bool, error) 
 	for i := 0; i < partitions; i++ {
 		p, err := OpenPartition(s.partitionDir(name, int32(i)), name, int32(i), s.maxSegmentBytes, s.indexInterval)
 		if err != nil {
-			// Best-effort cleanup of already created partitions.
+
 			for _, cp := range t.Partitions {
 				cp.Delete()
 			}
@@ -170,9 +157,6 @@ func (s *Store) createLocked(name string, partitions int) (*Topic, bool, error) 
 	return t, true, nil
 }
 
-// DeleteTopic removes a topic and all of its partition data from disk. The
-// topic is unlinked from the store under the lock, then the files are deleted
-// after it is released so the whole broker is not stalled behind disk I/O.
 func (s *Store) DeleteTopic(name string) error {
 	s.mu.Lock()
 	t, ok := s.topics[name]
@@ -192,7 +176,6 @@ func (s *Store) DeleteTopic(name string) error {
 	return firstErr
 }
 
-// GetPartition returns the partition for a topic, or nil if it does not exist.
 func (s *Store) GetPartition(topic string, partition int32) *Partition {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -203,14 +186,12 @@ func (s *Store) GetPartition(topic string, partition int32) *Partition {
 	return t.Partitions[partition]
 }
 
-// GetTopic returns a topic by name, or nil.
 func (s *Store) GetTopic(name string) *Topic {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.topics[name]
 }
 
-// TopicNames returns the sorted list of topic names.
 func (s *Store) TopicNames() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -222,7 +203,6 @@ func (s *Store) TopicNames() []string {
 	return names
 }
 
-// TopicsSnapshot returns a shallow copy of the topic map for iteration.
 func (s *Store) TopicsSnapshot() map[string]*Topic {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -233,8 +213,6 @@ func (s *Store) TopicsSnapshot() map[string]*Topic {
 	return out
 }
 
-// CompactNow runs log compaction immediately for a topic marked
-// cleanup.policy=compact. It is the backend for the web UI compact action.
 func (s *Store) CompactNow(topic string) error {
 	t := s.GetTopic(topic)
 	if t == nil {
@@ -248,10 +226,6 @@ func (s *Store) CompactNow(topic string) error {
 	return nil
 }
 
-// SyncAll fsyncs every partition's active segment. It is the interval flush
-// policy's periodic action and is also called before shutdown. The topic map is
-// snapshotted under the lock and released before the fsyncs, so topic
-// create/delete and partition lookups are not blocked behind disk I/O.
 func (s *Store) SyncAll() error {
 	s.mu.RLock()
 	var partitions []*Partition
@@ -271,9 +245,6 @@ func (s *Store) SyncAll() error {
 	return firstErr
 }
 
-// StartFlush runs periodic fsyncs of all partitions until stop is called. It
-// implements the "interval" flush policy; a non-positive interval disables the
-// loop and returns a no-op stop.
 func (s *Store) StartFlush(interval time.Duration) (stop func()) {
 	if interval <= 0 {
 		return func() {}
@@ -295,7 +266,6 @@ func (s *Store) StartFlush(interval time.Duration) (stop func()) {
 	return func() { once.Do(func() { close(done) }) }
 }
 
-// Close closes all open partition segment files.
 func (s *Store) Close() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -310,9 +280,6 @@ func (s *Store) Close() error {
 	return firstErr
 }
 
-// DiskUsagePct reports the percentage of the data directory's filesystem that
-// is used, for the web UI health alarm (0-100). It returns 0 if the stat call
-// fails (e.g. unsupported platform), so the UI stays quiet.
 func (s *Store) DiskUsagePct() float64 {
 	var fs syscall.Statfs_t
 	if err := syscall.Statfs(s.dir, &fs); err != nil {

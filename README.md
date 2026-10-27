@@ -435,4 +435,4 @@ cluster token, so a route that loses its rule fails that run.
 PocketKafka is open-source software licensed under the [MIT License](LICENSE).
 
 Created by **Muhammad Jafar Ikbal (Yukaz0)** — jaffrhere23@gmail.com.
-Fork/derivatif wajib mempertahankan atribusi ini (lihat [AUTHORS.md](AUTHORS.md)).
+Fork/derivatif wajib mempertahankan atribusi ini (lihat [AUTHORS.md](docs/AUTHORS.md)).

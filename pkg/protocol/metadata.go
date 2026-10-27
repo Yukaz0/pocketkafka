@@ -1,20 +1,17 @@
 package protocol
 
-// MetadataRequestTopic is one requested topic.
 type MetadataRequestTopic struct {
 	Topic string
 }
 
-// MetadataRequest (Key 3), decoded at v8.
 type MetadataRequest struct {
 	Version                            int16
-	Topics                             []MetadataRequestTopic // nil means all topics
+	Topics                             []MetadataRequestTopic
 	AllowAutoTopicCreation             bool
 	IncludeClusterAuthorizedOperations bool
 	IncludeTopicAuthorizedOperations   bool
 }
 
-// DecodeMetadataRequest parses the request body for versions up to 8.
 func DecodeMetadataRequest(version int16, body []byte) (*MetadataRequest, error) {
 	r := NewReader(body)
 	req := &MetadataRequest{Version: version}
@@ -49,7 +46,6 @@ func DecodeMetadataRequest(version int16, body []byte) (*MetadataRequest, error)
 	return req, nil
 }
 
-// MetadataBroker describes one broker in the cluster.
 type MetadataBroker struct {
 	NodeID int32
 	Host   string
@@ -57,7 +53,6 @@ type MetadataBroker struct {
 	Rack   *string
 }
 
-// MetadataPartition describes one partition's topology.
 type MetadataPartition struct {
 	ErrorCode       int16
 	Partition       int32
@@ -68,7 +63,6 @@ type MetadataPartition struct {
 	OfflineReplicas []int32
 }
 
-// MetadataTopic is one topic in the response.
 type MetadataTopic struct {
 	ErrorCode            int16
 	Name                 string
@@ -77,7 +71,6 @@ type MetadataTopic struct {
 	AuthorizedOperations int32
 }
 
-// MetadataResponse (Key 3), encoded at v8.
 type MetadataResponse struct {
 	Version                     int16
 	ThrottleTimeMs              int32
@@ -85,10 +78,9 @@ type MetadataResponse struct {
 	ClusterID                   *string
 	ControllerID                int32
 	Topics                      []MetadataTopic
-	ClusterAuthorizedOperations int32 // v8-v10, after the topics array
+	ClusterAuthorizedOperations int32
 }
 
-// EncodeMetadataResponse serializes the response body.
 func EncodeMetadataResponse(resp *MetadataResponse) ([]byte, error) {
 	w := NewWriter(256)
 	if resp.Version >= 3 {

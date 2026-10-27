@@ -23,7 +23,6 @@ var (
 	ErrJobLimitExceeded     = errors.New("fleet: active job limit reached")
 )
 
-// Jobs manages execution lifecycle, idempotency, persistence, and retention of fleet background tasks.
 type Jobs struct {
 	mu               sync.RWMutex
 	filePath         string
@@ -36,8 +35,6 @@ type Jobs struct {
 	maxActiveJobs    int
 }
 
-// NewJobs constructs a Jobs store backed by fleet_jobs.jsonl in dirOrPath.
-// If dirOrPath is empty, jobs are kept in-memory only.
 func NewJobs(dirOrPath string) *Jobs {
 	j := &Jobs{
 		jobs:             make(map[string]*Job),
@@ -63,14 +60,12 @@ func NewJobs(dirOrPath string) *Jobs {
 	return j
 }
 
-// SetTimeout sets the maximum duration a job may spend in running status before being marked failed.
 func (j *Jobs) SetTimeout(d time.Duration) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.timeout = d
 }
 
-// SetRetention configures retention policy by age (days) and count (entries).
 func (j *Jobs) SetRetention(days int, entries int) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -82,14 +77,12 @@ func (j *Jobs) SetRetention(days int, entries int) {
 	}
 }
 
-// SetMaxActiveJobs sets the maximum allowed number of active (queued/running) jobs.
 func (j *Jobs) SetMaxActiveJobs(limit int) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.maxActiveJobs = limit
 }
 
-// Submit enqueues a new job or returns the existing job ID if idempotencyKey has already been submitted.
 func (j *Jobs) SubmitForce(serverID, action, target, actor, idempotencyKey string, force bool) (string, error) {
 	id, err := j.Submit(serverID, action, target, actor, idempotencyKey)
 	if err != nil {
@@ -103,7 +96,6 @@ func (j *Jobs) SubmitForce(serverID, action, target, actor, idempotencyKey strin
 	return id, nil
 }
 
-// SubmitWithTail is Submit that also records the requested log tail lines.
 func (j *Jobs) SubmitWithTail(serverID, action, target, actor, idempotencyKey string, tail int) (string, error) {
 	id, err := j.Submit(serverID, action, target, actor, idempotencyKey)
 	if err != nil {
@@ -170,7 +162,6 @@ func (j *Jobs) Submit(serverID, action, target, actor, idempotencyKey string) (s
 	return id, nil
 }
 
-// Start transitions a job from queued to running.
 func (j *Jobs) Start(id string) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -198,7 +189,6 @@ func (j *Jobs) Start(id string) error {
 	return nil
 }
 
-// Complete transitions a job from running to succeeded or failed.
 func (j *Jobs) Complete(id string, status JobStatus, errMsg ...string) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -239,8 +229,6 @@ func (j *Jobs) Complete(id string, status JobStatus, errMsg ...string) error {
 	return nil
 }
 
-// SetResult stores an output payload on a job without changing its status.
-// Used for action results (e.g. container logs) retrieved after completion.
 func (j *Jobs) SetResult(id, result string) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -252,14 +240,10 @@ func (j *Jobs) SetResult(id, result string) error {
 	return j.appendLocked(job)
 }
 
-// Fail is a convenience helper for completing a job with failed status.
 func (j *Jobs) Fail(id string, errMsg string) error {
 	return j.Complete(id, JobStatusFailed, errMsg)
 }
 
-// Cancel fails a job that never started (queued): the dispatch target is
-// gone (no agent) or unreachable. Complete() rejects queued jobs by design,
-// so cancelling needs its own transition with the same rollback guarantee.
 func (j *Jobs) Cancel(id string, errMsg string) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -288,7 +272,6 @@ func (j *Jobs) Cancel(id string, errMsg string) error {
 	return nil
 }
 
-// Get returns a copy of the job with the specified ID.
 func (j *Jobs) Get(id string) (*Job, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -302,7 +285,6 @@ func (j *Jobs) Get(id string) (*Job, error) {
 	return copyJob(job), nil
 }
 
-// List returns copies of all jobs in submission order.
 func (j *Jobs) List() []*Job {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -317,7 +299,6 @@ func (j *Jobs) List() []*Job {
 	return out
 }
 
-// ListByServer returns copies of all jobs dispatched to a specific server.
 func (j *Jobs) ListByServer(serverID string) []*Job {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -332,7 +313,6 @@ func (j *Jobs) ListByServer(serverID string) []*Job {
 	return out
 }
 
-// Prune applies retention policies (age and maximum entries) to terminal jobs.
 func (j *Jobs) Prune() (int, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()

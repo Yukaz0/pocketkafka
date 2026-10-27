@@ -8,7 +8,6 @@ import (
 	"text/tabwriter"
 )
 
-// outputFormat is bound to the global -o/--output flag.
 var outputFormat string
 
 func renderTable(headers []string, rows [][]any) {

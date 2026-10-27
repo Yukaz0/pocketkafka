@@ -9,9 +9,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/tier"
 )
 
-// EnableTiering activates S3/MinIO tiered storage: closed segments older than
-// threshold are offloaded to the object store and fetched back on demand. It
-// returns a stop function for the background offload loop.
 func (s *Store) EnableTiering(client *tier.S3Client, threshold, interval time.Duration) func() {
 	s.s3 = client
 	s.tierThreshold = threshold
@@ -36,8 +33,6 @@ func (s *Store) EnableTiering(client *tier.S3Client, threshold, interval time.Du
 	return func() { close(stop) }
 }
 
-// attach wires an object-store fetcher onto a partition so remote segments can
-// be restored on demand, and a deleter so retention can drop their objects.
 func (s *Store) attach(p *Partition) {
 	if s.s3 != nil {
 		p.remoteFetch = s.fetchRemote
@@ -45,7 +40,6 @@ func (s *Store) attach(p *Partition) {
 	}
 }
 
-// fetchRemote downloads an object key from the configured store.
 func (s *Store) fetchRemote(key string) ([]byte, error) {
 	if s.s3 == nil {
 		return nil, fmt.Errorf("tiered storage not enabled")
@@ -53,8 +47,6 @@ func (s *Store) fetchRemote(key string) ([]byte, error) {
 	return s.s3.GetObject(key)
 }
 
-// deleteRemote removes an offloaded segment's log and index objects. Both are
-// attempted; the first failure is returned so the caller can ignore it.
 func (s *Store) deleteRemote(logKey, indexKey string) error {
 	if s.s3 == nil {
 		return fmt.Errorf("tiered storage not enabled")
@@ -68,7 +60,6 @@ func (s *Store) deleteRemote(logKey, indexKey string) error {
 	return firstErr
 }
 
-// offloadAll moves old closed segments of every partition to object storage.
 func (s *Store) offloadAll() {
 	for _, t := range s.TopicsSnapshot() {
 		for _, p := range t.Partitions {
@@ -77,10 +68,6 @@ func (s *Store) offloadAll() {
 	}
 }
 
-// offloadPartition uploads closed segments older than the threshold. It picks
-// candidates under the partition lock, does the reads and uploads without it
-// (so produce/fetch are not stalled behind S3), then re-takes the lock to mark
-// only the segments that are still present and not already remote.
 func (s *Store) offloadPartition(p *Partition) {
 	if s.s3 == nil {
 		return
@@ -140,8 +127,6 @@ func (s *Store) offloadPartition(p *Partition) {
 	}
 }
 
-// hasClosedSegmentLocked reports whether seg is still one of the partition's
-// closed segments.
 func (p *Partition) hasClosedSegmentLocked(seg *Segment) bool {
 	for _, s := range p.closedSegments {
 		if s == seg {
@@ -151,7 +136,6 @@ func (p *Partition) hasClosedSegmentLocked(seg *Segment) bool {
 	return false
 }
 
-// tierKey builds the object-store key for a segment file.
 func (s *Store) tierKey(p *Partition, seg *Segment, ext string) string {
 	return filepath.Join(p.topic, fmt.Sprintf("%d", p.partitionID), fmt.Sprintf("%020d%s", seg.baseOffset, ext))
 }

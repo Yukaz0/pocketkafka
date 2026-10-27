@@ -258,9 +258,7 @@ func (s *Server) authorizeAPI(mux *http.ServeMux, next http.Handler) http.Handle
 			next.ServeHTTP(w, r)
 			return
 		}
-		// Fleet routes are authenticated by authMiddleware (session/bearer) above;
-		// granular authorization happens in the fleet listener via the
-		// proxy-injected principal. Forward without a dashboard ACL rule.
+
 		if strings.HasPrefix(r.URL.Path, "/api/v1/fleet/") || r.URL.Path == "/api/v1/fleet" {
 			next.ServeHTTP(w, r)
 			return
@@ -414,12 +412,6 @@ func fleetTargetURL(listen string, useTLS bool) *url.URL {
 	return u
 }
 
-// fleetProxyTLS builds the TLS config the dashboard proxy uses to reach the
-// fleet listener. Wildcard binds are dialed via loopback (see fleetTargetURL);
-// ServerName defaults to the dialed host unless fleet.tls.server_name is set.
-// Trust order: fleet.tls.ca_file, else the listener's own cert_file, else
-// system roots. A self-signed listener cert without ca_file therefore works
-// only when the proxy can read that same cert_file.
 func fleetProxyTLS(caFile, serverName string, u *url.URL) (*tls.Config, error) {
 	conf := &tls.Config{MinVersion: tls.VersionTLS12}
 	host := u.Hostname()

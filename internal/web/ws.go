@@ -74,7 +74,7 @@ func (s *Server) upgradeWebSocket(w http.ResponseWriter, r *http.Request) (net.C
 		return nil, fmt.Errorf("missing Sec-WebSocket-Key")
 	}
 
-	h := sha1.New() //#nosec G401 -- see the import: the WebSocket handshake digest is fixed by RFC 6455
+	h := sha1.New()
 	h.Write([]byte(key + wsGUID))
 	accept := base64.StdEncoding.EncodeToString(h.Sum(nil))
 

@@ -469,9 +469,7 @@ func (s *Server) fetchClusterReport(ctx context.Context, e ClusterEntry, window 
 	endpoint := strings.TrimRight(e.URL, "/") + "/api/v1/health/overview?window=" + fmt.Sprintf("%d", int(window.Seconds()))
 	reqCtx, cancel := context.WithTimeout(ctx, clusterFetchTimeout)
 	defer cancel()
-	//#nosec G704 -- endpoint is a registered cluster URL (validateClusterURL) and
-	// the request is issued by clusterHTTPClient, whose dialer refuses
-	// link-local/metadata addresses and never follows a redirect.
+
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, 0, err
@@ -481,10 +479,7 @@ func (s *Server) fetchClusterReport(ctx context.Context, e ClusterEntry, window 
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	start := time.Now()
-	//#nosec G704 -- the URL is a registered cluster endpoint and
-	// clusterHTTPClient dials through guardDialAddr, which refuses
-	// link-local/metadata addresses after DNS resolution and never follows a
-	// redirect.
+
 	resp, err := clusterHTTPClient.Do(req)
 	latency := time.Since(start)
 	if err != nil {

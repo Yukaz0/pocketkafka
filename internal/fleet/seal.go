@@ -12,7 +12,6 @@ import (
 	"strings"
 )
 
-// Agent key sealing follows the KDF and AES-GCM pattern in internal/web/secrets.go.
 const (
 	fleetSecretPrefix  = "enc:v1:"
 	minMasterKeyChars  = 16

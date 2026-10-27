@@ -1,6 +1,3 @@
-// Package gateway implements multi-protocol HTTP ingress for pocketkafka: a
-// lightweight REST proxy (port 8082) that lets non-Kafka services publish and
-// consume messages over plain HTTP.
 package gateway
 
 import (
@@ -14,21 +11,17 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// RESTProxy is the HTTP REST proxy gateway.
 type RESTProxy struct {
 	store *storage.Store
 
-	// Partition round-robin counters for keyless produce.
 	rrMu      sync.Mutex
 	rrCounter map[string]uint64
 }
 
-// NewRESTProxy builds a REST proxy bound to the storage engine.
 func NewRESTProxy(store *storage.Store) *RESTProxy {
 	return &RESTProxy{store: store, rrCounter: make(map[string]uint64)}
 }
 
-// Handler returns the HTTP handler for the REST proxy.
 func (p *RESTProxy) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /topics/{topic}/messages", p.publish)
@@ -42,7 +35,6 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// publish produces a message to a topic via the storage engine.
 func (p *RESTProxy) publish(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
 	var req struct {
@@ -54,7 +46,7 @@ func (p *RESTProxy) publish(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid JSON body"})
 		return
 	}
-	// Accept both raw JSON values and strings for the value.
+
 	var value []byte
 	switch v := req.Value.(type) {
 	case nil:
@@ -77,8 +69,7 @@ func (p *RESTProxy) publish(w http.ResponseWriter, r *http.Request) {
 	for k, v := range req.Headers {
 		headers = append(headers, protocol.RecordHeader{Key: k, Value: []byte(v)})
 	}
-	// Partition selection: explicit ?partition= wins, else key hash
-	// (FNV-1a), else round-robin across the topic's partitions.
+
 	t := p.store.GetTopic(topic)
 	if t == nil || len(t.Partitions) == 0 {
 		writeJSON(w, 500, map[string]string{"error": "partition unavailable"})
@@ -132,7 +123,6 @@ func (p *RESTProxy) publish(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]interface{}{"topic": topic, "partition": part.PartitionID(), "offset": off})
 }
 
-// consume fetches messages from a topic with optional offset/limit pagination.
 func (p *RESTProxy) consume(w http.ResponseWriter, r *http.Request) {
 	topic := r.PathValue("topic")
 	offset, _ := strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64)
@@ -169,7 +159,7 @@ type restRecord struct {
 }
 
 func decodeRecords(topic string, partition int32, raw []byte) []restRecord {
-	// Non-nil so an empty read serialises as [] rather than null.
+
 	out := []restRecord{}
 	pos := 0
 	for pos < len(raw) {

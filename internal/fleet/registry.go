@@ -33,8 +33,6 @@ type registryData struct {
 	Servers     []*Server     `json:"servers,omitempty"`
 }
 
-// Registry manages servers, agents, and single-use enrollment tokens.
-// Safe for concurrent access. Persists state via atomicfile.
 type Registry struct {
 	mu          sync.RWMutex
 	path        string
@@ -46,10 +44,6 @@ type Registry struct {
 	maxAgents   int
 }
 
-// NewRegistry constructs a Registry bound to dirOrPath and masterKey.
-// If dirOrPath is a directory, state lives in __fleet_agents.json.
-// If dirOrPath is empty, state is in-memory only.
-// Fails closed if masterKey is shorter than 16 characters.
 func NewRegistry(dirOrPath, masterKey string) (*Registry, error) {
 	if len(masterKey) < minMasterKeyChars {
 		return nil, fmt.Errorf("fleet: master key must be at least %d characters (got %d)", minMasterKeyChars, len(masterKey))
@@ -80,9 +74,6 @@ func NewRegistry(dirOrPath, masterKey string) (*Registry, error) {
 	return r, nil
 }
 
-// NewRegistryWithKey is an alias for NewRegistry.
-
-// SetMaxAgents sets the maximum allowed number of active agents.
 func (r *Registry) SetMaxAgents(limit int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -109,7 +100,7 @@ func (r *Registry) load() error {
 
 	var state registryData
 	if err := json.Unmarshal(data, &state); err != nil {
-		// Fallback for flat agent list
+
 		var agents []*Agent
 		if err2 := json.Unmarshal(data, &agents); err2 == nil {
 			for _, a := range agents {
@@ -162,7 +153,6 @@ func (r *Registry) persistLocked() error {
 	return atomicfile.Write(r.path, data, 0o600)
 }
 
-// Enroll issues a 32-byte single-use token expiring in 15 minutes.
 func (r *Registry) Enroll(serverID string) (string, error) {
 	return r.enrollWithExpiry(serverID, 15*time.Minute)
 }
@@ -210,7 +200,6 @@ func (r *Registry) enrollWithExpiry(serverID string, duration time.Duration) (st
 	return token, nil
 }
 
-// ConsumeToken redeems an enrollment token exactly once, returning a newly registered Agent.
 func (r *Registry) ConsumeToken(token string) (*Agent, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -297,7 +286,6 @@ func (r *Registry) ConsumeToken(token string) (*Agent, error) {
 	return &cp, nil
 }
 
-// Revoke disables an agent immediately.
 func (r *Registry) Revoke(agentID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -314,7 +302,6 @@ func (r *Registry) Revoke(agentID string) error {
 	return r.persistLocked()
 }
 
-// TouchServer refreshes a server's last-seen timestamp on heartbeat.
 func (r *Registry) TouchServer(serverID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -326,7 +313,6 @@ func (r *Registry) TouchServer(serverID string) {
 	}
 }
 
-// RevokeServer revokes all active agents belonging to serverID and marks server revoked.
 func (r *Registry) RevokeServer(serverID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -351,7 +337,6 @@ func (r *Registry) RevokeServer(serverID string) error {
 	return r.persistLocked()
 }
 
-// ListServers returns all registered servers sorted by ID.
 func (r *Registry) ListServers() []*Server {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -365,7 +350,6 @@ func (r *Registry) ListServers() []*Server {
 	return out
 }
 
-// GetServer returns a server by ID.
 func (r *Registry) GetServer(serverID string) (*Server, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -378,8 +362,6 @@ func (r *Registry) GetServer(serverID string) (*Server, bool) {
 	return &cp, true
 }
 
-// ListEnrollments returns copies of pending enrollment tokens, pruning used
-// and expired ones first so the list never accumulates dead entries.
 func (r *Registry) ListEnrollments() []*Enrollment {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -405,7 +387,6 @@ func (r *Registry) ListEnrollments() []*Enrollment {
 	return out
 }
 
-// Lookup finds an agent by ID.
 func (r *Registry) Lookup(agentID string) (*Agent, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -419,7 +400,6 @@ func (r *Registry) Lookup(agentID string) (*Agent, error) {
 	return &cp, nil
 }
 
-// AuthorizeStream checks whether the agent exists and is not revoked.
 func (r *Registry) AuthorizeStream(agentID string) (*Agent, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -436,7 +416,6 @@ func (r *Registry) AuthorizeStream(agentID string) (*Agent, error) {
 	return &cp, nil
 }
 
-// ListAgents returns all agents sorted by ID.
 func (r *Registry) ListAgents() []*Agent {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -471,7 +450,6 @@ func (r *Registry) agentKey(agentID string) (string, error) {
 	return r.box.open(ag.SealedKey)
 }
 
-// AgentKey decrypts and returns the raw secret for an agent.
 func (r *Registry) AgentKey(agentID string) (string, error) {
 	return r.agentKey(agentID)
 }

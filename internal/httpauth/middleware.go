@@ -1,6 +1,3 @@
-// Package httpauth provides HTTP authentication and authorization for the
-// broker's management surfaces (web API, REST proxy, Schema Registry) so they
-// cannot be used to bypass the ACLs enforced on the Kafka protocol path.
 package httpauth
 
 import (
@@ -16,25 +13,14 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/ratelimit"
 )
 
-// Policy describes which paths are public and how a request maps to an
-// authorization decision.
 type Policy struct {
-	// Public lists path prefixes that are served without authentication
-	// (health checks, login, metrics scraping).
 	Public []string
-	// Classify maps a request to the operation/resource to authorize. When it
-	// returns ok=false the request is authenticated but not authorized against
-	// a specific resource.
+
 	Classify func(r *http.Request) (authz.Operation, authz.Resource, bool)
-	// RequireTLS refuses Basic credentials over a plaintext connection, where
-	// the password travels in cleartext (base64 is not encryption). It is what
-	// security.require_tls_for_plain turns on.
+
 	RequireTLS bool
 }
 
-// Middleware authenticates a request with HTTP Basic credentials and then
-// authorizes it. When security is disabled it is a pass-through, preserving
-// allow-all behaviour (decision D2).
 type Middleware struct {
 	enabled bool
 	users   []config.SecurityUser
@@ -43,8 +29,6 @@ type Middleware struct {
 	limiter *ratelimit.Limiter
 }
 
-// New builds the middleware. A nil authorizer is replaced with a default-deny
-// in-memory store, so enabling security can never silently allow everything.
 func New(enabled bool, users []config.SecurityUser, a authz.Authorizer, p Policy) *Middleware {
 	if a == nil {
 		a = authz.NewInMemory()
@@ -54,13 +38,11 @@ func New(enabled bool, users []config.SecurityUser, a authz.Authorizer, p Policy
 		users:   users,
 		authz:   a,
 		policy:  p,
-		// Three free attempts, then 1s doubling to 30s: enough for a mistyped
-		// password, not enough for a dictionary.
+
 		limiter: ratelimit.New(3, time.Second, 30*time.Second),
 	}
 }
 
-// Wrap returns next guarded by the middleware.
 func (m *Middleware) Wrap(next http.Handler) http.Handler {
 	if !m.enabled {
 		return next
@@ -125,9 +107,6 @@ func (m *Middleware) isPublic(path string) bool {
 	return false
 }
 
-// credentialsValid checks a Basic credential. The comparison is constant-time
-// and understands both a plaintext password and a stored PBKDF2 hash, so the
-// same user list can serve Kafka, MQTT, the dashboard and this surface.
 func (m *Middleware) credentialsValid(username, password string) bool {
 	if username == "" {
 		return false
@@ -156,11 +135,6 @@ func (m *Middleware) classify(r *http.Request) (authz.Operation, authz.Resource,
 	return DefaultClassify(r)
 }
 
-// DefaultClassify maps a request to a coarse operation/resource: reads map to
-// Read, writes to Write, and the resource name is taken from the first
-// /topics/<name> or /groups/<name> path segment, falling back to the cluster.
-// It parses the path directly rather than using PathValue because the
-// middleware runs before the router populates path variables.
 func DefaultClassify(r *http.Request) (authz.Operation, authz.Resource, bool) {
 	var op authz.Operation
 	switch r.Method {
@@ -181,7 +155,6 @@ func DefaultClassify(r *http.Request) (authz.Operation, authz.Resource, bool) {
 	return op, authz.Resource{Type: authz.ResourceCluster, Name: "cluster"}, true
 }
 
-// clientAddr renders a request's peer address for the audit trail and limiter.
 func clientAddr(r *http.Request) string {
 	if r.RemoteAddr == "" {
 		return ""

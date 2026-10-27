@@ -1,6 +1,3 @@
-// Package handler implements the per-API-request handlers for the broker,
-// decoding requests with pkg/protocol and producing responses backed by the
-// storage engine and the group coordinator.
 package handler
 
 import (
@@ -18,9 +15,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// RequestContext carries the identity and transport details of one request from
-// the connection layer into the handlers, so authorization decisions can be made
-// against the authenticated principal rather than an anonymous caller.
 type RequestContext struct {
 	Principal    string
 	ListenerPort int32
@@ -28,9 +22,6 @@ type RequestContext struct {
 	ClientAddr   string
 }
 
-// Handler routes API requests to the correct logic and encodes responses.
-// listenerAdvertised is the advertised host:port clients should use when
-// they connected through a specific listener (bind port).
 type listenerAdvertised struct {
 	host string
 	port int32
@@ -43,16 +34,12 @@ type Handler struct {
 	nodeID         int32
 	advertisedHost string
 	advertisedPort int32
-	// advertisedByBind maps a listener bind port to the advertised address
-	// for connections accepted through that listener (set once by the server
-	// during Start, before any request is served).
+
 	advertisedByBind map[int32]listenerAdvertised
-	// authorizer decides every read/write/admin permission. It defaults to
-	// allow-all so security-disabled deployments keep their old behaviour.
+
 	authorizer authz.Authorizer
 }
 
-// New builds a Handler bound to the given storage store and group coordinator.
 func New(store *storage.Store, coord *coordinator.GroupManager, cfg *config.Config, nodeID int32, host string, port int32) *Handler {
 	return &Handler{
 		store:          store,
@@ -65,8 +52,6 @@ func New(store *storage.Store, coord *coordinator.GroupManager, cfg *config.Conf
 	}
 }
 
-// WithAuthorizer installs the authorization policy used for every request.
-// Passing nil restores allow-all.
 func (h *Handler) WithAuthorizer(a authz.Authorizer) *Handler {
 	if a == nil {
 		a = authz.AllowAllAuthorizer{}
@@ -75,8 +60,6 @@ func (h *Handler) WithAuthorizer(a authz.Authorizer) *Handler {
 	return h
 }
 
-// authorize reports whether ctx.Principal may perform op on res. An empty
-// principal is treated as anonymous.
 func (h *Handler) authorize(ctx RequestContext, op authz.Operation, res authz.Resource) error {
 	principal := ctx.Principal
 	if principal == "" {
@@ -96,10 +79,7 @@ func (h *Handler) handleApiVersions(version int16, body []byte) ([]byte, error) 
 		ErrorCode: protocol.ErrNone,
 	}
 	if version > protocol.MaxVersion(protocol.APKApiVersions) {
-		// Per KIP-511 a broker that does not support the requested ApiVersions
-		// version replies with UNSUPPORTED_VERSION and the supported keys
-		// encoded in the non-flexible version 0 format, so the client can
-		// downgrade.
+
 		resp.ErrorCode = protocol.ErrUnsupportedVersion
 		resp.Version = 0
 	}
@@ -111,9 +91,7 @@ func (h *Handler) handleMetadata(version int16, body []byte, ctx RequestContext)
 	if err != nil {
 		return nil, err
 	}
-	// Advertise per-listener: klien yang masuk lewat listener tertentu harus
-	// mendapat alamat yang reachable dari jalur yang sama (mencegah klien
-	// docker-internal dial localhost yang tidak reachable).
+
 	host, port := h.advertisedFor(ctx.ListenerPort)
 	resp := &protocol.MetadataResponse{
 		Version:                     version,
@@ -143,9 +121,7 @@ func (h *Handler) handleMetadata(version int16, body []byte, ctx RequestContext)
 		t := h.store.GetTopic(name)
 		if t == nil && h.cfg.Topics.AutoCreate &&
 			h.authorize(ctx, authz.OpWrite, authz.Resource{Type: authz.ResourceTopic, Name: name}) == nil {
-			// Auto-creation is a write: a client that may only read some other
-			// topic must not be able to make the broker mint topics by asking
-			// for their metadata.
+
 			h.store.EnsureTopic(name, h.cfg.Topics.DefaultPartitions)
 			t = h.store.GetTopic(name)
 		}
@@ -159,8 +135,7 @@ func (h *Handler) handleMetadata(version int16, body []byte, ctx RequestContext)
 		}
 		if err := h.authorize(ctx, authz.OpDescribe, authz.Resource{Type: authz.ResourceTopic, Name: name}); err != nil {
 			if fullListing {
-				// A listing shows only what the caller may see, so it cannot be
-				// used to enumerate the whole cluster.
+
 				continue
 			}
 			mt.ErrorCode = protocol.ErrTopicAuthorizationFailed
@@ -189,8 +164,6 @@ func (h *Handler) handleProduce(version int16, body []byte, ctx RequestContext) 
 	resp := &protocol.ProduceResponse{Version: version, ThrottleTimeMs: 0}
 	now := time.Now().UnixMilli()
 
-	// Durability contract: flush_policy=request fsyncs before the ack, and a
-	// full-ack (acks=-1) does too when sync_on_acks_all is set.
 	syncBeforeAck := h.cfg.Storage.FlushPolicy == config.FlushPolicyRequest ||
 		(req.Acks == -1 && h.cfg.Storage.SyncOnAcksAll)
 
@@ -204,7 +177,7 @@ func (h *Handler) handleProduce(version int16, body []byte, ctx RequestContext) 
 				LogAppendTime: now,
 			}
 			if !allowed {
-				// Denied before any write so the log is untouched.
+
 				rp.ErrorCode = protocol.ErrTopicAuthorizationFailed
 				rp.BaseOffset = -1
 				rt.Partitions = append(rt.Partitions, rp)
@@ -238,16 +211,11 @@ func (h *Handler) handleProduce(version int16, body []byte, ctx RequestContext) 
 	return protocol.EncodeProduceResponse(resp)
 }
 
-// appendToPartition validates and persists one RecordBatch for a produce
-// request. It handles compression (decompressing the batch before storing it so
-// the log always stores uncompressed payloads) and idempotent producer
-// sequence validation.
 func (h *Handler) appendToPartition(part *storage.Partition, raw []byte, sync bool) (int64, error) {
 	if len(raw) < 61 {
 		return -1, fmt.Errorf("record batch too short")
 	}
-	// Read the compression codec from the attributes field (bytes 21-23)
-	// without decoding the (possibly compressed) records first.
+
 	attr := int16(binary.BigEndian.Uint16(raw[21:23]))
 	if codec := protocol.CompressionCodec(attr); codec != protocol.CompressionNone {
 		records, derr := protocol.DecompressRecordBatch(raw[61:], attr)
@@ -262,21 +230,18 @@ func (h *Handler) appendToPartition(part *storage.Partition, raw []byte, sync bo
 		return -1, err
 	}
 	if batch.ProducerID >= 0 {
-		// Idempotent producer path: sequence validation + dedup.
+
 		return part.AppendIdempotentSynced(batch.ProducerID, batch.ProducerEpoch, batch.BaseSequence, raw, sync)
 	}
 	return part.AppendSynced(raw, sync)
 }
 
-// rebuildBatch re-encodes a RecordBatch with decompressed records and a zeroed
-// compression codec, preserving timestamps and producer metadata.
 func rebuildBatch(raw []byte, records []byte) []byte {
-	// Decode the decompressed records so we can re-encode them with codec 0.
+
 	if len(records) < 4 {
 		return raw
 	}
-	// The records payload is a sequence of varint-length-prefixed records; the
-	// count lives in the header (bytes 57-61). Rebuild the header by hand.
+
 	count := int32(binary.BigEndian.Uint32(raw[57:61]))
 	rest := records
 	decoded := make([]protocol.Record, 0, count)
@@ -320,10 +285,6 @@ func (h *Handler) handleFetch(version int16, body []byte, ctx RequestContext) ([
 	}
 	resp := &protocol.FetchResponse{Version: version, ThrottleTimeMs: 0}
 
-	// Long-poll: wait for data on every partition that has none yet, all
-	// against one shared deadline, so a fetch spanning N idle partitions still
-	// returns within MaxWaitMillis instead of N x MaxWaitMillis. Partitions that
-	// already have data (HWM > FetchOffset) are skipped and read immediately.
 	if req.MaxWaitMillis > 0 {
 		var pending []fetchWait
 		for _, t := range req.Topics {
@@ -412,11 +373,7 @@ func (h *Handler) handleListOffsets(version int16, body []byte, ctx RequestConte
 				} else {
 					rp.Offset = off
 					if version == 0 {
-						// v0 tidak punya field Offset — hasil dibawa
-						// OldStyleOffsets. Tanpa ini klien legacy
-						// (librdkafka broker.version.fallback=0.9.0)
-						// membaca array null (-1) dan menyimpulkan
-						// offset END, jadi konsumen tidak pernah fetch.
+
 						rp.OldStyleOffsets = []int64{off}
 					}
 				}
@@ -454,7 +411,7 @@ func (h *Handler) handleCreateTopics(version int16, body []byte, ctx RequestCont
 		} else if _, err := h.store.CreateTopic(t.Topic, int(t.NumPartitions)); err != nil {
 			ct.ErrorCode = protocol.ErrUnknownServerError
 		} else if isCompacted(t.Configs) {
-			// Log compaction is requested; persist the topic flag.
+
 			if err := h.store.MarkCompacted(t.Topic, true); err != nil {
 				ct.ErrorCode = protocol.ErrUnknownServerError
 			}
@@ -493,8 +450,7 @@ func (h *Handler) handleFindCoordinator(version int16, body []byte, localPort in
 		return nil, err
 	}
 	resp := h.coord.FindCoordinator(req)
-	// Koordinator group harus reachable dari jalur klien: override alamat
-	// dengan advertised listener tempat klien masuk.
+
 	resp.Host, resp.Port = h.advertisedFor(localPort)
 	return protocol.EncodeFindCoordinatorResponse(resp)
 }
@@ -505,8 +461,7 @@ func (h *Handler) handleJoinGroup(version int16, body []byte, ctx RequestContext
 		return nil, err
 	}
 	if err := h.authorize(ctx, authz.OpRead, authz.Resource{Type: authz.ResourceGroup, Name: req.Group}); err != nil {
-		// Denied before the coordinator sees the request, so no group state
-		// is created or mutated.
+
 		return protocol.EncodeJoinGroupResponse(&protocol.JoinGroupResponse{
 			Version: version, ErrorCode: protocol.ErrGroupAuthorizationFailed,
 		})
@@ -563,7 +518,7 @@ func (h *Handler) handleOffsetCommit(version int16, body []byte, ctx RequestCont
 		return nil, err
 	}
 	if err := h.authorize(ctx, authz.OpWrite, authz.Resource{Type: authz.ResourceGroup, Name: req.Group}); err != nil {
-		// Report the denial per partition without touching the offset store.
+
 		resp := &protocol.OffsetCommitResponse{Version: version}
 		for _, t := range req.Topics {
 			rt := protocol.OffsetCommitResponseTopic{Topic: t.Topic}
@@ -595,9 +550,6 @@ func (h *Handler) handleOffsetFetch(version int16, body []byte, ctx RequestConte
 	return protocol.EncodeOffsetFetchResponse(resp)
 }
 
-// handleListGroups (Key 16) lists the consumer groups this principal may see.
-// A group the caller cannot describe is omitted rather than reported, so the
-// call cannot be used to enumerate every group id in the cluster.
 func (h *Handler) handleListGroups(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeListGroupsRequest(version, body)
 	if err != nil {
@@ -616,9 +568,6 @@ func (h *Handler) handleListGroups(version int16, body []byte, ctx RequestContex
 	return protocol.EncodeListGroupsResponse(resp)
 }
 
-// handleDescribeGroups (Key 15) returns per-group state, members and protocol.
-// Member metadata, assignments and client hosts are only disclosed to a
-// principal that may describe the group.
 func (h *Handler) handleDescribeGroups(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeDescribeGroupsRequest(version, body)
 	if err != nil {
@@ -626,9 +575,7 @@ func (h *Handler) handleDescribeGroups(version int16, body []byte, ctx RequestCo
 	}
 	resp := &protocol.DescribeGroupsResponse{Version: req.Version}
 	for _, id := range req.GroupIDs {
-		// Authorized operations are reported as "not available" (the INT32_MIN
-		// the protocol reserves for that), because the ACL model here does not
-		// map onto Kafka's per-operation bitmask.
+
 		g := protocol.DescribeGroupsResponseGroup{GroupID: id, AuthorizedOperations: math.MinInt32}
 		if err := h.authorize(ctx, authz.OpDescribe, authz.Resource{Type: authz.ResourceGroup, Name: id}); err != nil {
 			g.ErrorCode = protocol.ErrGroupAuthorizationFailed
@@ -660,7 +607,6 @@ func (h *Handler) handleDescribeGroups(version int16, body []byte, ctx RequestCo
 	return protocol.EncodeDescribeGroupsResponse(resp)
 }
 
-// handleDeleteGroups (Key 42) deletes empty groups.
 func (h *Handler) handleDeleteGroups(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeDeleteGroupsRequest(version, body)
 	if err != nil {
@@ -684,18 +630,12 @@ func (h *Handler) handleDeleteGroups(version int16, body []byte, ctx RequestCont
 	return protocol.EncodeDeleteGroupsResponse(resp)
 }
 
-// handleInitProducerID (Key 22) allocates a producer ID and epoch for
-// idempotent producers. Transactional producers are accepted here but cannot
-// make progress: the transactional APIs are not advertised (see
-// DisabledTransactionAPIKeys) and always answer UNSUPPORTED_VERSION.
 func (h *Handler) handleInitProducerID(version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	req, err := protocol.DecodeInitProducerIdRequest(version, body)
 	if err != nil {
 		return nil, err
 	}
-	// Allocating a producer id is a cluster-scoped write: Kafka gates it on
-	// IDEMPOTENT_WRITE on the cluster. Without the check any authenticated
-	// client could mint producer ids.
+
 	if err := h.authorize(ctx, authz.OpWrite, authz.Resource{Type: authz.ResourceCluster, Name: "cluster"}); err != nil {
 		resp := &protocol.InitProducerIdResponse{
 			Version:   req.Version,
@@ -713,19 +653,11 @@ func (h *Handler) handleInitProducerID(version int16, body []byte, ctx RequestCo
 	return protocol.EncodeInitProducerIdResponse(resp)
 }
 
-// fetchWait identifies one partition a fetch request must wait on before it can
-// build its response.
 type fetchWait struct {
 	part        *storage.Partition
 	fetchOffset int64
 }
 
-// waitFetchData blocks until the pending partitions satisfy minBytes or the
-// shared maxWait deadline elapses. With MinBytes <= 1 it returns as soon as any
-// single pending partition has data; with a larger MinBytes it waits for every
-// pending partition (byte accounting is deliberately not fabricated). All
-// partitions are awaited concurrently against one deadline, so the request
-// waits at most maxWait regardless of how many partitions are idle.
 func waitFetchData(pending []fetchWait, minBytes, maxWait int32) {
 	if len(pending) == 0 || maxWait <= 0 {
 		return
@@ -762,12 +694,6 @@ func waitFetchData(pending []fetchWait, minBytes, maxWait int32) {
 	wg.Wait()
 }
 
-// longPoll blocks until data beyond fetchOffset is available or the deadline
-// passes, reporting whether data arrived. The wake channel is snapshotted
-// before the high watermark is read, so an Append landing between the two reads
-// is never missed: either the returned channel is already closed or the
-// returned HWM already covers fetchOffset. A wake that turns out spurious (the
-// HWM did not advance) simply re-arms the wait, bounded by the deadline.
 func longPoll(part *storage.Partition, fetchOffset int64, deadline time.Time) bool {
 	for {
 		ch, hwm := part.DataWaiter()
@@ -791,7 +717,6 @@ func longPoll(part *storage.Partition, fetchOffset int64, deadline time.Time) bo
 	}
 }
 
-// isCompacted reports whether a topic creation request sets cleanup.policy=compact.
 func isCompacted(configs []protocol.CreateTopicsConfig) bool {
 	for _, c := range configs {
 		if c.Name == "cleanup.policy" && c.Value != nil {

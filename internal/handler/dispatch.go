@@ -6,11 +6,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// This file holds the request dispatcher: the ApiVersions table the broker
-// advertises, the top-level routing switch, and the fail-closed handling of
-// APIs the broker does not implement. The per-API handlers live in handler.go.
-
-// supportedKeys returns the ApiVersions table advertised by this broker.
 func (h *Handler) supportedKeys() []protocol.ApiKeySupport {
 	return []protocol.ApiKeySupport{
 		{ApiKey: protocol.APKProduce, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKProduce)},
@@ -36,8 +31,6 @@ func (h *Handler) supportedKeys() []protocol.ApiKeySupport {
 	}
 }
 
-// SetAdvertisedForPort registers the advertised address for connections
-// accepted through the listener bound to bindPort.
 func (h *Handler) SetAdvertisedForPort(bindPort int32, host string, port int32) {
 	if h.advertisedByBind == nil {
 		h.advertisedByBind = make(map[int32]listenerAdvertised)
@@ -45,8 +38,6 @@ func (h *Handler) SetAdvertisedForPort(bindPort int32, host string, port int32) 
 	h.advertisedByBind[bindPort] = listenerAdvertised{host: host, port: port}
 }
 
-// advertisedFor resolves the advertised address for a connection accepted
-// through bindPort, falling back to the primary advertised address.
 func (h *Handler) advertisedFor(bindPort int32) (string, int32) {
 	if a, ok := h.advertisedByBind[bindPort]; ok {
 		return a.host, a.port
@@ -54,9 +45,6 @@ func (h *Handler) advertisedFor(bindPort int32) (string, int32) {
 	return h.advertisedHost, h.advertisedPort
 }
 
-// Handle decodes and processes a single request body, returning the encoded
-// response body (the correlation ID is added by the server layer). ctx carries
-// the authenticated principal used for authorization.
 func (h *Handler) Handle(apiKey, version int16, body []byte, ctx RequestContext) ([]byte, error) {
 	maxV := protocol.MaxVersion(apiKey)
 	if apiKey != protocol.APKApiVersions && (maxV < 0 || version > maxV || version < 0) {
@@ -105,22 +93,12 @@ func (h *Handler) Handle(apiKey, version int16, body []byte, ctx RequestContext)
 	}
 }
 
-// disabledTxnMaxVersion is the last wire version whose request/response codecs
-// we are prepared to run for the transactional APIs. The broker does not
-// implement transactions, so these requests only ever receive
-// UNSUPPORTED_VERSION; the cap keeps us from mis-encoding a version we do not
-// actually understand.
 var disabledTxnMaxVersion = map[int16]int16{
 	protocol.APKAddPartitionsToTxn: 1,
 	protocol.APKAddOffsetsToTxn:    1,
 	protocol.APKEndTxn:             2,
 }
 
-// unsupportedVersion builds a response body reporting UNSUPPORTED_VERSION. For
-// ApiVersions we include the supported keys so the client can downgrade. For
-// the transactional APIs (whose codecs exist but whose semantics do not) we
-// answer with a well-formed UNSUPPORTED_VERSION response instead of a success,
-// so a client never mistakes a no-op for a committed transaction.
 func (h *Handler) unsupportedVersion(apiKey, version int16, body []byte) ([]byte, error) {
 	if apiKey == protocol.APKApiVersions {
 		resp := &protocol.ApiVersionsResponse{
@@ -136,9 +114,6 @@ func (h *Handler) unsupportedVersion(apiKey, version int16, body []byte) ([]byte
 	return nil, fmt.Errorf("unsupported version %d for api key %d", version, apiKey)
 }
 
-// disabledTransactionResponse decodes a transactional request solely to learn
-// its version, then replies UNSUPPORTED_VERSION using the matching response
-// codec. No transaction state is created.
 func disabledTransactionResponse(apiKey, version int16, body []byte) ([]byte, error) {
 	switch apiKey {
 	case protocol.APKAddPartitionsToTxn:

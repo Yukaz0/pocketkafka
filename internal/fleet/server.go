@@ -20,19 +20,10 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/authz"
 )
 
-// ProxyPrincipalHeader carries the authenticated principal from the dashboard
-// reverse proxy to the fleet listener. It must never be trusted from a direct
-// client connection: the proxy strips any client-sent value and sets it only
-// after session authentication, alongside ProxyTokenHeader.
 const ProxyPrincipalHeader = "X-Pocketkafka-Principal"
 
-// ProxyTokenHeader is a per-process random token shared only between the
-// dashboard proxy and the fleet listener. Direct requests without it are
-// rejected even on loopback, so a client that reaches the fleet port
-// cannot forge a principal header.
 const ProxyTokenHeader = "X-Pocketkafka-Fleet-Proxy"
 
-// NewProxyToken generates a per-process token shared between the dashboard
 func NewProxyToken() string {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -54,8 +45,6 @@ func isValidServerID(id string) bool {
 	return true
 }
 
-
-// ServerConfig holds dependencies for FleetServer.
 type ServerConfig struct {
 	Registry     *Registry
 	Jobs         *Jobs
@@ -63,8 +52,7 @@ type ServerConfig struct {
 	Manager      *AgentManager
 	Authorizer   authz.Authorizer
 	MaxBodyBytes int64
-	// ProxyToken authenticates the dashboard reverse proxy to this listener.
-	// Generated per process; direct requests without it are rejected.
+
 	ProxyToken      string
 	MaxConnections  int
 	MaxActiveJobs   int
@@ -90,16 +78,14 @@ type FleetServer struct {
 	agentChannels map[string]*ChannelTransport
 }
 
-// NewServer constructs a new FleetServer with isolated mux and configured routes.
 func NewServer(cfg ServerConfig) *FleetServer {
 	return NewFleetServer(cfg)
 }
 
-// NewFleetServer constructs a new FleetServer with isolated mux and configured routes.
 func NewFleetServer(cfg ServerConfig) *FleetServer {
 	maxBytes := cfg.MaxBodyBytes
 	if maxBytes <= 0 {
-		maxBytes = 2 * 1024 * 1024 // 2MB default
+		maxBytes = 2 * 1024 * 1024
 	}
 
 	maxConnections := cfg.MaxConnections
@@ -161,8 +147,7 @@ func generateRequestID() string {
 }
 
 func clientIP(r *http.Request) string {
-	// RemoteAddr only: X-Forwarded-For / X-Real-IP are client-controlled on
-	// the direct fleet listener and must not feed rate-limit keys.
+
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {
 		return host
@@ -189,7 +174,6 @@ func (s *FleetServer) writeError(w http.ResponseWriter, r *http.Request, status 
 	})
 }
 
-// NewDisabledHandler returns an http.Handler that responds with 404 Not Found to indicate fleet is disabled.
 func NewDisabledHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqID := r.Header.Get("X-Request-ID")
@@ -211,12 +195,10 @@ func NewDisabledHandler() http.Handler {
 	})
 }
 
-// Handler returns the HTTP handler for the fleet server mux.
 func (s *FleetServer) Handler() http.Handler {
 	return s.mux
 }
 
-// ServeHTTP satisfies http.Handler.
 func (s *FleetServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
@@ -242,8 +224,7 @@ func (s *FleetServer) wrap(h http.HandlerFunc) http.HandlerFunc {
 		if s.maxBodyBytes > 0 && r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, s.maxBodyBytes)
 		}
-		// Agent transport endpoints authenticate via HMAC/tokens, not the proxy.
-		// POST /enroll carries the single-use enrollment token as its credential.
+
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/fleet/agent/") && r.URL.Path != "/api/v1/fleet/enroll" {
 			if s.proxyToken == "" || !validProxyToken(r, s.proxyToken) {
 				slog.Error("fleet: rejected direct request without proxy token", "path", r.URL.Path)
@@ -752,7 +733,7 @@ func (s *FleetServer) handleContainerLogs(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if tail > 1000 {
-		tail = 1000 // capped
+		tail = 1000
 	}
 
 	serverID := r.URL.Query().Get("server_id")
@@ -785,8 +766,6 @@ func (s *FleetServer) handleContainerLogs(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// waitJobLines polls a logs job until it completes, returning split lines.
-// Returns nil on timeout/failure so callers fall back to an empty list.
 func (s *FleetServer) waitJobLines(jobID string, timeout time.Duration) []string {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -956,15 +935,12 @@ func (s *FleetServer) handleAgentEnvelope(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Verify HMAC statelessly BEFORE allocating any per-agent state: an
-	// anonymous POST with a forged AgentID must not grow agentChannels.
 	gate := NewVerifier("", time.Minute, DirectionAgentToControl).WithRegistry(s.registry)
 	if err := gate.Verify(&env); err != nil {
 		s.writeError(w, r, http.StatusUnauthorized, ErrCodeUnauthorized, err.Error())
 		return
 	}
 
-	// Register session with ChannelTransport if not yet registered
 	s.getOrCreateAgentChannel(env.AgentID)
 
 	if err := s.manager.HandleInboundEnvelope(&env); err != nil {

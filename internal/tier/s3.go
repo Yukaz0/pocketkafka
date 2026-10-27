@@ -1,6 +1,3 @@
-// Package tier implements tiered (cold) storage for pocketkafka: old segments
-// are offloaded to an S3/MinIO-compatible object store and fetched back on
-// demand. It uses a zero-dependency HTTP client with AWS Signature V4 signing.
 package tier
 
 import (
@@ -16,9 +13,8 @@ import (
 	"time"
 )
 
-// S3Client is a minimal S3-compatible object store client with SigV4 signing.
 type S3Client struct {
-	Endpoint  string // e.g. http://localhost:9000
+	Endpoint  string
 	Bucket    string
 	AccessKey string
 	SecretKey string
@@ -27,7 +23,6 @@ type S3Client struct {
 	HTTP      *http.Client
 }
 
-// NewS3Client builds a client for the given endpoint/bucket.
 func NewS3Client(endpoint, bucket, accessKey, secretKey, region, prefix string) *S3Client {
 	return &S3Client{
 		Endpoint:  strings.TrimRight(endpoint, "/"),
@@ -49,7 +44,6 @@ func (c *S3Client) objectURL(key string) string {
 	return fmt.Sprintf("%s/%s/%s", c.Endpoint, c.Bucket, url.PathEscape(k))
 }
 
-// PutObject uploads data to an object key.
 func (c *S3Client) PutObject(key string, data []byte) error {
 	u := c.objectURL(key)
 	body := bytes.NewReader(data)
@@ -74,7 +68,6 @@ func (c *S3Client) PutObject(key string, data []byte) error {
 	return nil
 }
 
-// GetObject downloads an object by key.
 func (c *S3Client) GetObject(key string) ([]byte, error) {
 	u := c.objectURL(key)
 	now := time.Now().UTC()
@@ -101,8 +94,6 @@ func (c *S3Client) GetObject(key string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// DeleteObject removes an object by key. A missing object (404) counts as
-// success so deleting an already-gone segment is idempotent.
 func (c *S3Client) DeleteObject(key string) error {
 	u := c.objectURL(key)
 	now := time.Now().UTC()
@@ -129,7 +120,6 @@ func (c *S3Client) DeleteObject(key string) error {
 	return nil
 }
 
-// sign adds the SigV4 Authorization header to a request.
 func (c *S3Client) sign(req *http.Request, now time.Time, payloadHash string, query map[string]string) {
 	amzDate := now.Format("20060102T150405Z")
 	dateStamp := now.Format("20060102")

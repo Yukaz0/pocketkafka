@@ -1,5 +1,3 @@
-// Command client-example demonstrates the zero-dependency client SDK
-// (pkg/client) talking to the pocketkafka broker.
 package main
 
 import (

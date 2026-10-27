@@ -1,6 +1,3 @@
-// Package schemaregistry implements an embedded Schema Registry with a
-// Confluent-compatible REST API, so standard clients (kafka-avro-serializer,
-// confluent-kafka-go) can use it without a separate container.
 package schemaregistry
 
 import (
@@ -21,18 +18,14 @@ type schemaEntry struct {
 	SchemaType string
 }
 
-// Registry is a schema store. When constructed with Open it persists every
-// registration to disk and reloads it on restart; New returns a purely
-// in-memory registry.
 type Registry struct {
 	mu        sync.RWMutex
 	nextID    int
-	bySubject map[string][]*schemaEntry // subject -> versions (ascending)
+	bySubject map[string][]*schemaEntry
 	byID      map[int]*schemaEntry
-	path      string // empty for in-memory
+	path      string
 }
 
-// New returns an empty in-memory registry.
 func New() *Registry {
 	return &Registry{
 		nextID:    1,
@@ -41,9 +34,6 @@ func New() *Registry {
 	}
 }
 
-// Open loads (or creates) a file-backed registry at path. A missing file yields
-// an empty registry; a corrupt file is an error so a damaged store is never
-// silently treated as empty.
 func Open(path string) (*Registry, error) {
 	r := New()
 	r.path = path
@@ -69,7 +59,6 @@ func Open(path string) (*Registry, error) {
 	return r, nil
 }
 
-// persist writes the whole registry state atomically. Callers must not hold mu.
 func (r *Registry) persist() error {
 	if r.path == "" {
 		return nil
@@ -87,7 +76,6 @@ func (r *Registry) persist() error {
 	return saveState(r.path, st)
 }
 
-// ListSubjects returns the sorted names of all registered subjects.
 func (r *Registry) ListSubjects() []string {
 	r.mu.RLock()
 	subjects := make([]string, 0, len(r.bySubject))
@@ -99,7 +87,6 @@ func (r *Registry) ListSubjects() []string {
 	return subjects
 }
 
-// SchemaVersion is a single registered schema version for the web UI.
 type SchemaVersion struct {
 	Subject    string `json:"subject"`
 	Version    int    `json:"version"`
@@ -108,7 +95,6 @@ type SchemaVersion struct {
 	SchemaType string `json:"schemaType"`
 }
 
-// SubjectVersions returns every registered version for a subject, newest last.
 func (r *Registry) SubjectVersions(subject string) []SchemaVersion {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -120,7 +106,6 @@ func (r *Registry) SubjectVersions(subject string) []SchemaVersion {
 	return out
 }
 
-// Handler returns the HTTP handler exposing the Confluent-compatible API.
 func (r *Registry) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /subjects", r.listSubjects)
@@ -171,7 +156,7 @@ func (r *Registry) register(w http.ResponseWriter, req *http.Request) {
 	}
 
 	r.mu.Lock()
-	// Deduplicate: if the exact schema already exists for the subject, return it.
+
 	for _, e := range r.bySubject[subject] {
 		if e.Schema == body.Schema && e.SchemaType == schemaType {
 			id := e.ID
@@ -189,8 +174,7 @@ func (r *Registry) register(w http.ResponseWriter, req *http.Request) {
 	r.mu.Unlock()
 
 	if err := r.persist(); err != nil {
-		// The schema is in memory but not durable; surface this rather than
-		// acknowledging a registration that would vanish on restart.
+
 		writeJSON(w, 500, map[string]string{"error_code": "500", "message": "persist schema: " + err.Error()})
 		return
 	}
@@ -198,10 +182,6 @@ func (r *Registry) register(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, 200, map[string]int{"id": id})
 }
 
-// validateSchema rejects empty, syntactically invalid, or unsupported schemas
-// instead of storing any string. Avro schemas are JSON documents, so both AVRO
-// and JSON are checked with the JSON parser. PROTOBUF has no validator here, so
-// it is rejected rather than accepted unvalidated.
 func validateSchema(schemaType, schema string) error {
 	if strings.TrimSpace(schema) == "" {
 		return fmt.Errorf("schema is empty")

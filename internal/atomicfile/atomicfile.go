@@ -1,7 +1,3 @@
-// Package atomicfile writes files so that a crash never leaves a partially
-// written file visible under the destination name: data is written to a
-// temporary sibling, fsync'd, renamed into place, and the parent directory is
-// fsync'd so the rename itself survives a power loss.
 package atomicfile
 
 import (
@@ -10,9 +6,6 @@ import (
 	"path/filepath"
 )
 
-// Write atomically replaces the file at path with data. The temporary file is
-// created in the same directory (so the rename never crosses filesystems) and
-// is removed if any step fails.
 func Write(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -52,7 +45,6 @@ func Write(path string, data []byte, perm os.FileMode) error {
 	return syncDir(dir)
 }
 
-// syncDir fsyncs a directory so a completed rename is durable.
 func syncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {

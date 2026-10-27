@@ -10,40 +10,29 @@ import (
 	"time"
 )
 
-// Segment is a single append-only log file (.log) with its associated sparse
-// index (.index). It owns the raw RecordBatch bytes for a contiguous range of
-// offsets starting at baseOffset.
 type Segment struct {
 	baseOffset      int64
 	logFile         *os.File
 	index           *indexFile
-	nextOffset      int64 // Log End Offset within this segment
-	size            int64 // current .log size in bytes
+	nextOffset      int64
+	size            int64
 	dir             string
 	maxSegmentBytes int64
 	indexInterval   int64
-	remote          bool   // true when this segment is offloaded to object storage
-	remoteStub      string // path to the .remote pointer file
+	remote          bool
+	remoteStub      string
 
-	// How far an fsync has covered. Everything past syncedBytes is in the page
-	// cache only, so it is the broker's own answer to "what would a power cut
-	// cost me" - a property no client can observe.
 	syncedOffset int64
 	syncedBytes  int64
 	lastSyncMs   int64
 }
 
-// openSegment opens (or creates) a segment whose base offset is baseOffset and
-// whose files live in dir. If an existing segment is found it is resumed, which
-// recovers nextOffset and size from disk.
 func openSegment(dir string, baseOffset int64, maxSegmentBytes, indexInterval int64) (*Segment, error) {
 	name := fmt.Sprintf("%020d", baseOffset)
 	logPath := filepath.Join(dir, name+".log")
 	idxPath := filepath.Join(dir, name+".index")
 	remotePath := filepath.Join(dir, name+".remote")
 
-	// If the segment has been offloaded, there is no local .log; it will be
-	// restored on demand before reads.
 	if _, err := os.Stat(remotePath); err == nil {
 		_, _, next, err := readRemoteStub(remotePath)
 		if err != nil {
@@ -91,13 +80,11 @@ func openSegment(dir string, baseOffset int64, maxSegmentBytes, indexInterval in
 		seg.close()
 		return nil, err
 	}
-	// What recovery just read is on disk, so it counts as durable.
+
 	seg.syncedOffset, seg.syncedBytes = seg.nextOffset, seg.size
 	return seg, nil
 }
 
-// recover recomputes nextOffset from the existing log content so a reopened
-// segment has an accurate LEO (crash recovery).
 func (s *Segment) recover() error {
 	if s.size == 0 {
 		return nil
@@ -110,10 +97,9 @@ func (s *Segment) recover() error {
 		}
 		length := int32(binary.BigEndian.Uint32(buf[8:12]))
 		if length <= 0 || pos+12+int64(length) > s.size {
-			break // trailing partial batch; stop here
+			break
 		}
-		// LastOffsetDelta lives at offset 23 within the batch (11 into the
-		// 12-byte prefix + length region).
+
 		var delta [4]byte
 		if _, err := s.logFile.ReadAt(delta[:], pos+23); err != nil {
 			return err
@@ -123,7 +109,7 @@ func (s *Segment) recover() error {
 		pos += 12 + int64(length)
 	}
 	if pos != s.size {
-		// A partial batch remains; truncate it.
+
 		if err := s.logFile.Truncate(pos); err != nil {
 			return err
 		}
@@ -132,8 +118,6 @@ func (s *Segment) recover() error {
 	return nil
 }
 
-// append writes a raw RecordBatch to the segment, rewriting its base offset to
-// the segment's current nextOffset. It returns the assigned base offset.
 func (s *Segment) append(raw []byte) (int64, error) {
 	h, err := ParseRecordBatchHeader(raw)
 	if err != nil {
@@ -144,7 +128,7 @@ func (s *Segment) append(raw []byte) (int64, error) {
 	}
 
 	assigned := s.nextOffset
-	// Rewrite the base offset in the copy before persisting.
+
 	var base [8]byte
 	binary.BigEndian.PutUint64(base[:], uint64(assigned))
 	copy(raw[0:8], base[:])
@@ -160,26 +144,14 @@ func (s *Segment) append(raw []byte) (int64, error) {
 	s.size += int64(n)
 	s.nextOffset += int64(h.LastOffsetDelta) + 1
 
-	// The sparse index is an accelerator that is rebuilt on reopen and after a
-	// truncation, so failing to extend it must not fail an append whose data is
-	// already on disk: the client would retry and duplicate the batch.
 	_ = s.index.maybeAppend(assigned, pos)
 	return assigned, nil
 }
 
-// full reports whether the segment has reached its configured size limit and
-// should be rolled.
 func (s *Segment) full() bool {
 	return s.size >= s.maxSegmentBytes
 }
 
-// read returns raw RecordBatch bytes starting at or containing offset, up to
-// maxBytes. Batches whose last offset is strictly before the requested offset
-// are skipped.
-//
-// It preallocates the output to maxBytes and reads each batch straight into it
-// (one pread for the 12-byte header, one for the whole batch), so a fetch
-// neither allocates nor copies per batch.
 func (s *Segment) read(offset int64, maxBytes int32) ([]byte, error) {
 	if maxBytes <= 0 {
 		return nil, nil
@@ -201,12 +173,9 @@ func (s *Segment) read(offset int64, maxBytes int32) ([]byte, error) {
 		}
 		total := 12 + int64(length)
 		if total < batchHeaderSize {
-			break // truncated/corrupt batch header
+			break
 		}
-		// Read the whole batch directly into the output buffer, then parse the
-		// offset range from the bytes we just read. A batch larger than the
-		// remaining capacity (a single batch can exceed maxBytes) grows the
-		// buffer; otherwise this is a plain reslice with no allocation.
+
 		start := len(out)
 		if end := start + int(total); end <= cap(out) {
 			out = out[:end]
@@ -219,12 +188,11 @@ func (s *Segment) read(offset int64, maxBytes int32) ([]byte, error) {
 			return out[:start], err
 		}
 		baseOffset := int64(binary.BigEndian.Uint64(out[start : start+8]))
-		// LastOffsetDelta lives at offset 23 within the batch (11 into the
-		// 12-byte prefix + length region).
+
 		lastOffsetDelta := int32(binary.BigEndian.Uint32(out[start+23 : start+27]))
 		pos += total
 		if baseOffset+int64(lastOffsetDelta) < offset {
-			// Entirely before the requested offset: drop it without copying.
+
 			out = out[:start]
 			continue
 		}
@@ -232,15 +200,11 @@ func (s *Segment) read(offset int64, maxBytes int32) ([]byte, error) {
 	return out, nil
 }
 
-// logEndOffset returns the LEO of this segment.
 func (s *Segment) logEndOffset() int64 { return s.nextOffset }
 
-// truncateTo truncates the segment file to the first byte of the batch that
-// contains the target offset, dropping all data at or after it. The index is
-// rebuilt from the remaining log.
 func (s *Segment) truncateTo(target int64) error {
 	if target <= s.baseOffset {
-		// Everything is after the target: empty the segment.
+
 		if s.logFile != nil {
 			if err := s.logFile.Truncate(0); err != nil {
 				return err
@@ -270,7 +234,7 @@ func (s *Segment) truncateTo(target int64) error {
 			lastOffsetDelta = int32(binary.BigEndian.Uint32(delta[:]))
 		}
 		if baseOffset+int64(lastOffsetDelta) >= target {
-			break // this batch contains the target; truncate here
+			break
 		}
 		pos += 12 + int64(length)
 	}
@@ -281,7 +245,7 @@ func (s *Segment) truncateTo(target int64) error {
 	s.nextOffset = target
 	if s.index != nil {
 		s.index.reset()
-		// Rebuild a sparse index over the remaining log.
+
 		scan := int64(0)
 		rebuild := int64(0)
 		for scan < s.size {
@@ -302,7 +266,6 @@ func (s *Segment) truncateTo(target int64) error {
 	return nil
 }
 
-// deleteFiles removes the segment's on-disk files (.log, .index, .remote).
 func (s *Segment) deleteFiles() error {
 	if s.logFile != nil {
 		s.logFile.Close()
@@ -318,15 +281,10 @@ func (s *Segment) deleteFiles() error {
 	return nil
 }
 
-// sizeBytes returns the current on-disk log size.
 func (s *Segment) sizeBytes() int64 { return s.size }
 
-// isRemote reports whether the segment is offloaded to object storage.
 func (s *Segment) isRemote() bool { return s.remote }
 
-// markRemote writes a .remote pointer file and releases the local segment files.
-// The stub stores the log/index keys and the segment's nextOffset so LEO can be
-// recovered after a restart.
 func (s *Segment) markRemote(logKey, indexKey string) error {
 	content := fmt.Sprintf("%s\n%s\n%d", logKey, indexKey, s.nextOffset)
 	if err := os.WriteFile(s.remoteStub, []byte(content), 0o600); err != nil {
@@ -347,7 +305,6 @@ func (s *Segment) markRemote(logKey, indexKey string) error {
 	return nil
 }
 
-// remoteKeys returns the object store keys for the offloaded segment.
 func (s *Segment) remoteKeys() (string, string, error) {
 	data, err := os.ReadFile(s.remoteStub)
 	if err != nil {
@@ -360,7 +317,6 @@ func (s *Segment) remoteKeys() (string, string, error) {
 	return lines[0], lines[1], nil
 }
 
-// readRemoteStub parses a .remote stub, returning keys and the segment LEO.
 func readRemoteStub(path string) (string, string, int64, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -375,7 +331,6 @@ func readRemoteStub(path string) (string, string, int64, error) {
 	return lines[0], lines[1], next, nil
 }
 
-// restoreFrom writes the downloaded .log and .index back and reopens the segment.
 func (s *Segment) restoreFrom(logData, indexData []byte) error {
 	if err := os.WriteFile(s.logPath(), logData, 0o600); err != nil {
 		return err
@@ -400,9 +355,6 @@ func (s *Segment) indexPath() string {
 	return filepath.Join(s.dir, fmt.Sprintf("%020d.index", s.baseOffset))
 }
 
-// modTime reports the last-modified time of the segment. An offloaded segment
-// has no local .log, so its .remote stub stands in for it; this never depends
-// on logFile, which is nil for remote segments.
 func (s *Segment) modTime() (time.Time, error) {
 	if s.isRemote() {
 		return fileMtime(s.remoteStub)
@@ -410,15 +362,12 @@ func (s *Segment) modTime() (time.Time, error) {
 	return fileMtime(s.logPath())
 }
 
-// sync flushes the segment's log and index to stable storage so an
-// acknowledged append survives a power loss.
 func (s *Segment) sync() error {
 	if s.logFile != nil {
 		if err := s.logFile.Sync(); err != nil {
 			return err
 		}
-		// Marked only after the fsync returns: the point of these fields is to
-		// never claim durability that has not happened.
+
 		s.syncedOffset, s.syncedBytes = s.nextOffset, s.size
 		s.lastSyncMs = time.Now().UnixMilli()
 	}

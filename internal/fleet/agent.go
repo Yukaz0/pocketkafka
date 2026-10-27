@@ -326,8 +326,7 @@ func (a *AgentRunner) executeJob(ctx context.Context, job JobDispatchMessage) {
 	default:
 		execErr = fmt.Errorf("unknown action: %s", job.Action)
 	}
-	// Push fresh inventory BEFORE the result: the control plane snapshot
-	// the UI reads is already post-mutation when the job completes.
+
 	a.sendHeartbeat(ctx)
 
 	if execErr != nil {
@@ -416,8 +415,6 @@ func (m *AgentManager) RegisterSession(agentID, secret string, transport AgentTr
 	return sess, nil
 }
 
-// UnregisterServerSessions drops all live sessions of a revoked server so its
-// stale inventory stops being served.
 func (m *AgentManager) UnregisterServerSessions(serverID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -434,7 +431,6 @@ func (m *AgentManager) UnregisterSession(agentID string) {
 	delete(m.sessions, agentID)
 }
 
-// ListContainers returns all containers reported by connected agents.
 func (m *AgentManager) ListContainers() []ContainerSummary {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -512,7 +508,7 @@ func (m *AgentManager) HandleInboundEnvelope(env *Envelope) error {
 			}
 		}
 	case OpJobAccepted:
-		// Agent acknowledged job reception
+
 	case OpJobRunning:
 		if m.jobs != nil {
 			var res JobResultMessage

@@ -514,6 +514,26 @@ html[data-theme="light"] body[data-zone="fleet"] .navLink.active{color:#0284c7;b
   @media (prefers-reduced-motion: reduce){
     *,::before,::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;scroll-behavior:auto !important}
   }
+
+  /* Auth mode: standalone login screen without navigation chrome */
+  body.auth-mode{background:var(--bg-canvas)}
+  body.auth-mode .tb,
+  body.auth-mode .appNav,
+  body.auth-mode .plist,
+  body.auth-mode .topbar,
+  body.auth-mode .drw,
+  body.auth-mode .sbar,
+  body.auth-mode #sbar,
+  body.auth-mode #alarmBanner,
+  body.auth-mode .sideBackdrop{display:none !important}
+  body.auth-mode .appShell,
+  body.auth-mode .ws,
+  body.auth-mode .content{height:100%;width:100%;min-height:0}
+  body.auth-mode #view{display:flex !important;align-items:center;justify-content:center;height:100%;width:100%;padding:20px;overflow-y:auto;box-sizing:border-box}
+  body.auth-mode #view>div,
+  body.auth-mode #view>.loginWrap{width:100% !important;max-width:380px !important;margin:auto !important;display:flex !important;flex-direction:column !important}
+  .loginCard{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:28px 24px;width:100%;box-sizing:border-box}
+  .loginFooter{display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding:0 4px}
 </style>
 </head>
 <body>
@@ -669,8 +689,8 @@ async function apiError(r,j,targetRequest){
       try{localSessionExpired=(await fetch('/api/v1/auth/status')).status===401;}catch(e){}
       if(!localSessionExpired)throw new Error(redactTargetEndpoint(j.error||r.status));
     }
-    if(targetRequest||(state.auth&&state.auth.enabled)){showLogin();throw new Error('Authentication required');}
-    throw new Error(redactTargetEndpoint(j.error||r.status));
+    showLogin();
+    throw new Error('Authentication required');
   }
   if(!r.ok)throw new Error(redactTargetEndpoint(j.error||r.status));
   return j;
@@ -753,6 +773,7 @@ async function refreshFleetView(){
   await Promise.allSettled(tasks);
 }
 async function refresh(){
+  if(state.auth&&state.auth.enabled&&!state.auth.authenticated)return;
   const generation=state.targetGeneration;
   await loadInfo();
   if(state.zone==='fleet'){
@@ -790,7 +811,7 @@ function updAgo(){
   el.title='Auto-refresh: '+(state.refreshMs/1000)+'s';
 }
 setInterval(updAgo,1000);
-function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden&&!isReducedMotion()&&state.zone!=='fleet'){ await refresh(); const connActive=state.view==='connections'||(state.view==='settings'&&(state.settingsTab==='connections'||state.settingsTab==='general'||state.settingsTab==='clusters')); if(connActive&&!patchConnections())render(); if(state.view==='metrics')loadThroughput(); } scheduleRefresh(); },state.refreshMs); }
+function scheduleRefresh(){ setTimeout(async()=>{ if(!document.hidden&&!isReducedMotion()&&state.zone!=='fleet'){ if(state.auth&&state.auth.enabled&&!state.auth.authenticated){scheduleRefresh();return;} await refresh(); const connActive=state.view==='connections'||(state.view==='settings'&&(state.settingsTab==='connections'||state.settingsTab==='general'||state.settingsTab==='clusters')); if(connActive&&!patchConnections())render(); if(state.view==='metrics')loadThroughput(); } scheduleRefresh(); },state.refreshMs); }
 function patchFleetView(){
   const v=document.getElementById('view'); if(!v)return false;
   const ae=document.activeElement;
@@ -1235,7 +1256,6 @@ function applyHash(){
   render();
 }
 window.addEventListener('hashchange',applyHash);
-// syncHash menulis state browser ke URL agar bisa di-share/refresh.
 function syncHash(){
   if(state.view!=='databrowser')return;
   let h='#/databrowser';
@@ -1248,6 +1268,21 @@ function syncHash(){
 window.addEventListener('keydown',e=>{if(e.key==='Escape'&&window.matchMedia('(max-width: 760px)').matches)closeMobileDrawers();});
 function render(){
   try{
+    const authRequired=!!(state.auth&&state.auth.enabled&&!state.auth.authenticated);
+    document.body.classList.toggle('auth-mode',authRequired);
+    if(authRequired){
+      document.title='PocketKafka - Sign In';
+      const sb=document.getElementById('sbar');if(sb)sb.remove();
+      const ab=document.getElementById('alarmBanner');if(ab)ab.remove();
+      closeDrw();
+      closeMobileDrawers();
+      bindView();
+      const v=$('#view');
+      if(v){v.innerHTML=viewLogin();bindLogin();}
+      window.__renderedView='__login__';
+      return;
+    }
+    document.title='PocketKafka';
     const scroller=$('#view'),keepScroll=(scroller&&window.__renderedView===state.view)?scroller.scrollTop:0;
     updateBrokerPicker();buildNav();buildTList();buildStatusbar();updateChips();
     const zoneSwitcherEl=document.getElementById('zoneSwitcher');
@@ -1279,8 +1314,7 @@ function render(){
         state.view==='databrowser'?`<button class="btn" style="padding:5px 12px;font-size:12px" onclick="goView('connections')">Connections</button>`:'');
     }
     const v=$('#view');
-    if(state.auth&&state.auth.enabled&&!state.auth.authenticated){v.innerHTML=viewLogin();bindLogin();}
-    else if(state.zone==='fleet'&&!state.fleetEnabled)v.innerHTML=viewFleetDisabled();
+    if(state.zone==='fleet'&&!state.fleetEnabled)v.innerHTML=viewFleetDisabled();
     else if(state.view==='fleet-servers')v.innerHTML=viewFleetServers();
     else if(state.view==='fleet-containers')v.innerHTML=viewFleetContainers();
     else if(state.view==='fleet-jobs')v.innerHTML=viewFleetJobs();
@@ -1420,38 +1454,87 @@ window.goZoneRoot=function(){
 
 /* Fitur 12: login */
 function viewLogin(){
-  return `<div style="max-width:360px;margin:80px auto">
-    <div class="card">
-      <img src="/favicon.svg" alt="PocketKafka" width="44" height="44" style="display:block;margin:0 auto 14px;border-radius:10px">
-      <h3 style="margin-bottom:14px">Sign in</h3>
-      <label>Username</label><input id="loginUser" autocomplete="username">
-      <div style="height:10px"></div>
-      <label>Password</label><input id="loginPass" type="password" autocomplete="current-password">
-      <div style="height:16px"></div>
-      <button class="btn" style="width:100%" onclick="doLogin()">Login</button>
+  const v=state.version?(' v'+esc(state.version)):'';
+  const isDark=state.theme==='dark';
+  return `<div class="loginWrap">
+    <div class="loginCard">
+      <div style="text-align:center;margin-bottom:22px">
+        <img src="/favicon.svg" alt="PocketKafka" width="48" height="48" style="display:block;margin:0 auto 12px;border-radius:10px">
+        <h2 style="font-size:18px;font-weight:600;letter-spacing:-.01em;margin-bottom:4px">Sign in to PocketKafka</h2>
+        <p class="muted" style="font-size:12px">Enter your credentials to continue</p>
+      </div>
+      <div id="loginErr" style="display:none;font-size:12px;padding:8px 10px;background:var(--danger-soft);border:1px solid var(--danger-line);color:var(--danger-text);border-radius:4px;margin-bottom:14px"></div>
+      <div style="margin-bottom:12px">
+        <label for="loginUser" style="margin-bottom:5px">Username</label>
+        <input id="loginUser" autocomplete="username" placeholder="Enter username" style="height:36px;font-size:13px;width:100%" autofocus>
+      </div>
+      <div style="margin-bottom:18px">
+        <label for="loginPass" style="margin-bottom:5px">Password</label>
+        <input id="loginPass" type="password" autocomplete="current-password" placeholder="Enter password" style="height:36px;font-size:13px;width:100%">
+      </div>
+      <button class="btn" id="loginBtn" style="width:100%;height:36px;font-size:13px;font-weight:600" onclick="doLogin()">Sign in</button>
+    </div>
+    <div class="loginFooter">
+      <span class="muted" style="font-size:11px">PocketKafka${v}</span>
+      <button class="btn ghost" style="padding:3px 8px;font-size:11px;height:auto" onclick="setTheme(state.theme==='dark'?'light':'dark');render();">${isDark?'Light theme':'Dark theme'}</button>
     </div>
   </div>`;
 }
 function bindLogin(){
-  const p=$('#loginPass'); if(p)p.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+  const u=$('#loginUser'),p=$('#loginPass');
+  if(u){
+    u.addEventListener('keydown',e=>{if(e.key==='Enter'){if(p&&!p.value)p.focus();else doLogin();}});
+    setTimeout(()=>{try{u.focus();}catch(e){}},50);
+  }
+  if(p){
+    p.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+  }
 }
 window.showLogin=function(){state.auth={enabled:true,authenticated:false};render();};
 window.doLogin=async function(){
-  const u=$('#loginUser').value,p=$('#loginPass').value;
-  if(!u||!p){toast('Enter username and password');return;}
+  const u=($('#loginUser')?.value||'').trim(),p=$('#loginPass')?.value||'';
+  const errEl=$('#loginErr'),btn=$('#loginBtn');
+  if(errEl){errEl.style.display='none';errEl.textContent='';}
+  if(!u||!p){
+    const msg='Enter username and password';
+    if(errEl){errEl.textContent=msg;errEl.style.display='block';}
+    toast(msg);
+    return;
+  }
+  if(btn){btn.disabled=true;btn.textContent='Signing in...';}
   try{
-    const r=await fetch('/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json','X-PocketKafka-Request':'1'},body:JSON.stringify({username:u,password:p})});
-    if(!r.ok){toast('Invalid credentials');return;}
+    const r=await fetch('/api/v1/auth/login',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-PocketKafka-Request':'1'},
+      body:JSON.stringify({username:u,password:p})
+    });
+    if(!r.ok){
+      let msg='Invalid credentials';
+      try{const j=await r.json();if(j&&j.error)msg=j.error;}catch(e){}
+      if(errEl){errEl.textContent=msg;errEl.style.display='block';}
+      toast(msg);
+      if(btn){btn.disabled=false;btn.textContent='Sign in';}
+      return;
+    }
     state.auth={enabled:true,authenticated:true};
     toast('Welcome, '+u);
-    await loadClusterList();if(!state.targetSwitching)await refresh();render();
-  }catch(e){toast(e.message);}
+    await loadClusterList();
+    if(!state.targetSwitching)await refresh();
+    applyHash();
+    render();
+  }catch(e){
+    if(errEl){errEl.textContent=e.message;errEl.style.display='block';}
+    toast(e.message);
+    if(btn){btn.disabled=false;btn.textContent='Sign in';}
+  }
 };
 window.logout=async function(){
-  await fetch('/api/v1/auth/logout',{method:'POST',headers:{'X-PocketKafka-Request':'1'}});
+  try{
+    await fetch('/api/v1/auth/logout',{method:'POST',headers:{'X-PocketKafka-Request':'1'}});
+  }catch(e){}
+  state.auth={enabled:true,authenticated:false};
   render();
 };
-
 /* Settings */
 function viewGeneralSettings(){
   const c=state.cluster||{};
@@ -1687,8 +1770,9 @@ function viewDataBrowser(){
         <div id="diffPanel"></div>
       </div>
       <aside class="sideIns hidden" id="inspector">
-        <h3 style="display:flex;align-items:center;gap:10px;margin-bottom:12px">Message Inspector<span style="flex:1"></span><button class="cbtn" id="inspCpAll" onclick="copyInspJson(this)">copy json</button><button class="cbtn" id="inspCpVal" onclick="copyInspValue(this)">copy value</button></h3>
-        <pre id="insp" style="max-height:calc(100vh - 280px)"></pre>
+        <h3 style="display:flex;align-items:center;gap:10px;margin-bottom:8px">Message Inspector<span style="flex:1"></span><button class="cbtn" id="inspCpAll" onclick="copyInspJson(this)">copy json</button><button class="cbtn" id="inspCpVal" onclick="copyInspValue(this)">copy value</button></h3>
+        <div id="inspMeta" class="muted mono" style="font-size:11px;padding:4px 0 8px;margin-bottom:8px;border-bottom:1px solid var(--border-soft);display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
+        <pre id="insp" style="max-height:calc(100vh - 300px)"></pre>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
           ${readOnly?`<button class="btn ghost" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Replay / DLQ</button>`:`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="replaySelected()">Replay / DLQ</button>`}
           <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="closeInspector()">Close</button>
@@ -1722,10 +1806,6 @@ window.prevPage=prevPage;
 function nextPage(){ if(!state.msgs.length)return; const last=Math.max(...state.msgs.map(m=>m.offset)); state.off=last+1; loadMsgs(); }
 window.nextPage=nextPage;
 function filteredMsgs(){ return state.msgs.filter(passesFilters); }
-// passesFilters dipakai juga saat tail menyisipkan baris satu per satu, supaya
-// baris yang difilter tidak pernah masuk DOM. Pencarian key/value dan jendela
-// timestamp ikut di sini: loadMsgs mengirimkannya ke server, jalur tail hanya
-// punya data yang sudah tiba, jadi keduanya harus menilai dengan aturan sama.
 function passesFilters(m){
   if(state.search){ const hay=(String(m.key||'')+'\u0000'+String(m.value||'')).toLowerCase(); if(!hay.includes(String(state.search).toLowerCase()))return false; }
   const fromTs=Number(state.fromTs||0), toTs=Number(state.toTs||0);
@@ -1806,7 +1886,7 @@ function jnode(key,val,force){tnId++;const id=tnId;
   return '<div><div class="jrow" onclick="toggleNode('+id+')"><span class="jarrow" id="ta-'+id+'">'+(open?'v':'>')+'</span><span class="jkey">"'+esc(key)+'"</span>: <span class="jnum">'+label+'</span></div><div class="jnode" id="tn-'+id+'" style="'+(open?'':'display:none')+'">'+(body||'<div class="muted" style="padding-left:14px">(empty)</div>')+'</div></div>';}
 window.toggleNode=function(id){const b=document.getElementById('tn-'+id),a=document.getElementById('ta-'+id);if(b){const o=b.style.display!=='none';b.style.display=o?'none':'block';a.innerHTML=o?'>':'v';}};
 let _inspCur=null;
-window.insp=function(m){_inspCur=m;$('#inspector').classList.remove('hidden');let val=m.value;if(state.decoder==='hex')val=hex(m.valueB64);else if(m.isJSON){try{val=JSON.parse(m.value||'null');}catch(e){val=m.value;}}const obj={topic:m.topic,partition:m.partition,offset:m.offset,timestamp:new Date(m.timestamp).toISOString(),key:m.key,headers:m.headers,valueSize:m.valueSize,value:val};let body='';for(const k in obj)body+=jnode(k,obj[k],k==='value');$('#insp').innerHTML='<div class="jnode" style="border:none;margin:0;padding-left:0">'+body+'</div>';};
+window.insp=function(m){_inspCur=m;$('#inspector').classList.remove('hidden');let val=m.value;if(state.decoder==='hex')val=hex(m.valueB64);else if(m.isJSON){try{val=JSON.parse(m.value||'null');}catch(e){val=m.value;}}const metaEl=document.getElementById('inspMeta');if(metaEl){const hdrs=Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('');metaEl.innerHTML=`<span class="chip">P${m.partition}</span> <span class="chip">offset ${m.offset}</span> <span class="chip">${fmtBytes(m.valueSize||0)}</span> ${m.key?`<span class="chip">key: ${esc(m.key)}</span>`:''}${hdrs} <span style="margin-left:auto;font-size:10px" class="muted">${new Date(m.timestamp).toISOString()}</span>`;}let body='';if(val!==null&&typeof val==='object'){if(Array.isArray(val)){body=val.map((item,idx)=>jnode(idx,item,true)).join('');}else{for(const k in val)body+=jnode(k,val[k],true);}}else{body=`<div style="padding:4px 0">${esc(val)}</div>`;}$('#insp').innerHTML='<div class="jnode" style="border:none;margin:0;padding-left:0">'+(body||'<span class="muted">(empty)</span>')+'</div>';};
 window.closeInspector=function(){_inspCur=null;const el=document.getElementById('inspector');if(el)el.classList.add('hidden');};
 function inspJsonText(){
   const m=_inspCur; if(!m)return '';
@@ -1969,7 +2049,6 @@ window.seekOffsetGo=function(){ const inp=$('#offInput'); if(!inp)return; const 
   if(isNaN(n)||n<0){toast('Offset harus angka >= 0');inp.focus();return;}
   if(state.leo!=null&&n>=state.leo){toast('Offset melebihi LEO ('+state.leo+')');inp.focus();return;}
   state.off=n; loadMsgs(); };
-// meta partisi untuk posInfo + tombol Latest (LEO & earliest)
 function loadPosMeta(){
   api(`/api/v1/topics/${encodeURIComponent(state.topic)}/partitions`).then(ps=>{
     const pno=state.partition==='all'?0:parseInt(state.partition,10)||0;
@@ -2346,7 +2425,6 @@ function activeAlerts(){
   }
   const c=state.cluster||{};
   if(c.diskUsagePct && c.diskUsagePct>85){ alerts.push({id:'disk', text:'Disk usage '+c.diskUsagePct+'% (>85%)'}); }
-  // DLQ: only topics that actually hold messages (LEO > 0 or non-empty bytes)
   for(const t of (Array.isArray(state.topics)?state.topics:[])){
     if(/-(dlq|dead)$/i.test(t.name)){
       const hasMsgs=(t.totalBytes||0)>0||(t.partitions||[]).some(p=>(p.logEndOffset||0)>0);
@@ -2357,9 +2435,6 @@ function activeAlerts(){
 }
 function checkAlarms(){
   const alerts=activeAlerts();
-  // Forget dismissals for alerts that no longer fire, so a recurring
-  // condition re-alarms when it comes back later. Matching is by id, never by
-  // the rendered text: a lag number moves on every poll.
   const live=new Set(alerts.map(a=>a.id));
   for(const k of [...state.alarmsDismissed]) if(!live.has(k)) state.alarmsDismissed.delete(k);
   const shown=alerts.filter(a=>!state.alarmsDismissed.has(a.id));
@@ -2371,8 +2446,6 @@ function checkAlarms(){
   }
   else if(existing){ existing.remove(); }
 }
-// Dismiss remembers the decision across reloads so the 5s auto-refresh (or a
-// browser restart) does not resurrect the banner.
 window.dismissAlarms=function(){
   for(const a of activeAlerts()) state.alarmsDismissed.add(a.id);
   try{ localStorage.setItem('pk_alarms_dismissed',JSON.stringify([...state.alarmsDismissed])); }catch(e){}
@@ -2845,7 +2918,7 @@ function viewHealth(){
 const HEALTH_PATCH=[['hMsgsRate','text'],['hLag','text'],['hDisk','text'],['hSubTop','text'],['hSubLag','text'],['hSubDisk','text'],
   ['hClusterStatus','html'],['hNotes','html'],['hRateSpark','html'],['hLagSpark','html'],['hAttList','html'],['hTopicsBody','html'],['hGroupsBody','html'],['hTopicPager','html'],['hGroupPager','html']];
 function patchHealth(){
-  if(!document.getElementById('hTopicsBody'))return false;   // view belum tampil (atau sedang error/loading)
+  if(!document.getElementById('hTopicsBody'))return false;
   const tmp=document.createElement('div'); tmp.innerHTML=viewHealth();
   HEALTH_PATCH.forEach(pair=>{
     const src=tmp.querySelector('#'+pair[0]),dst=document.getElementById(pair[0]);
@@ -3029,7 +3102,7 @@ function viewClusters(){
 
 const CLUSTER_PATCH=[['clSummary','html'],['clUpdated','text'],['clBody','html']];
 function patchClusters(){
-  if(!document.getElementById('clBody'))return false;   // view belum tampil (atau sedang error/loading)
+  if(!document.getElementById('clBody'))return false;
   const tmp=document.createElement('div'); tmp.innerHTML=viewClusters();
   CLUSTER_PATCH.forEach(pair=>{
     const src=tmp.querySelector('#'+pair[0]),dst=document.getElementById(pair[0]);
@@ -4467,7 +4540,22 @@ document.addEventListener('visibilitychange',()=>{
   else bindView();
 });
 initTheme();
-(async function(){await loadClusterList();await loadInfo();await refresh();if(!location.hash)history.replaceState(null,'','#/overview');applyHash();state.initialized=true;})();
+(async function(){
+  try{
+    const st=await apiLocal('/api/v1/auth/status');
+    if(st)state.auth=st;
+  }catch(e){}
+  if(state.auth&&state.auth.enabled&&!state.auth.authenticated){
+    render();
+    return;
+  }
+  await loadClusterList();
+  await loadInfo();
+  await refresh();
+  if(!location.hash)history.replaceState(null,'','#/overview');
+  applyHash();
+  state.initialized=true;
+})();
 </script>
 </body>
 </html>

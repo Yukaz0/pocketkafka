@@ -1,6 +1,5 @@
 package protocol
 
-// FetchRequestPartition is one partition to fetch.
 type FetchRequestPartition struct {
 	Partition         int32
 	FetchOffset       int64
@@ -8,13 +7,11 @@ type FetchRequestPartition struct {
 	PartitionMaxBytes int32
 }
 
-// FetchRequestTopic groups fetched partitions by topic.
 type FetchRequestTopic struct {
 	Topic      string
 	Partitions []FetchRequestPartition
 }
 
-// FetchRequest (Key 1), decoded at v5.
 type FetchRequest struct {
 	Version        int16
 	ReplicaID      int32
@@ -25,7 +22,6 @@ type FetchRequest struct {
 	Topics         []FetchRequestTopic
 }
 
-// DecodeFetchRequest parses the request body for versions up to 5.
 func DecodeFetchRequest(version int16, body []byte) (*FetchRequest, error) {
 	r := NewReader(body)
 	req := &FetchRequest{Version: version}
@@ -89,30 +85,26 @@ func DecodeFetchRequest(version int16, body []byte) (*FetchRequest, error) {
 	return req, nil
 }
 
-// FetchResponsePartition is the fetched data for one partition.
 type FetchResponsePartition struct {
 	Partition        int32
 	ErrorCode        int16
 	HighWatermark    int64
 	LastStableOffset int64
 	LogStartOffset   int64
-	Records          []byte // raw RecordBatch bytes
+	Records          []byte
 }
 
-// FetchResponseTopic groups fetched partitions by topic.
 type FetchResponseTopic struct {
 	Topic      string
 	Partitions []FetchResponsePartition
 }
 
-// FetchResponse (Key 1), encoded at v5.
 type FetchResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
 	Topics         []FetchResponseTopic
 }
 
-// EncodeFetchResponse serializes the response body.
 func EncodeFetchResponse(resp *FetchResponse) ([]byte, error) {
 	w := NewWriter(256)
 	if resp.Version >= 1 {
@@ -133,14 +125,12 @@ func EncodeFetchResponse(resp *FetchResponse) ([]byte, error) {
 				w.WriteInt64(p.LogStartOffset)
 			}
 			if resp.Version >= 4 {
-				w.WriteArrayLen(-1) // aborted_transactions: null
+				w.WriteArrayLen(-1)
 			}
 			if resp.Version >= 11 {
-				w.WriteInt32(-1) // preferred_read_replica
+				w.WriteInt32(-1)
 			}
-			// Sarama's decoder reads the records field with getRawBytes, which
-			// rejects a -1 (null) length with "invalid byteslice length". Encode
-			// empty/nil records as a zero-length byte array instead.
+
 			if len(p.Records) == 0 {
 				w.WriteInt32(0)
 			} else {

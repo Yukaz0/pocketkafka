@@ -8,8 +8,6 @@ import (
 	"io"
 )
 
-// Compression codecs for Kafka RecordBatch v2 attribute bits 0-2.
-// Codec values: 0 none, 1 gzip, 2 snappy, 3 lz4, 4 zstd.
 const (
 	CompressionNone   int16 = 0
 	CompressionGzip   int16 = 1
@@ -18,18 +16,12 @@ const (
 	CompressionZSTD   int16 = 4
 )
 
-// ErrUnsupportedCompression is returned when a batch uses an unknown codec.
 var ErrUnsupportedCompression = fmt.Errorf("unsupported compression codec")
 
-// CompressionCodec extracts the compression codec from a RecordBatch attribute
-// word (bits 0-2).
 func CompressionCodec(attr int16) int16 {
 	return attr & 0x07
 }
 
-// CompressRecordBatch compresses the record payload using the given codec and
-// returns the compressed bytes together with the new attribute word that has
-// the codec bits set.
 func CompressRecordBatch(records []byte, codec int16, attr int16) ([]byte, int16, error) {
 	switch codec {
 	case CompressionNone:
@@ -48,8 +40,6 @@ func CompressRecordBatch(records []byte, codec int16, attr int16) ([]byte, int16
 	}
 }
 
-// DecompressRecordBatch decompresses the record payload of a RecordBatch given
-// its attribute word. A nil/empty payload for codec 0 is returned unchanged.
 func DecompressRecordBatch(records []byte, attr int16) ([]byte, error) {
 	switch CompressionCodec(attr) {
 	case CompressionNone:
@@ -89,20 +79,14 @@ func gzipDecompress(src []byte) ([]byte, error) {
 	return io.ReadAll(r)
 }
 
-// Snappy block format (as used by Kafka): the 4-byte big-endian length prefix
-// followed by the raw snappy block encoding of the data.
-
-// snappyMaxEncodedLen estimates the upper bound of a snappy block encoding.
 func snappyMaxEncodedLen(srcLen int) int {
-	// 32-byte header + literals can at worst grow by 1/255 per byte.
+
 	return 32 + srcLen + srcLen/255
 }
 
-// snappyEncode compresses src into the Kafka snappy framing (4-byte BE length
-// + raw snappy block).
 func snappyEncode(dst, src []byte) []byte {
 	if len(src) <= 4 {
-		// Emit a single literal covering the whole input.
+
 		out := make([]byte, 0, 4+1+1+len(src))
 		out = binary.BigEndian.AppendUint32(out, uint32(len(src)))
 		return appendSnappyLiteral(out, src)
@@ -113,12 +97,11 @@ func snappyEncode(dst, src []byte) []byte {
 	return append(out, encoded...)
 }
 
-// appendSnappyLiteral appends an uncompressed literal tag + payload.
 func appendSnappyLiteral(out, src []byte) []byte {
 	n := len(src)
 	switch {
 	case n < 60:
-		out = append(out, byte(n-1)<<2) // literal tag, length-1 in upper 6 bits
+		out = append(out, byte(n-1)<<2)
 	case n < 256:
 		out = append(out, 60<<2, byte(n-1))
 	case n < 65536:
@@ -129,10 +112,6 @@ func appendSnappyLiteral(out, src []byte) []byte {
 	return append(out, src...)
 }
 
-// snappyBlockEncode performs a simple greedy LZ77-style block encoding. It is
-// fully compatible with the snappy block format (literals + copies) and lets
-// standard snappy decoders (and klauspost/compress, if later swapped in)
-// decompress the result.
 func snappyBlockEncode(src []byte) []byte {
 	tableSize := 1 << 14
 	table := make([]int32, tableSize)
@@ -157,24 +136,21 @@ func snappyBlockEncode(src []byte) []byte {
 		cand := table[pos]
 		table[pos] = int32(i)
 		if cand >= 0 && int(cand)+4 <= i && i-int(cand) <= 65535 && src[cand] == src[i] && src[cand+1] == src[i+1] && src[cand+2] == src[i+2] && src[cand+3] == src[i+3] {
-			// Extend the match, capped at 64 bytes: snappy copy length is
-			// limited to 64, longer runs are emitted as chained copies.
+
 			matchLen := 4
 			for i+matchLen < len(src) && src[int(cand)+matchLen] == src[i+matchLen] && matchLen < 64 {
 				matchLen++
 			}
 			emitLiteral(i)
-			// Copy tags (per the snappy block format):
-			//  - 1-byte offset (type 1): length = 4 + (tag>>2), max 67; offset-1 <= 511
-			//  - 2-byte offset (type 2): length = 1 + (tag>>2), max 64
+
 			offset := i - int(cand)
 			off := offset - 1
 			if off <= 511 && matchLen < 12 {
-				// 1-byte offset copy: tag = ((len-4) << 2) | 1, 3 high offset bits in tag
+
 				tag := byte((matchLen-4)<<2) | 1 | byte(off>>8)<<5
 				out = append(out, tag, byte(off))
 			} else {
-				// 2-byte offset copy: tag = ((len-1) << 2) | 2
+
 				out = append(out, byte((matchLen-1)<<2)|2, byte(off), byte(off>>8))
 			}
 			i += matchLen
@@ -187,8 +163,6 @@ func snappyBlockEncode(src []byte) []byte {
 	return out
 }
 
-// snappyDecode decodes the Kafka snappy framing (4-byte BE length prefix then a
-// raw snappy block). An empty input yields empty output.
 func snappyDecode(dst, src []byte) ([]byte, error) {
 	if len(src) < 4 {
 		if len(src) == 0 {
@@ -207,7 +181,6 @@ func snappyDecode(dst, src []byte) ([]byte, error) {
 	return out, nil
 }
 
-// snappyBlockDecode decodes a raw snappy block (literals and copies).
 func snappyBlockDecode(dst, src []byte) ([]byte, error) {
 	if len(src) == 0 {
 		return dst, nil
@@ -217,7 +190,7 @@ func snappyBlockDecode(dst, src []byte) ([]byte, error) {
 		tag := src[i]
 		i++
 		switch tag & 3 {
-		case 0: // literal
+		case 0:
 			length := int(tag >> 2)
 			if length >= 60 {
 				n := length - 59
@@ -236,39 +209,39 @@ func snappyBlockDecode(dst, src []byte) ([]byte, error) {
 			}
 			dst = append(dst, src[i:i+length]...)
 			i += length
-		case 1: // copy, 1-byte offset (stored as offset-1)
+		case 1:
 			length := 4 + int(tag>>2)
 			if i+1 > len(src) {
 				return nil, fmt.Errorf("snappy: copy overrun")
 			}
 			offset := int(src[i]) | int(tag&0xe0)<<3
-			offset++ // wire format stores offset-1
+			offset++
 			i++
 			var err error
 			dst, err = snappyCopy(dst, offset, length)
 			if err != nil {
 				return nil, err
 			}
-		case 2: // copy, 2-byte offset (stored as offset-1)
+		case 2:
 			length := 1 + int(tag>>2)
 			if i+2 > len(src) {
 				return nil, fmt.Errorf("snappy: copy overrun")
 			}
 			offset := int(src[i]) | int(src[i+1])<<8
-			offset++ // wire format stores offset-1
+			offset++
 			i += 2
 			var err error
 			dst, err = snappyCopy(dst, offset, length)
 			if err != nil {
 				return nil, err
 			}
-		default: // case 3: copy, 4-byte offset (stored as offset-1)
+		default:
 			length := 1 + int(tag>>2)
 			if i+4 > len(src) {
 				return nil, fmt.Errorf("snappy: copy overrun")
 			}
 			offset := int(src[i]) | int(src[i+1])<<8 | int(src[i+2])<<16 | int(src[i+3])<<24
-			offset++ // wire format stores offset-1
+			offset++
 			i += 4
 			var err error
 			dst, err = snappyCopy(dst, offset, length)
@@ -280,7 +253,6 @@ func snappyBlockDecode(dst, src []byte) ([]byte, error) {
 	return dst, nil
 }
 
-// snappyCopy appends `length` bytes copied from `offset` bytes back.
 func snappyCopy(dst []byte, offset, length int) ([]byte, error) {
 	if offset <= 0 || offset > len(dst) {
 		return nil, fmt.Errorf("snappy: invalid copy offset %d", offset)
@@ -292,11 +264,6 @@ func snappyCopy(dst []byte, offset, length int) ([]byte, error) {
 	return dst, nil
 }
 
-// LZ4 block format (as used by Kafka): 4-byte magic 0x184D2204 + 4-byte BE
-// compressed length + 4-byte BE uncompressed length + raw LZ4 block. The block
-// carries its own 4-byte little-endian xxHash32 at the end, which we ignore on
-// decode (we verify sizes instead).
-
 const (
 	lz4FrameMagic    uint32 = 0x184D2204
 	lz4BlockMagic    uint32 = 0x184D2205
@@ -304,13 +271,11 @@ const (
 	lz4BlockUnlinked uint32 = 0x184D2207
 )
 
-// lz4MaxCompressedLen is the worst-case upper bound for an LZ4 block.
 func lz4MaxCompressedLen(srcLen int) int {
-	// Each byte could become a 2-byte token + up to 15-byte length extension.
+
 	return srcLen + srcLen/255 + 16
 }
 
-// lz4BlockCompress compresses src into a Kafka-compatible LZ4 block frame.
 func lz4BlockCompress(src []byte) ([]byte, error) {
 	if len(src) == 0 {
 		return nil, nil
@@ -323,9 +288,6 @@ func lz4BlockCompress(src []byte) ([]byte, error) {
 	return append(out, block...), nil
 }
 
-// lz4BlockEncode performs a greedy hash-table LZ4 block encoding producing a
-// standard LZ4 block (token + literals + offsets). The trailing 4-byte xxHash32
-// checksum is not appended here; the frame decoder ignores it.
 func lz4BlockEncode(src []byte) []byte {
 	out := make([]byte, 0, lz4MaxCompressedLen(len(src)))
 	const tableBits = 14
@@ -365,7 +327,7 @@ func lz4BlockEncode(src []byte) []byte {
 				token |= (matchLen - 4)
 			}
 			out = append(out, byte(token))
-			// literal length extension
+
 			if litLen >= 15 {
 				rest := litLen - 15
 				for rest >= 255 {
@@ -391,7 +353,7 @@ func lz4BlockEncode(src []byte) []byte {
 		}
 		i++
 	}
-	// Trailing literals.
+
 	litLen := len(src) - litStart
 	token := 0
 	if litLen >= 15 {
@@ -412,7 +374,6 @@ func lz4BlockEncode(src []byte) []byte {
 	return out
 }
 
-// lz4BlockDecompress decodes a Kafka LZ4 block frame.
 func lz4BlockDecompress(src []byte) ([]byte, error) {
 	if len(src) == 0 {
 		return nil, nil
@@ -429,7 +390,7 @@ func lz4BlockDecompress(src []byte) ([]byte, error) {
 	if compLen < 0 || uncompLen < 0 || compLen != len(src)-12 {
 		return nil, fmt.Errorf("lz4: length mismatch comp=%d avail=%d", compLen, len(src)-12)
 	}
-	// Kafka LZ4 blocks (KIP-57) append a 4-byte xxHash32; tolerate both.
+
 	block := src[12:]
 	if len(block) == compLen-4 && uncompLen == compLen+4 {
 		block = block[:compLen-4]
@@ -444,7 +405,6 @@ func lz4BlockDecompress(src []byte) ([]byte, error) {
 	return out, nil
 }
 
-// lz4BlockDecode decodes a raw LZ4 block.
 func lz4BlockDecode(src []byte, uncompLen int) ([]byte, error) {
 	dst := make([]byte, 0, uncompLen)
 	i := 0
@@ -471,7 +431,7 @@ func lz4BlockDecode(src []byte, uncompLen int) ([]byte, error) {
 		dst = append(dst, src[i:i+litLen]...)
 		i += litLen
 		if i >= len(src) {
-			break // last sequence is literals only
+			break
 		}
 		if i+2 > len(src) {
 			return nil, fmt.Errorf("lz4: offset overrun")

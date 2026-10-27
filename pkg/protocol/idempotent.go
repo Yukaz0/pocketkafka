@@ -1,7 +1,5 @@
 package protocol
 
-// InitProducerIdRequest (Key 22), v0-v2. The broker allocates a producer ID and
-// epoch that the client uses for idempotent produce and transactions.
 type InitProducerIdRequest struct {
 	Version              int16
 	TransactionalID      *string
@@ -10,7 +8,6 @@ type InitProducerIdRequest struct {
 	ProducerEpoch        int16
 }
 
-// DecodeInitProducerIdRequest parses the request body for versions up to 2.
 func DecodeInitProducerIdRequest(version int16, body []byte) (*InitProducerIdRequest, error) {
 	r := NewReader(body)
 	req := &InitProducerIdRequest{Version: version}
@@ -32,7 +29,6 @@ func DecodeInitProducerIdRequest(version int16, body []byte) (*InitProducerIdReq
 	return req, nil
 }
 
-// InitProducerIdResponse reports the allocated producer ID and epoch.
 type InitProducerIdResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
@@ -41,7 +37,6 @@ type InitProducerIdResponse struct {
 	ProducerEpoch  int16
 }
 
-// EncodeInitProducerIdResponse serializes the response body.
 func EncodeInitProducerIdResponse(resp *InitProducerIdResponse) ([]byte, error) {
 	w := NewWriter(32)
 	if resp.Version >= 1 {
@@ -53,7 +48,6 @@ func EncodeInitProducerIdResponse(resp *InitProducerIdResponse) ([]byte, error) 
 	return w.Bytes(), nil
 }
 
-// EncodeInitProducerIdRequest serializes the request body (client side).
 func EncodeInitProducerIdRequest(req *InitProducerIdRequest) ([]byte, error) {
 	w := NewWriter(32)
 	w.WriteNullableString(req.TransactionalID)
@@ -65,7 +59,6 @@ func EncodeInitProducerIdRequest(req *InitProducerIdRequest) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// DecodeInitProducerIdResponse parses the response body (client side).
 func DecodeInitProducerIdResponse(version int16, body []byte) (*InitProducerIdResponse, error) {
 	r := NewReader(body)
 	resp := &InitProducerIdResponse{Version: version}

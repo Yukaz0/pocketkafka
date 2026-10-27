@@ -8,7 +8,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/atomicfile"
 )
 
-// persistedEntry is one schema version as stored on disk.
 type persistedEntry struct {
 	ID         int    `json:"id"`
 	Subject    string `json:"subject"`
@@ -17,13 +16,11 @@ type persistedEntry struct {
 	SchemaType string `json:"schemaType"`
 }
 
-// persistedState is the whole registry document.
 type persistedState struct {
 	NextID  int              `json:"nextId"`
 	Entries []persistedEntry `json:"entries"`
 }
 
-// loadState reads the registry file. A missing file returns (nil, nil).
 func loadState(path string) (*persistedState, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -42,7 +39,6 @@ func loadState(path string) (*persistedState, error) {
 	return &st, nil
 }
 
-// saveState atomically replaces the registry file.
 func saveState(path string, st persistedState) error {
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {

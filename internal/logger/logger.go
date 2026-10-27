@@ -1,5 +1,3 @@
-// Package logger configures the process-wide slog logger and provides
-// structured logging helpers for the broker engine.
 package logger
 
 import (
@@ -8,9 +6,6 @@ import (
 	"os"
 )
 
-// InitWithSink configures slog as the default logger and tees every record into
-// sink (when non-nil). level is one of "debug", "info", "warn", "error"; format
-// is "json" or "text".
 func InitWithSink(level, format string, sink io.Writer) {
 	var lvl slog.Level
 	switch level {
@@ -33,12 +28,9 @@ func InitWithSink(level, format string, sink io.Writer) {
 	slog.SetDefault(slog.New(handler))
 }
 
-// slogOut wraps the destination writer: sink (if any) tees into the base writer.
 func slogOut(sink io.Writer) io.Writer {
 	if sink == nil {
 		return os.Stdout
 	}
 	return io.MultiWriter(os.Stdout, sink)
 }
-
-// LogProduce emits a structured "record appended" log line.

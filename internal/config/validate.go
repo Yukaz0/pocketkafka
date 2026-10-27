@@ -9,9 +9,6 @@ import (
 	"strings"
 )
 
-// defaultWebSecrets are placeholder secrets shipped in the defaults and sample
-// config. Enabling web auth while one of these is still in place is treated as
-// a misconfiguration: it would publish a publicly-known signing key.
 var defaultWebSecrets = map[string]bool{
 	"":                        true,
 	"pocketkafka-web-secret":  true,
@@ -19,9 +16,6 @@ var defaultWebSecrets = map[string]bool{
 	"changeme":                true,
 }
 
-// weakPasswords are the values that show up in every sample config and wordlist.
-// A security-enabled broker refuses to start on one of them: online guessing
-// against a known default is not a hypothetical risk.
 var weakPasswords = map[string]bool{
 	"changeme":                true,
 	"change-me-in-production": true,
@@ -40,14 +34,8 @@ var weakPasswords = map[string]bool{
 	"letmein":                 true,
 }
 
-// MinPasswordLength is the shortest plaintext password a security-enabled
-// broker accepts. It applies to config-supplied passwords; verifiers carry
-// their own stronger material.
 const MinPasswordLength = 8
 
-// IsLoopbackHost reports whether a bind host only accepts local connections.
-// An empty host, "0.0.0.0", "::" and any non-loopback name all mean "reachable
-// from the network", which is the conservative reading.
 func IsLoopbackHost(host string) bool {
 	host = strings.TrimSpace(strings.Trim(strings.TrimSpace(host), "[]"))
 	switch strings.ToLower(host) {
@@ -62,8 +50,6 @@ func IsLoopbackHost(host string) bool {
 	return false
 }
 
-// bindTargets lists every address the broker would listen on, labelled with the
-// config field that produced it.
 func bindTargets(c *Config) []bindTarget {
 	out := []bindTarget{}
 	for name, addr := range c.Listeners {
@@ -84,16 +70,11 @@ func bindTargets(c *Config) []bindTarget {
 	return out
 }
 
-// bindTarget is one configured listen address and the field naming it.
 type bindTarget struct {
 	field string
 	addr  string
 }
 
-// ValidateClusterName checks a monitored-cluster name. The charset is
-// deliberately narrow: a name ends up in URLs, in log lines, and as an argument
-// inside a generated onclick attribute, so allowing punctuation would only
-// create escaping problems for no benefit.
 func ValidateClusterName(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -112,9 +93,6 @@ func ValidateClusterName(name string) error {
 	return nil
 }
 
-// ValidateClusterURL checks a monitored-cluster endpoint: plain http(s) with a
-// host and no embedded credentials. Only URLs that pass this ever get fetched,
-// which is what keeps the dashboard fan-out from being an SSRF primitive.
 func ValidateClusterURL(raw string) error {
 	if strings.TrimSpace(raw) == "" {
 		return errors.New("is required")
@@ -135,9 +113,6 @@ func ValidateClusterURL(raw string) error {
 	return nil
 }
 
-// Validate checks the configuration for values that would make the broker
-// unsafe or non-functional at runtime. It reports every problem it finds,
-// naming the config field, so startup can fail before any listener is opened.
 func (c *Config) Validate() error {
 	var problems []string
 	add := func(format string, args ...interface{}) {
@@ -242,11 +217,6 @@ func validateStorage(c *Config, add func(string, ...interface{})) {
 	}
 }
 
-// validateExposure refuses a broker that is both unauthenticated and reachable
-// from the network. Every ingress (Kafka, dashboard, Schema Registry, REST
-// proxy, MQTT) is default-deny only when security is enabled, so a non-loopback
-// bind with security off means anyone who can route to this host can truncate
-// topics and edit ACLs.
 func validateExposure(c *Config, add func(string, ...interface{})) {
 	if c.Security.Enabled || c.Security.AllowInsecurePublic {
 		return
@@ -254,7 +224,7 @@ func validateExposure(c *Config, add func(string, ...interface{})) {
 	for _, t := range bindTargets(c) {
 		host, _, err := net.SplitHostPort(strings.TrimSpace(t.addr))
 		if err != nil {
-			continue // shape errors are reported by validateListeners
+			continue
 		}
 		if IsLoopbackHost(host) {
 			continue
@@ -265,8 +235,6 @@ func validateExposure(c *Config, add func(string, ...interface{})) {
 	}
 }
 
-// validateTiered rejects a cold-storage configuration that would ship objects
-// with a well-known credential over a plaintext link to a remote host.
 func validateTiered(c *Config, add func(string, ...interface{})) {
 	if !c.Storage.Tiered.Enabled {
 		return
@@ -287,9 +255,6 @@ func validateTiered(c *Config, add func(string, ...interface{})) {
 	}
 }
 
-// unresolvedEnv reports a ${NAME} reference that environment expansion could
-// not resolve. It mirrors expandEnv: a "${" with no closing "}" is literal
-// text, not a reference, and must not be rejected.
 func unresolvedEnv(v string) bool {
 	i := strings.Index(v, "${")
 	if i < 0 {
@@ -299,21 +264,17 @@ func unresolvedEnv(v string) bool {
 }
 
 func validateSecurity(c *Config, add func(string, ...interface{})) {
-	// Enabling security also turns on web login (the dashboard must not be an
-	// unauthenticated bypass), so the signing secret must be non-default in
-	// either case.
+
 	if c.Web.Enabled && (c.Web.Auth || c.Security.Enabled) {
 		if defaultWebSecrets[c.Web.AuthSecret] {
 			add("web.auth_secret: must be set to a non-default value when web.auth or security.enabled is true")
 		}
 		if unresolvedEnv(c.Web.AuthSecret) {
-			// The literal "${NAME}" is not an empty secret: it is a *predictable*
-			// one, and a predictable signing key forges sessions.
+
 			add("web.auth_secret: %q references an unset environment variable", c.Web.AuthSecret)
 		}
 	}
-	// Same reasoning for the two other shared secrets: a literal ${NAME} that was
-	// never substituted is guessable, whether or not it is "non-default".
+
 	for _, secret := range []struct{ field, value string }{
 		{"web.cluster_token", c.Web.ClusterToken},
 		{"web.secrets_key", c.Web.SecretsKey},
@@ -323,8 +284,7 @@ func validateSecurity(c *Config, add func(string, ...interface{})) {
 			add("%s: %q references an unset environment variable", secret.field, secret.value)
 		}
 	}
-	// Multi-cluster monitoring: a malformed entry would be persisted and then
-	// fail on every fan-out, so reject it at startup instead.
+
 	seenClusters := map[string]bool{}
 	for i, cl := range c.Web.Clusters {
 		name := strings.TrimSpace(cl.Name)
@@ -340,17 +300,11 @@ func validateSecurity(c *Config, add func(string, ...interface{})) {
 			add("web.clusters[%d].url: %v", i, err)
 		}
 	}
-	// The bearer token this broker accepts from an aggregator: short values are
-	// guessable, so refuse them rather than shipping a weak shared secret.
+
 	if c.Web.ClusterToken != "" && len(c.Web.ClusterToken) < 16 {
 		add("web.cluster_token: must be at least 16 characters when set")
 	}
-	// The key that seals stored credentials at rest. A short key protects
-	// nothing; an unset key is fine because one is generated in the data dir.
-	// The environment variable is checked too: it is the effective key whenever
-	// it is set, and validating only the config value would leave the shorter
-	// path open. (The generated key file is 32 random bytes, checked where it is
-	// read.)
+
 	if c.Web.SecretsKey != "" && len(c.Web.SecretsKey) < 16 {
 		add("web.secrets_key: must be at least 16 characters when set")
 	}
@@ -368,8 +322,7 @@ func validateSecurity(c *Config, add func(string, ...interface{})) {
 		if useful == 0 {
 			add("security.users: at least one user with a username is required when security.enabled is true")
 		}
-		// A super user that is not also a configured user can never present a
-		// credential, so the entry would silently grant nothing.
+
 		known := map[string]bool{}
 		for _, u := range c.Security.Users {
 			known[strings.TrimSpace(u.Username)] = true
@@ -386,8 +339,6 @@ func validateSecurity(c *Config, add func(string, ...interface{})) {
 	validateTLS(c, add)
 }
 
-// validateUserSecret checks one user's credential source: exactly one method,
-// and a plaintext password that is neither a known default nor trivially short.
 func validateUserSecret(i int, u SecurityUser, add func(string, ...interface{})) {
 	where := fmt.Sprintf("security.users[%d]", i)
 	if name := strings.TrimSpace(u.Username); name != "" {
@@ -422,8 +373,6 @@ func validateUserSecret(i int, u SecurityUser, add func(string, ...interface{}))
 	}
 }
 
-// validateTLS checks the shared certificate and the surfaces switched over to
-// it.
 func validateTLS(c *Config, add func(string, ...interface{})) {
 	t := c.Security.TLS
 	active := t.Enabled || t.HTTP || t.MQTT
@@ -454,8 +403,6 @@ func validateTLS(c *Config, add func(string, ...interface{})) {
 	}
 }
 
-// validHostPort reports whether addr parses as host:port with a numeric or
-// service-name port.
 func validHostPort(addr string) bool {
 	_, port, err := net.SplitHostPort(addr)
 	if err != nil {

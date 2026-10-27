@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 )
 
-// topicManifest persists per-topic configuration (e.g. cleanup.policy=compact)
-// across broker restarts.
 type topicManifest struct {
 	Compacted []string `json:"compacted"`
 }
@@ -16,7 +14,6 @@ func (s *Store) manifestPath() string {
 	return filepath.Join(s.dir, "__topics.json")
 }
 
-// loadManifest reads the topic manifest if present.
 func (s *Store) loadManifest() error {
 	data, err := os.ReadFile(s.manifestPath())
 	if err != nil {
@@ -35,7 +32,6 @@ func (s *Store) loadManifest() error {
 	return nil
 }
 
-// saveManifest persists the current topic configuration.
 func (s *Store) saveManifest() error {
 	m := topicManifest{}
 	for name, c := range s.compacted {
@@ -54,14 +50,12 @@ func (s *Store) saveManifest() error {
 	return os.Rename(tmp, s.manifestPath())
 }
 
-// IsCompacted reports whether a topic uses log compaction.
 func (s *Store) IsCompacted(topic string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.compacted[topic]
 }
 
-// MarkCompacted toggles log compaction for a topic and persists the setting.
 func (s *Store) MarkCompacted(topic string, compact bool) error {
 	s.mu.Lock()
 	if compact {

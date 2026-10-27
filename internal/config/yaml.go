@@ -6,10 +6,6 @@ import (
 	"strings"
 )
 
-// parseYAML parses a small YAML subset: nested maps of scalars plus sequences of
-// maps (e.g. security.users). Indentation is significant and '#' starts a
-// comment. This is enough for config/config.yaml and keeps the module free of
-// external dependencies.
 func parseYAML(data []byte) (map[string]interface{}, error) {
 	root := map[string]interface{}{}
 
@@ -28,7 +24,6 @@ func parseYAML(data []byte) (map[string]interface{}, error) {
 		lines = append(lines, yamlLine{leadingSpaces(trimmed), c})
 	}
 
-	// stack of (indent, map) for nested scopes.
 	type scope struct {
 		indent int
 		m      map[string]interface{}
@@ -43,7 +38,7 @@ func parseYAML(data []byte) (map[string]interface{}, error) {
 		parent := stack[len(stack)-1].m
 
 		if strings.HasPrefix(ln.content, "- ") {
-			// A sequence item; append a fresh element map to the parent's list.
+
 			seqKey := lastSeqKey(parent)
 			if seqKey == "" {
 				continue
@@ -57,7 +52,7 @@ func parseYAML(data []byte) (map[string]interface{}, error) {
 				item[k] = ""
 			}
 			parent[seqKey] = append(parent[seqKey].([]interface{}), item)
-			// Subsequent deeper lines populate this element map.
+
 			stack = append(stack, scope{indent: ln.indent, m: item})
 			continue
 		}
@@ -65,8 +60,7 @@ func parseYAML(data []byte) (map[string]interface{}, error) {
 		key, val, hasVal := splitKeyValue(ln.content)
 		if !hasVal {
 			child := map[string]interface{}{}
-			// A key with no value is a nested map, unless its children are
-			// sequence items, in which case it is a list.
+
 			if i+1 < len(lines) && lines[i+1].indent > ln.indent && strings.HasPrefix(lines[i+1].content, "- ") {
 				parent[key] = []interface{}{}
 				continue
@@ -80,8 +74,6 @@ func parseYAML(data []byte) (map[string]interface{}, error) {
 	return root, nil
 }
 
-// lastSeqKey returns a key in m whose value is a list (used to place sequence
-// items). Config sections have at most one list, so this is unambiguous here.
 func lastSeqKey(m map[string]interface{}) string {
 	for k, v := range m {
 		if _, ok := v.([]interface{}); ok {
@@ -115,7 +107,7 @@ func splitKeyValue(s string) (string, string, bool) {
 	key := strings.TrimSpace(s[:colon])
 	val := strings.TrimSpace(s[colon+1:])
 	if val == "" {
-		// A key with no value begins a nested map.
+
 		return key, "", false
 	}
 	return key, val, true
@@ -147,7 +139,6 @@ func parseScalar(s string) interface{} {
 	return s
 }
 
-// asMap returns m[k] as a nested map.
 func asMap(m map[string]interface{}, k string) map[string]interface{} {
 	if v, ok := m[k].(map[string]interface{}); ok {
 		return v
@@ -155,9 +146,6 @@ func asMap(m map[string]interface{}, k string) map[string]interface{} {
 	return nil
 }
 
-// getString returns a string value, expanding ${NAME} references against the
-// environment so a secret never has to be written into the YAML file (or the
-// container image built from it).
 func getString(m map[string]interface{}, k string, def string) string {
 	if v, ok := m[k].(string); ok {
 		return expandEnv(v)
@@ -165,9 +153,6 @@ func getString(m map[string]interface{}, k string, def string) string {
 	return def
 }
 
-// expandEnv replaces every ${NAME} with the value of that environment
-// variable. An unresolvable name is left verbatim so Validate can report it:
-// silently expanding to "" would turn a configured password into no password.
 func expandEnv(s string) string {
 	i := strings.Index(s, "${")
 	if i < 0 {
@@ -180,8 +165,7 @@ func expandEnv(s string) string {
 	name := s[i+2 : i+2+j]
 	end := i + 2 + j + 1
 	if v, ok := os.LookupEnv(name); ok {
-		// The substituted value is appended verbatim: expanding it would let a
-		// value that happens to contain "${X}" pull in another variable.
+
 		return s[:i] + v + expandEnv(s[end:])
 	}
 	return s[:end] + expandEnv(s[end:])
@@ -218,7 +202,6 @@ func getBool(m map[string]interface{}, k string, def bool) bool {
 	return def
 }
 
-// applyYAML overlays parsed YAML values onto a Config.
 func applyYAML(cfg *Config, m map[string]interface{}) {
 	if b := asMap(m, "broker"); b != nil {
 		cfg.Broker.ID = getInt(b, "id", cfg.Broker.ID)

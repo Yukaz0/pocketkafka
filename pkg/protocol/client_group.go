@@ -74,7 +74,7 @@ func DecodeJoinGroupResponse(version int16, body []byte) (*JoinGroupResponse, er
 		return nil, err
 	}
 	if version >= 7 {
-		if _, err = r.ReadNullableString(); err != nil { // protocol_type
+		if _, err = r.ReadNullableString(); err != nil {
 			return nil, err
 		}
 		var pn *string
@@ -127,8 +127,8 @@ func EncodeSyncGroupRequest(req *SyncGroupRequest) ([]byte, error) {
 		w.WriteNullableString(req.InstanceID)
 	}
 	if req.Version >= 5 {
-		w.WriteNullableString(nil) // protocol_type
-		w.WriteNullableString(nil) // protocol_name
+		w.WriteNullableString(nil)
+		w.WriteNullableString(nil)
 	}
 	w.WriteArrayLen(len(req.Assignments))
 	for _, a := range req.Assignments {
@@ -151,10 +151,10 @@ func DecodeSyncGroupResponse(version int16, body []byte) (*SyncGroupResponse, er
 		return nil, err
 	}
 	if version >= 5 {
-		if _, err = r.ReadNullableString(); err != nil { // protocol_type
+		if _, err = r.ReadNullableString(); err != nil {
 			return nil, err
 		}
-		if _, err = r.ReadNullableString(); err != nil { // protocol_name
+		if _, err = r.ReadNullableString(); err != nil {
 			return nil, err
 		}
 	}
@@ -198,13 +198,13 @@ func EncodeOffsetCommitRequest(req *OffsetCommitRequest) ([]byte, error) {
 		w.WriteString(req.MemberID)
 	}
 	if req.Version == 1 {
-		w.WriteInt64(0) // retention_time
+		w.WriteInt64(0)
 	}
 	if req.Version >= 7 {
 		w.WriteNullableString(req.InstanceID)
 	}
 	if req.Version >= 2 && req.Version <= 4 {
-		w.WriteInt64(0) // retention_time
+		w.WriteInt64(0)
 	}
 	w.WriteArrayLen(len(req.Topics))
 	for _, t := range req.Topics {
@@ -214,7 +214,7 @@ func EncodeOffsetCommitRequest(req *OffsetCommitRequest) ([]byte, error) {
 			w.WriteInt32(p.Partition)
 			w.WriteInt64(p.Offset)
 			if req.Version == 1 {
-				w.WriteInt64(0) // commit_timestamp
+				w.WriteInt64(0)
 			}
 			if req.Version >= 6 {
 				w.WriteInt32(p.LeaderEpoch)
@@ -280,7 +280,7 @@ func EncodeOffsetFetchRequest(req *OffsetFetchRequest) ([]byte, error) {
 		}
 	}
 	if req.Version >= 7 {
-		w.WriteBool(false) // require_stable
+		w.WriteBool(false)
 	}
 	return w.Bytes(), nil
 }

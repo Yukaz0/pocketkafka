@@ -356,8 +356,6 @@ type dockerPort struct {
 	Type        string `json:"Type"`
 }
 
-// formatDockerPorts renders e.g. "0.0.0.0:8080->80/tcp, 5432/tcp",
-// deduplicating dual-stack IPv6 (::) bindings when an IPv4 (0.0.0.0) binding exists.
 func formatDockerPorts(ports []dockerPort) string {
 	parts := make([]string, 0, len(ports))
 	seen := make(map[string]bool)

@@ -1,6 +1,5 @@
 package main
 
-// Probe: render Metadata v8 response hex untuk pemeriksaan manual byte-level.
 import (
 	"encoding/hex"
 	"fmt"
@@ -25,14 +24,12 @@ func main() {
 	gm := coordinator.NewGroupManager(offsetStore, 0, "local-kafka", 29092, 10000)
 	h := handler.New(store, gm, &cfg, 0, "local-kafka", 29092)
 
-	// Metadata v8: topics array (compact? tidak - v8 classic: int32 array),
-	// null = -1, lalu bool aut creation + 2 bool authorized ops.
 	body := []byte{}
-	body = append(body, 0xff, 0xff, 0xff, 0xff)                                    // null topics array
-	body = append(body, 0x01)                                                      // allow auto topic creation = true
-	body = append(body, 0x01)                                                      // include cluster authorized ops = true
-	body = append(body, 0x01)                                                      // include topic authorized ops = true
-	resp, err := h.Handle(3, 8, body, handler.RequestContext{ListenerPort: 29092}) // Metadata v8
+	body = append(body, 0xff, 0xff, 0xff, 0xff)
+	body = append(body, 0x01)
+	body = append(body, 0x01)
+	body = append(body, 0x01)
+	resp, err := h.Handle(3, 8, body, handler.RequestContext{ListenerPort: 29092})
 	if err != nil {
 		panic(err)
 	}

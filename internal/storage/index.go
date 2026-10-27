@@ -6,13 +6,6 @@ import (
 	"sort"
 )
 
-// indexEntry is a single 8-byte sparse index entry mapping a relative offset to
-// a physical byte position within the associated .log segment.
-//
-//	+-----------------------------------+-----------------------------------+
-//	|   Relative Offset (uint32)        |  Physical Byte Position (uint32)  |
-//	|           (4 Bytes)               |              (4 Bytes)            |
-//	+-----------------------------------+-----------------------------------+
 type indexEntry struct {
 	relativeOffset uint32
 	position       uint32
@@ -20,10 +13,6 @@ type indexEntry struct {
 
 const indexEntrySize = 8
 
-// indexFile is a memory-mapped style sparse index backed by a file on disk.
-// For simplicity and correctness we keep an in-memory copy of the entries and
-// flush them to disk as we append. Segments are small enough that the sparse
-// index is fully resident in memory, matching the design goal in the spec.
 type indexFile struct {
 	path        string
 	baseOffset  int64
@@ -33,7 +22,6 @@ type indexFile struct {
 	writtenSize int64
 }
 
-// openIndex opens (or creates) the sparse index file for a segment.
 func openIndex(path string, baseOffset int64, interval int64) (*indexFile, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -52,15 +40,13 @@ func openIndex(path string, baseOffset int64, interval int64) (*indexFile, error
 	return idx, nil
 }
 
-// load reads any existing entries from disk so a reopened segment keeps its
-// sparse index (crash recovery).
 func (idx *indexFile) load() error {
 	st, err := idx.file.Stat()
 	if err != nil {
 		return err
 	}
 	if st.Size()%indexEntrySize != 0 {
-		// Truncate a partially written tail entry.
+
 		trim := st.Size() / indexEntrySize * indexEntrySize
 		if err := idx.file.Truncate(trim); err != nil {
 			return err
@@ -80,8 +66,6 @@ func (idx *indexFile) load() error {
 	return nil
 }
 
-// maybeAppend adds a new entry if the segment log position has advanced by at
-// least the index interval since the last entry.
 func (idx *indexFile) maybeAppend(absoluteOffset int64, position int64) error {
 	lastPos := int64(0)
 	if len(idx.entries) > 0 {
@@ -108,25 +92,21 @@ func (idx *indexFile) append(absoluteOffset int64, position int64) error {
 	return nil
 }
 
-// positionForOffset returns the physical byte position in the .log file that
-// corresponds to the largest relative offset <= targetOffset. If the index is
-// empty, it returns 0.
 func (idx *indexFile) positionForOffset(targetOffset int64) int64 {
 	rel := uint32(targetOffset - idx.baseOffset)
 	n := len(idx.entries)
 	if n == 0 {
 		return 0
 	}
-	// Entries are written in order; binary search for the last rel <= target.
+
 	i := sort.Search(n, func(i int) bool { return idx.entries[i].relativeOffset > rel })
 	if i == 0 {
-		// Even the first entry is ahead of the target; start from 0.
+
 		return 0
 	}
 	return int64(idx.entries[i-1].position)
 }
 
-// reset clears the in-memory entries and truncates the index file to zero.
 func (idx *indexFile) reset() error {
 	idx.entries = idx.entries[:0]
 	idx.writtenSize = 0
@@ -136,7 +116,6 @@ func (idx *indexFile) reset() error {
 	return nil
 }
 
-// sync flushes the index file to stable storage without closing it.
 func (idx *indexFile) sync() error {
 	if idx.file == nil {
 		return nil

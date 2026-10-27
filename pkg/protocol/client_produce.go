@@ -3,7 +3,7 @@ package protocol
 func EncodeProduceRequest(req *ProduceRequest) ([]byte, error) {
 	w := NewWriter(128)
 	if req.Version >= 3 {
-		w.WriteNullableString(nil) // transactional_id
+		w.WriteNullableString(nil)
 	}
 	w.WriteInt16(req.Acks)
 	w.WriteInt32(req.Timeout)
@@ -54,7 +54,7 @@ func DecodeProduceResponse(version int16, body []byte) (*ProduceResponse, error)
 				}
 			}
 			if version >= 5 {
-				if _, err = r.ReadInt64(); err != nil { // log_start_offset
+				if _, err = r.ReadInt64(); err != nil {
 					return nil, err
 				}
 			}

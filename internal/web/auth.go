@@ -59,8 +59,7 @@ func cookieName(secure bool) string {
 
 func (s *Server) authMiddleware(mux *http.ServeMux, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Agent transport authenticates via HMAC/tokens at the fleet listener,
-		// not via dashboard session. Proxy still strips/forges headers.
+
 		if strings.HasPrefix(r.URL.Path, "/api/v1/fleet/agent/") || r.URL.Path == "/api/v1/fleet/enroll" {
 			next.ServeHTTP(w, r)
 			return
@@ -229,9 +228,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		secure := s.secureRequest(r)
-		//#nosec G124 -- Secure is derived from secureRequest(r): true whenever the
-		// browser's connection (or a trusted proxy) is HTTPS. Forcing it on a
-		// plaintext development connection would make the browser drop the cookie.
+
 		http.SetCookie(w, &http.Cookie{
 			Name:     cookieName(secure),
 			Value:    signToken(sessionPayload(u.Username, exp, id), s.authSecret),
@@ -280,8 +277,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	for _, name := range []string{hostCookieName, authCookieName} {
-		//#nosec G124 -- HttpOnly and SameSite are set below; Secure follows the
-		// connection, exactly as on the login cookie.
+
 		http.SetCookie(w, &http.Cookie{
 			Name:     name,
 			Value:    "",

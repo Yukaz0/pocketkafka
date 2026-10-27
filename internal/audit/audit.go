@@ -1,10 +1,3 @@
-// Package audit writes the broker's security-relevant trail: who did what, to
-// which resource, and whether it was allowed. Every record goes to the process
-// log as a structured line and, when a path is configured, is appended to a
-// 0600 JSON-lines file.
-//
-// The trail is deliberately independent of the dashboard's in-memory ring: a
-// restart, a full ring, or an attacker flooding the UI must not erase it.
 package audit
 
 import (
@@ -19,7 +12,6 @@ import (
 	"unicode"
 )
 
-// Result values.
 const (
 	ResultOK    = "ok"
 	ResultAllow = "allow"
@@ -27,19 +19,14 @@ const (
 	ResultError = "error"
 )
 
-// Anonymous is the actor recorded for an event with no verified identity.
 const Anonymous = "anonymous"
 
 const (
-	// maxFileBytes rotates the trail file before it grows past this size.
 	maxFileBytes = 8 << 20
-	// maxFieldBytes truncates a field so one oversized topic name or error
-	// string cannot dominate (or wedge) the trail.
+
 	maxFieldBytes = 512
 )
 
-// Event is one audit record. Callers must never put a password, token, or other
-// secret into Detail or Resource.
 type Event struct {
 	Time       int64  `json:"time"`
 	Actor      string `json:"actor"`
@@ -61,9 +48,6 @@ var (
 	authzDenials atomic.Int64
 )
 
-// authFailureActions are the events that count as a refused credential (as
-// opposed to a refused permission). Keeping the classification here means every
-// ingress that already reports to the trail feeds the metric for free.
 var authFailureActions = map[string]bool{
 	"auth.login":  true,
 	"auth.bearer": true,
@@ -72,7 +56,6 @@ var authFailureActions = map[string]bool{
 	"auth.basic":  true,
 }
 
-// authzDenialActions are the events that count as a permission refusal.
 var authzDenialActions = map[string]bool{
 	"auth.request":  true,
 	"auth.list":     true,
@@ -80,14 +63,10 @@ var authzDenialActions = map[string]bool{
 	"kafka.request": true,
 }
 
-// AuthFailures reports refused credentials since start.
 func AuthFailures() int64 { return authFailures.Load() }
 
-// AuthzDenials reports refused permissions since start.
 func AuthzDenials() int64 { return authzDenials.Load() }
 
-// Init points the trail at a file. An empty path keeps the trail in the process
-// log only. Callers must call it once, before serving.
 func Init(logPath string) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -109,14 +88,12 @@ func Init(logPath string) error {
 	return nil
 }
 
-// Enabled reports whether the trail has a file sink.
 func Enabled() bool {
 	mu.Lock()
 	defer mu.Unlock()
 	return file != nil
 }
 
-// Close flushes and closes the file sink.
 func Close() error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -129,9 +106,6 @@ func Close() error {
 	return err
 }
 
-// Log records one event. It never fails the caller: a trail that cannot be
-// written reports itself in the process log rather than breaking the request
-// that triggered it.
 func Log(e Event) {
 	if e.Time == 0 {
 		e.Time = time.Now().UnixMilli()
@@ -152,8 +126,6 @@ func Log(e Event) {
 		}
 	}
 
-	// The structured process-log line is always emitted: it is what a log
-	// shipper or journald already collects.
 	attrs := []any{
 		"actor", e.Actor,
 		"action", e.Action,
@@ -188,7 +160,6 @@ func Log(e Event) {
 	rotateLocked()
 }
 
-// rotateLocked rolls the file over to <path>.1 once it exceeds maxFileBytes.
 func rotateLocked() {
 	info, err := file.Stat()
 	if err != nil || info.Size() < maxFileBytes {
@@ -207,7 +178,6 @@ func rotateLocked() {
 	file = f
 }
 
-// openAppend opens the trail with 0600 permissions, creating it when missing.
 func openAppend(p string) (*os.File, error) {
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
@@ -216,8 +186,6 @@ func openAppend(p string) (*os.File, error) {
 	return f, nil
 }
 
-// sanitize strips control characters (a forged newline would otherwise let a
-// caller inject whole lines into the trail) and bounds the length.
 func sanitize(s string) string {
 	if s == "" {
 		return ""

@@ -891,8 +891,7 @@ func (s *Server) proxyPeerAPI(w http.ResponseWriter, r *http.Request, entry Clus
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	//#nosec G704 -- the target is a registered peer and peerTargetTransport dials
-	// through guardDialAddr; redirects are rejected below.
+
 	response, err := peerTargetClient.Do(request)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "peer request failed")

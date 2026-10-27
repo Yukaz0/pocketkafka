@@ -1,6 +1,5 @@
 package protocol
 
-// CreateTopicsRequestTopic describes one topic to create.
 type CreateTopicsRequestTopic struct {
 	Topic             string
 	NumPartitions     int32
@@ -9,19 +8,16 @@ type CreateTopicsRequestTopic struct {
 	Configs           []CreateTopicsConfig
 }
 
-// CreateTopicsReplicaAssignment manually assigns replicas to a partition.
 type CreateTopicsReplicaAssignment struct {
 	Partition int32
 	Replicas  []int32
 }
 
-// CreateTopicsConfig is a topic-level configuration override.
 type CreateTopicsConfig struct {
 	Name  string
 	Value *string
 }
 
-// CreateTopicsRequest (Key 19), decoded at v4.
 type CreateTopicsRequest struct {
 	Version      int16
 	Topics       []CreateTopicsRequestTopic
@@ -29,7 +25,6 @@ type CreateTopicsRequest struct {
 	ValidateOnly bool
 }
 
-// DecodeCreateTopicsRequest parses the request body for versions up to 4.
 func DecodeCreateTopicsRequest(version int16, body []byte) (*CreateTopicsRequest, error) {
 	r := NewReader(body)
 	req := &CreateTopicsRequest{Version: version}
@@ -92,21 +87,18 @@ func DecodeCreateTopicsRequest(version int16, body []byte) (*CreateTopicsRequest
 	return req, nil
 }
 
-// CreateTopicsResponseTopic is the result for one topic creation.
 type CreateTopicsResponseTopic struct {
 	Topic        string
 	ErrorCode    int16
 	ErrorMessage *string
 }
 
-// CreateTopicsResponse (Key 19), encoded at v4.
 type CreateTopicsResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
 	Topics         []CreateTopicsResponseTopic
 }
 
-// EncodeCreateTopicsResponse serializes the response body.
 func EncodeCreateTopicsResponse(resp *CreateTopicsResponse) ([]byte, error) {
 	w := NewWriter(128)
 	if resp.Version >= 2 {
@@ -120,22 +112,20 @@ func EncodeCreateTopicsResponse(resp *CreateTopicsResponse) ([]byte, error) {
 			w.WriteNullableString(t.ErrorMessage)
 		}
 		if resp.Version >= 5 {
-			w.WriteInt32(-1)    // num_partitions
-			w.WriteInt16(-1)    // replication_factor
-			w.WriteArrayLen(-1) // configs
+			w.WriteInt32(-1)
+			w.WriteInt16(-1)
+			w.WriteArrayLen(-1)
 		}
 	}
 	return w.Bytes(), nil
 }
 
-// DeleteTopicsRequest (Key 20), decoded at v3.
 type DeleteTopicsRequest struct {
 	Version    int16
 	TopicNames []string
 	TimeoutMs  int32
 }
 
-// DecodeDeleteTopicsRequest parses the request body for versions up to 3.
 func DecodeDeleteTopicsRequest(version int16, body []byte) (*DeleteTopicsRequest, error) {
 	r := NewReader(body)
 	req := &DeleteTopicsRequest{Version: version}
@@ -157,21 +147,18 @@ func DecodeDeleteTopicsRequest(version int16, body []byte) (*DeleteTopicsRequest
 	return req, nil
 }
 
-// DeleteTopicsResponseTopic is the result for one topic deletion.
 type DeleteTopicsResponseTopic struct {
 	Name         string
 	ErrorCode    int16
 	ErrorMessage *string
 }
 
-// DeleteTopicsResponse (Key 20), encoded at v3.
 type DeleteTopicsResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
 	Topics         []DeleteTopicsResponseTopic
 }
 
-// EncodeDeleteTopicsResponse serializes the response body.
 func EncodeDeleteTopicsResponse(resp *DeleteTopicsResponse) ([]byte, error) {
 	w := NewWriter(128)
 	if resp.Version >= 1 {

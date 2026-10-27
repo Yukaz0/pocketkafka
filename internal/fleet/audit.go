@@ -24,8 +24,6 @@ var (
 	reJSONSecret   = regexp.MustCompile(`(?i)("(?:[a-z0-9_-]*(?:secret[-_]?key|api[-_]?key|private[-_]?key|access[-_]?key|auth[-_]?key|master[-_]?key|raw[-_]?secret|secret|token|password|passwd)|pass|pwd|key|auth|authorization|credential|credentials)")\s*:\s*"([^"]+)"`)
 )
 
-// Audit writes security- and operationally-relevant audit events to fleet_audit.jsonl.
-// Thread-safe and sanitizes secret credentials before writing.
 type Audit struct {
 	mu               sync.RWMutex
 	filePath         string
@@ -34,8 +32,6 @@ type Audit struct {
 	retentionEntries int
 }
 
-// NewAudit constructs an Audit recorder bound to fleet_audit.jsonl in dirOrPath.
-// If dirOrPath is empty, audit events are held in memory only.
 func NewAudit(dirOrPath string) *Audit {
 	a := &Audit{
 		retentionDays:    30,
@@ -58,7 +54,6 @@ func NewAudit(dirOrPath string) *Audit {
 	return a
 }
 
-// SetRetention configures retention policy by age (days) and count (entries).
 func (a *Audit) SetRetention(days int, entries int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -70,8 +65,6 @@ func (a *Audit) SetRetention(days int, entries int) {
 	}
 }
 
-// Log sanitizes and appends an audit event to the record trail.
-// It never panics or fails the caller.
 func (a *Audit) Log(e AuditEvent) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -102,7 +95,6 @@ func (a *Audit) Log(e AuditEvent) {
 	}
 }
 
-// List returns copies of all recorded audit events in chronological order.
 func (a *Audit) List() []*AuditEvent {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -114,7 +106,6 @@ func (a *Audit) List() []*AuditEvent {
 	return out
 }
 
-// Query returns up to limit recent audit events, newest first.
 func (a *Audit) Query(limit int) []*AuditEvent {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -132,7 +123,6 @@ func (a *Audit) Query(limit int) []*AuditEvent {
 	return out
 }
 
-// Prune purges events exceeding retention days or entry limits and rewrites the log file.
 func (a *Audit) Prune() (int, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -170,7 +160,6 @@ func (a *Audit) Prune() (int, error) {
 	return pruned, nil
 }
 
-// Close flushes any state if needed (compatible with Task 5 cleanup).
 func (a *Audit) Close() error {
 	return nil
 }
@@ -261,7 +250,6 @@ func sanitizeAuditString(s string) string {
 		return ""
 	}
 
-	// 1. Sanitize control characters (prevent JSONL newline injection)
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
@@ -273,7 +261,6 @@ func sanitizeAuditString(s string) string {
 	}
 	out := strings.TrimSpace(b.String())
 
-	// 2. Redact secret credentials
 	out = reKeyValSecret.ReplaceAllString(out, "${1}${2}${3}[REDACTED]${5}")
 	out = reBearerSecret.ReplaceAllString(out, "Bearer [REDACTED]")
 	out = reJSONSecret.ReplaceAllString(out, `${1}: "[REDACTED]"`)

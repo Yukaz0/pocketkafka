@@ -12,7 +12,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// ErrCompactionRunning reports a compaction already in flight for this partition.
 var ErrCompactionRunning = errors.New("compaction already running")
 
 const (
@@ -25,9 +24,6 @@ const (
 	compactMaxKeyBytes = 256 << 20
 )
 
-// compactionManifest names the files a swap deletes and installs. It is written
-// and fsynced before anything is deleted, so a crash mid-swap is finished by
-// applyCompactionSwap on the next open.
 type compactionManifest struct {
 	Old []string `json:"old"`
 	New []string `json:"new"`
@@ -40,10 +36,6 @@ type compactionPlan struct {
 	keyBytes int64
 }
 
-// Compact keeps the most recent record per non-null key, plus every null-key
-// record, and rewrites the partition with contiguous offsets from zero. It never
-// holds the partition in memory: one map entry per distinct key, one read page at
-// a time. Readers keep working; writers pause only for the swap.
 func (p *Partition) Compact() error {
 	if !p.compacting.CompareAndSwap(false, true) {
 		return ErrCompactionRunning
@@ -64,7 +56,7 @@ func (p *Partition) Compact() error {
 	}
 	if plan.planned >= plan.total {
 		p.mu.RUnlock()
-		return nil // nothing superseded
+		return nil
 	}
 	w, err := stageCompaction(filepath.Join(p.dir, compactTmpDir), p.maxSegmentBytes, p.indexInterval, segs, end, plan)
 	p.mu.RUnlock()
@@ -82,9 +74,6 @@ func (p *Partition) Compact() error {
 	return nil
 }
 
-// compactionSource returns the segments to read with the log end offset of the
-// snapshot. A tiered segment has no local log, so compaction skips the partition
-// rather than paying a restore per read.
 func (p *Partition) compactionSource() ([]*Segment, int64) {
 	segs := make([]*Segment, 0, len(p.closedSegments)+1)
 	segs = append(segs, p.closedSegments...)
@@ -163,8 +152,6 @@ func stageCompaction(tmpDir string, maxSegBytes, indexInterval int64, segs []*Se
 	return w, nil
 }
 
-// installCompaction runs under the write lock: it carries over what was appended
-// while the plan was built, publishes the manifest, then swaps the files.
 func (p *Partition) installCompaction(w *compactWriter, snapshotEnd int64) error {
 	if p.activeSegment == nil {
 		return errors.New("compaction: no active segment")
@@ -220,11 +207,6 @@ func (p *Partition) closeSegments() error {
 	return firstErr
 }
 
-// applyCompactionSwap drops the pre-compaction files and moves the staged set in.
-// It is idempotent, so recovery runs it again after a crash: a name shared by the
-// old and new sets is only removed while its staged replacement is still in the
-// staging directory, which is what keeps a partial swap from mixing two offset
-// spaces.
 func applyCompactionSwap(dir string) error {
 	tmp := filepath.Join(dir, compactTmpDir)
 	data, err := os.ReadFile(filepath.Join(tmp, compactManifest))
@@ -243,7 +225,7 @@ func applyCompactionSwap(dir string) error {
 	for _, name := range m.Old {
 		if replaced[name] {
 			if _, err := os.Stat(staged(name)); err != nil {
-				continue // already installed
+				continue
 			}
 		}
 		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
@@ -267,8 +249,6 @@ func applyCompactionSwap(dir string) error {
 	return syncDir(dir)
 }
 
-// stageSwapFiles renames the staged segment files aside so the swap can tell an
-// installed file from a not-yet-installed one with the same final name.
 func stageSwapFiles(tmp string, names []string) error {
 	for _, name := range names {
 		if err := os.Rename(filepath.Join(tmp, name), filepath.Join(tmp, name+compactStaged)); err != nil {
@@ -312,8 +292,6 @@ func syncDir(dir string) error {
 	return d.Sync()
 }
 
-// compactWriter writes retained records into fresh segments in a staging
-// directory, rolling at the configured segment size.
 type compactWriter struct {
 	dir          string
 	maxBytes     int64
@@ -343,9 +321,6 @@ func (w *compactWriter) roll() error {
 	return nil
 }
 
-// add buffers a record, flushing on whichever bound comes first: the record
-// count or the buffered bytes. Bounding by bytes is what keeps a topic of large
-// values from buffering hundreds of megabytes per batch.
 func (w *compactWriter) add(rec protocol.Record) error {
 	w.batch = append(w.batch, protocol.Record{
 		OffsetDelta: int32(len(w.batch)),
@@ -455,8 +430,6 @@ func forEachBatchRange(seg *Segment, from, to int64, fn func(*protocol.RecordBat
 	return nil
 }
 
-// StartCompaction launches a background goroutine that periodically compacts all
-// topics marked with cleanup.policy=compact. It returns a stop function.
 func (s *Store) StartCompaction(interval time.Duration) func() {
 	stop := make(chan struct{})
 	go func() {

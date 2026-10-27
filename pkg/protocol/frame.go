@@ -6,7 +6,6 @@ import (
 	"io"
 )
 
-// RequestHeader is the fixed portion of a Kafka request frame.
 type RequestHeader struct {
 	ApiKey        int16
 	ApiVersion    int16
@@ -14,8 +13,6 @@ type RequestHeader struct {
 	ClientID      string
 }
 
-// DecodeRequestHeader parses the header from a Reader positioned just after the
-// 4-byte frame length. It assumes a classic (non-flexible) request header.
 func DecodeRequestHeader(r *Reader) (*RequestHeader, error) {
 	apiKey, err := r.ReadInt16()
 	if err != nil {
@@ -41,9 +38,6 @@ func DecodeRequestHeader(r *Reader) (*RequestHeader, error) {
 	}, nil
 }
 
-// ReadRequestFrame reads a single length-prefixed request frame from conn. It
-// returns the parsed header and the raw request body bytes (everything after
-// the header). Requests larger than maxSize are rejected.
 func ReadRequestFrame(conn io.Reader, maxSize int64) (*RequestHeader, []byte, error) {
 	var lenBuf [4]byte
 	if _, err := io.ReadFull(conn, lenBuf[:]); err != nil {
@@ -69,8 +63,6 @@ func ReadRequestFrame(conn io.Reader, maxSize int64) (*RequestHeader, []byte, er
 	return hdr, body, nil
 }
 
-// WriteResponseFrame builds a complete length-prefixed response frame for a
-// non-flexible response. body must already contain the correlation ID.
 func WriteResponseFrame(corrID int32, body []byte) []byte {
 	out := make([]byte, 0, len(body)+8)
 	out = appendInt32(out, int32(len(body)+4))
@@ -85,12 +77,10 @@ func appendInt32(dst []byte, v int32) []byte {
 	return append(dst, b[:]...)
 }
 
-// ResponseHeader is the fixed portion of a Kafka response frame.
 type ResponseHeader struct {
 	CorrelationID int32
 }
 
-// EncodeResponseHeader appends a classic (non-flexible) response header.
 func EncodeResponseHeader(w *Writer, corrID int32) {
 	w.WriteInt32(corrID)
 }

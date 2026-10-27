@@ -1,18 +1,15 @@
 package protocol
 
-// ProduceRequestTopic is one topic in a produce request.
 type ProduceRequestTopic struct {
 	Topic      string
 	Partitions []ProduceRequestPartition
 }
 
-// ProduceRequestPartition is one partition's record batch.
 type ProduceRequestPartition struct {
 	Partition int32
-	Records   []byte // raw RecordBatch bytes
+	Records   []byte
 }
 
-// ProduceRequest (Key 0), decoded at v2.
 type ProduceRequest struct {
 	Version int16
 	Acks    int16
@@ -20,12 +17,11 @@ type ProduceRequest struct {
 	Topics  []ProduceRequestTopic
 }
 
-// DecodeProduceRequest parses the request body for versions up to 2.
 func DecodeProduceRequest(version int16, body []byte) (*ProduceRequest, error) {
 	r := NewReader(body)
 	req := &ProduceRequest{Version: version}
 	if version >= 3 {
-		if _, err := r.ReadNullableString(); err != nil { // transactional_id
+		if _, err := r.ReadNullableString(); err != nil {
 			return nil, err
 		}
 	}
@@ -66,7 +62,6 @@ func DecodeProduceRequest(version int16, body []byte) (*ProduceRequest, error) {
 	return req, nil
 }
 
-// ProduceResponsePartition is the response for one produced partition.
 type ProduceResponsePartition struct {
 	Partition     int32
 	ErrorCode     int16
@@ -74,20 +69,17 @@ type ProduceResponsePartition struct {
 	LogAppendTime int64
 }
 
-// ProduceResponseTopic groups partition responses by topic.
 type ProduceResponseTopic struct {
 	Topic      string
 	Partitions []ProduceResponsePartition
 }
 
-// ProduceResponse (Key 0), encoded at v2.
 type ProduceResponse struct {
 	Version        int16
 	Topics         []ProduceResponseTopic
 	ThrottleTimeMs int32
 }
 
-// EncodeProduceResponse serializes the response body.
 func EncodeProduceResponse(resp *ProduceResponse) ([]byte, error) {
 	w := NewWriter(128)
 	w.WriteArrayLen(len(resp.Topics))
@@ -102,7 +94,7 @@ func EncodeProduceResponse(resp *ProduceResponse) ([]byte, error) {
 				w.WriteInt64(p.LogAppendTime)
 			}
 			if resp.Version >= 5 {
-				w.WriteInt64(-1) // log_start_offset
+				w.WriteInt64(-1)
 			}
 		}
 	}

@@ -12,53 +12,36 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/atomicfile"
 )
 
-// Offset store backend names (kept in sync with config.BackendFile /
-// config.BackendInMemory; duplicated here so the coordinator package does not
-// depend on the config package).
 const (
 	BackendFile     = "file"
 	BackendInMemory = "inmemory"
 )
 
-// walCompactThreshold is the number of WAL records appended before the store
-// rewrites the snapshot and truncates the WAL. It bounds replay time on restart.
 const walCompactThreshold = 1024
 
-// CommittedOffset is the persisted position for one group/topic/partition.
 type CommittedOffset struct {
 	Offset      int64
 	Metadata    *string
 	LeaderEpoch int32
-	// UpdatedAt is the Unix-nano time of the last commit, used for offset
-	// retention. Zero means "unknown" (loaded from a legacy snapshot).
+
 	UpdatedAt int64
 }
 
-// OffsetStore persists committed consumer group offsets. It supports an
-// in-memory backend and a file-backed backend (a gob snapshot plus a
-// write-ahead log) so offsets survive broker restarts without rewriting the
-// whole snapshot on every commit.
 type OffsetStore struct {
 	mu      sync.RWMutex
 	backend string
-	path    string // snapshot path (empty for in-memory)
+	path    string
 	wal     *offsetWAL
 	walMu   sync.Mutex
 	walN    int
-	// compacting guards against overlapping background compactions; closed
-	// stops new ones from starting so Close can drain them.
+
 	compacting bool
 	closed     bool
 	compactWG  sync.WaitGroup
 
-	offsets map[string]map[string]map[int32]*CommittedOffset // group -> topic -> partition
+	offsets map[string]map[string]map[int32]*CommittedOffset
 }
 
-// NewOffsetStore creates an offset store. backend is "inmemory" for a pure
-// in-memory store or "file" for the snapshot+WAL store persisted under dir. Any
-// other value is rejected; in particular the legacy "pebble" spelling is
-// normalized to "file" by the config layer before it reaches here, because the
-// implementation has never used Pebble.
 func NewOffsetStore(backend, dir string) (*OffsetStore, error) {
 	s := &OffsetStore{
 		backend: backend,
@@ -66,7 +49,7 @@ func NewOffsetStore(backend, dir string) (*OffsetStore, error) {
 	}
 	switch backend {
 	case BackendInMemory:
-		// Nothing to load.
+
 	case BackendFile:
 		s.path = filepath.Join(dir, "offsets.gob")
 		if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -84,7 +67,7 @@ func NewOffsetStore(backend, dir string) (*OffsetStore, error) {
 			wal.close()
 			return nil, err
 		}
-		// Collapse a long WAL into a fresh snapshot on startup.
+
 		if s.walN >= walCompactThreshold {
 			if err := s.compact(); err != nil {
 				wal.close()
@@ -97,7 +80,6 @@ func NewOffsetStore(backend, dir string) (*OffsetStore, error) {
 	return s, nil
 }
 
-// OffsetCommitRecord is one offset to persist in a batched commit.
 type OffsetCommitRecord struct {
 	Group     string
 	Topic     string
@@ -105,14 +87,10 @@ type OffsetCommitRecord struct {
 	Offset    *CommittedOffset
 }
 
-// Commit stores an offset for a group/topic/partition and logs it to the WAL.
 func (s *OffsetStore) Commit(group, topic string, partition int32, off *CommittedOffset) error {
 	return s.CommitBatch([]OffsetCommitRecord{{Group: group, Topic: topic, Partition: partition, Offset: off}})
 }
 
-// CommitBatch applies several committed offsets to memory and appends them to
-// the WAL with a single fsync, so an OffsetCommit request touching N partitions
-// pays one fsync instead of N.
 func (s *OffsetStore) CommitBatch(records []OffsetCommitRecord) error {
 	if len(records) == 0 {
 		return nil
@@ -155,11 +133,6 @@ func (s *OffsetStore) CommitBatch(records []OffsetCommitRecord) error {
 	return s.appendAndMaybeCompact(recs)
 }
 
-// appendAndMaybeCompact appends the records and, when the WAL has grown past the
-// compaction threshold, starts a background compaction. Compaction holds walMu
-// across the snapshot encode and the WAL reset, which is what keeps an
-// acknowledged commit from being truncated away; running it in the background
-// means the caller's group lock is not held for the duration of the I/O.
 func (s *OffsetStore) appendAndMaybeCompact(recs []walRecord) error {
 	s.walMu.Lock()
 	if err := s.wal.appendBatch(recs); err != nil {
@@ -188,8 +161,6 @@ func (s *OffsetStore) compactAsync() {
 	s.walMu.Unlock()
 }
 
-// DeleteGroup removes every committed offset for a group and persists the
-// result, matching Kafka's DeleteGroups semantics.
 func (s *OffsetStore) DeleteGroup(group string) error {
 	s.mu.Lock()
 	_, ok := s.offsets[group]
@@ -201,7 +172,6 @@ func (s *OffsetStore) DeleteGroup(group string) error {
 	return s.compact()
 }
 
-// Fetch returns the committed offset for a group/topic/partition, or nil.
 func (s *OffsetStore) Fetch(group, topic string, partition int32) (*CommittedOffset, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -217,7 +187,6 @@ func (s *OffsetStore) Fetch(group, topic string, partition int32) (*CommittedOff
 	return off, ok
 }
 
-// GroupTopics returns the set of topic names with commits for a group.
 func (s *OffsetStore) GroupTopics(group string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -232,7 +201,6 @@ func (s *OffsetStore) GroupTopics(group string) []string {
 	return out
 }
 
-// Partitions returns committed partitions for a group/topic.
 func (s *OffsetStore) Partitions(group, topic string) []int32 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -251,8 +219,6 @@ func (s *OffsetStore) Partitions(group, topic string) []int32 {
 	return out
 }
 
-// GroupOffsets returns all committed offsets for a group as topic -> partition
-// -> offset.
 func (s *OffsetStore) GroupOffsets(group string) map[string]map[int32]int64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -271,7 +237,6 @@ func (s *OffsetStore) GroupOffsets(group string) map[string]map[int32]int64 {
 	return out
 }
 
-// Groups returns the names of all groups with committed offsets.
 func (s *OffsetStore) Groups() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -282,11 +247,6 @@ func (s *OffsetStore) Groups() []string {
 	return out
 }
 
-// PruneOlderThan removes committed offsets last updated before cutoff and
-// persists the result. It returns the number of offsets removed. An offset with
-// a zero UpdatedAt (unknown, e.g. migrated from a legacy snapshot) is treated as
-// expired only when cutoff is non-zero, matching the "retention applies from
-// now on" contract. The caller supplies now so tests can inject a clock.
 func (s *OffsetStore) PruneOlderThan(cutoff time.Time) int {
 	if cutoff.IsZero() {
 		return 0
@@ -319,13 +279,11 @@ func (s *OffsetStore) PruneOlderThan(cutoff time.Time) int {
 	return removed
 }
 
-// Close flushes a final snapshot and closes the WAL.
 func (s *OffsetStore) Close() error {
 	if s.wal == nil {
 		return nil
 	}
-	// Stop new background compactions and wait for any in-flight one before
-	// touching the WAL, so compact() and close() cannot race it.
+
 	s.walMu.Lock()
 	s.closed = true
 	s.walMu.Unlock()
@@ -388,18 +346,12 @@ func (s *OffsetStore) replayWAL() error {
 	return nil
 }
 
-// compact writes a fresh snapshot and truncates the WAL. Callers must not hold
-// s.mu or walMu.
 func (s *OffsetStore) compact() error {
 	s.walMu.Lock()
 	defer s.walMu.Unlock()
 	return s.compactLocked()
 }
 
-// compactLocked writes a fresh snapshot and truncates the WAL. The caller must
-// hold walMu, which keeps the snapshot encode and the reset atomic with respect
-// to concurrent commits. It takes s.mu.RLock to encode; commits are designed to
-// release s.mu before acquiring walMu, so the lock order is safe.
 func (s *OffsetStore) compactLocked() error {
 	if s.path == "" {
 		s.walN = 0

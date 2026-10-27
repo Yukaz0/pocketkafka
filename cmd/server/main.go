@@ -1,4 +1,3 @@
-// Command server runs the pocketkafka broker engine.
 package main
 
 import (
@@ -45,8 +44,7 @@ var version = "dev"
 var noticeText string
 
 func main() {
-	// Operational subcommands never load a config or open a listener, so they
-	// are dispatched before the flag set below.
+
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "healthcheck":
@@ -82,21 +80,17 @@ func main() {
 	logSecurityPosture(cfg)
 	startPprof()
 
-	// Storage engine.
 	store, err := storage.NewStore(cfg.Storage.DataDir, cfg.Storage.SegmentMaxBytes, cfg.Storage.IndexIntervalBytes)
 	if err != nil {
 		log.Fatalf("init storage: %v", err)
 	}
 	defer store.Close()
 
-	// Durability: the "interval" flush policy fsyncs all partitions
-	// periodically; "request" and acks=-1 sync per produce ack (see handler).
 	if cfg.Storage.FlushPolicy == config.FlushPolicyInterval {
 		stopFlush := store.StartFlush(time.Duration(cfg.Storage.FlushIntervalMs) * time.Millisecond)
 		defer stopFlush()
 	}
 
-	// Offsets + group coordinator.
 	offsetDir := cfg.Storage.DataDir + "/__coordinator"
 	offsetStore, err := coordinator.NewOffsetStore(cfg.Coordinator.StorageBackend, offsetDir)
 	if err != nil {
@@ -105,17 +99,11 @@ func main() {
 	advHost, advPort := advertised(cfg)
 	gm := coordinator.NewGroupManager(offsetStore, int32(cfg.Broker.ID), advHost, advPort, int32(cfg.Coordinator.SessionTimeoutMs)).
 		WithDefaultRebalanceTimeout(time.Duration(cfg.Coordinator.RebalanceTimeoutMs) * time.Millisecond)
-	// Flush the offset snapshot/WAL before the process exits, and drop idle
-	// commits per offsets_retention_minutes while it runs.
+
 	defer offsetStore.Close()
 	defer startOffsetRetention(gm, cfg.Coordinator.OffsetsRetentionMinutes)()
 	defer gm.StartSessionReaper(time.Second)()
 
-	// Shared ACL store. When security is disabled the broker keeps its
-	// historical allow-all behaviour (allow-all authorizer); when it is enabled
-	// every ingress uses this store with default-deny. security.super_users
-	// wraps it so an operator named there can administer a fresh install
-	// instead of hand-editing __acls.json.
 	aclStore, err := authz.NewStore(filepath.Join(cfg.Storage.DataDir, "__acls.json"))
 	if err != nil {
 		log.Fatalf("init ACL store: %v", err)
@@ -129,14 +117,11 @@ func main() {
 		log.Printf("pocketkafka super users (bypass every ACL): %s", strings.Join(cfg.Security.SuperUsers, ", "))
 	}
 
-	// One certificate serves every surface; the per-surface flags decide which
-	// ones speak TLS.
 	tlsConf, err := cfg.Security.TLS.ServerConfig()
 	if err != nil {
 		log.Fatalf("configure TLS: %v", err)
 	}
 
-	// Handlers + server.
 	h := handler.New(store, gm, &cfg, int32(cfg.Broker.ID), advHost, advPort)
 	if cfg.Security.Enabled {
 		h.WithAuthorizer(authorizer)
@@ -147,16 +132,11 @@ func main() {
 		log.Fatalf("start server: %v", err)
 	}
 
-	// Management surfaces require identity/authorization whenever security is
-	// enabled, so REST/Schema Registry cannot bypass the ACLs enforced on the
-	// Kafka protocol path.
 	httpPolicy := httpauth.Policy{
 		Public:     []string{"/healthz", "/livez"},
 		RequireTLS: cfg.Security.Enabled && cfg.Security.RequireTLSForPlain,
 	}
 
-	// Embedded Schema Registry (port 8081, Confluent-compatible). Schemas are
-	// persisted under the data dir so IDs/versions survive a restart.
 	sr, err := schemaregistry.Open(filepath.Join(cfg.Storage.DataDir, "__schemas.json"))
 	if err != nil {
 		log.Fatalf("init schema registry: %v", err)
@@ -171,9 +151,6 @@ func main() {
 		}
 	}()
 
-	// Embedded Web UI dashboard (port 8080), started only when web.enabled is
-	// true. The MQTT bridge handle is wired after this block, so the server
-	// exposes it through WithMQTT below.
 	ws, webSrv := buildWebServer(cfg, store, gm, sr, aclStore, authorizer, version)
 	if webSrv != nil {
 		go func() {
@@ -186,7 +163,6 @@ func main() {
 		log.Printf("pocketkafka web UI disabled (web.enabled=false)")
 	}
 
-	// HTTP REST Proxy gateway (port 8082).
 	restHandler := httpauth.New(cfg.Security.Enabled, cfg.Security.Users, authorizer, httpPolicy).
 		Wrap(limitBody(gateway.NewRESTProxy(store).Handler(), cfg.Network.MaxRequestSizeBytes))
 	gwSrv := newHTTPServer(cfg, cfg.Gateway.Listen, restHandler, false)
@@ -197,8 +173,6 @@ func main() {
 		}
 	}()
 
-	// Isolated Fleet server (port 18090 by default), started only when
-	// fleet.enabled is true. When disabled, the listener is not opened at all (FR-001).
 	var fleetSrv *http.Server
 	if cfg.Fleet.Enabled {
 		regPath := filepath.Join(cfg.Storage.DataDir, "__fleet_agents.json")
@@ -251,8 +225,7 @@ func main() {
 	} else {
 		log.Printf("pocketkafka fleet disabled (fleet.enabled=false)")
 	}
-	// the bridge authenticates CONNECT and authorizes publish/subscribe against
-	// the mapped Kafka topic so MQTT is not an authorization bypass.
+
 	mqttBridge := gateway.NewMQTTBridge(store).
 		WithSecurity(cfg.Security.Enabled, cfg.Security.Users, authorizer)
 	if cfg.Security.TLS.MQTT {
@@ -265,22 +238,16 @@ func main() {
 		log.Printf("mqtt bridge error: %v", mqttStartErr)
 	}
 	if ws != nil {
-		// The listener counts as running only when it bound: wiring the bridge
-		// unconditionally made the Integrations card report LISTENING while the
-		// port was in fact held by another process.
+
 		ws.WithMQTT(mqttBridge, cfg.MQTT.Listen, mqttStartErr == nil)
 	}
 
-	// Health sampler: keeps a rolling sample ring for /api/v1/health/overview,
-	// which the dashboard Health view renders, so history exists even before
-	// anyone opens the page.
 	if ws != nil {
 		samplerCtx, stopSampler := context.WithCancel(context.Background())
 		defer stopSampler()
 		ws.StartSampler(samplerCtx, store, gm, 5*time.Second)
 	}
 
-	// Background retention cleanup.
 	retention := storage.Retention{
 		CheckInterval:  time.Duration(cfg.Storage.Retention.CheckIntervalMs) * time.Millisecond,
 		RetentionTime:  time.Duration(cfg.Storage.Retention.RetentionHours) * time.Hour,
@@ -288,10 +255,8 @@ func main() {
 	}
 	stopRetention := store.StartRetention(retention)
 
-	// Background log compaction for cleanup.policy=compact topics.
 	stopCompaction := store.StartCompaction(60 * time.Second)
 
-	// S3/MinIO tiered (cold) storage.
 	if cfg.Storage.Tiered.Enabled {
 		client := tier.NewS3Client(
 			cfg.Storage.Tiered.Endpoint, cfg.Storage.Tiered.Bucket,
@@ -312,10 +277,7 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	log.Printf("shutting down")
-	// Close the MQTT bridge first and explicitly: it must finish before the
-	// deferred store.Close/offsetStore.Close run, otherwise a bridge that hangs
-	// on a live client would stall the final fsync/snapshot and the broker
-	// would not exit cleanly.
+
 	mqttBridge.Close()
 	stopRetention()
 	stopCompaction()
@@ -326,9 +288,6 @@ func main() {
 	srv.Close()
 }
 
-// startOffsetRetention drops committed offsets idle beyond retentionMinutes on
-// a background ticker. It returns a stop function; a non-positive retention
-// disables the loop (offset retention turned off).
 func startOffsetRetention(gm *coordinator.GroupManager, retentionMinutes int) func() {
 	if retentionMinutes <= 0 {
 		return func() {}
@@ -357,7 +316,6 @@ func startOffsetRetention(gm *coordinator.GroupManager, retentionMinutes int) fu
 	return func() { once.Do(func() { close(done) }) }
 }
 
-// startFleetRetention prunes terminal async jobs and audit logs exceeding retention limits.
 func startFleetRetention(jobs *fleet.Jobs, audit *fleet.Audit, interval time.Duration) func() {
 	if jobs == nil && audit == nil {
 		return func() {}
@@ -395,9 +353,6 @@ func startFleetRetention(jobs *fleet.Jobs, audit *fleet.Audit, interval time.Dur
 	return func() { once.Do(func() { close(done) }) }
 }
 
-// buildWebServer constructs the embedded dashboard server. It returns
-// (nil, nil) when the web UI is disabled, so callers must treat a nil server as
-// "not started" instead of unconditionally shutting it down.
 func buildWebServer(cfg config.Config, store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.Registry, aclStore *authz.Store, authorizer authz.Authorizer, version string) (*web.Server, *http.Server) {
 	if !cfg.Web.Enabled {
 		return nil, nil
@@ -416,8 +371,6 @@ func buildWebServer(cfg config.Config, store *storage.Store, gm *coordinator.Gro
 	return ws, srv
 }
 
-// serveHTTP starts a management server, over TLS when the surface is switched
-// to it. The certificate comes from the shared security.tls block.
 func serveHTTP(srv *http.Server, tlsConf *tls.Config, useTLS bool) error {
 	if !useTLS || tlsConf == nil {
 		return srv.ListenAndServe()
@@ -427,7 +380,6 @@ func serveHTTP(srv *http.Server, tlsConf *tls.Config, useTLS bool) error {
 	return srv.ListenAndServeTLS("", "")
 }
 
-// httpScheme labels a listen address in the startup log.
 func httpScheme(useTLS bool) string {
 	if useTLS {
 		return "https://"
@@ -435,10 +387,6 @@ func httpScheme(useTLS bool) string {
 	return "http://"
 }
 
-// logSecurityPosture states the exposure the broker is about to accept. A
-// security-disabled broker is only reachable from loopback now (config
-// validation refuses anything else unless the operator opted in), but the
-// operator should still see it in the log.
 func logSecurityPosture(cfg config.Config) {
 	switch {
 	case cfg.Security.Enabled && cfg.Security.TLS.Any():
@@ -453,7 +401,6 @@ func logSecurityPosture(cfg config.Config) {
 	}
 }
 
-// tlsSurfaces names the enabled TLS surfaces for the startup log.
 func tlsSurfaces(t config.TLS) string {
 	out := []string{}
 	if t.Enabled {
@@ -468,10 +415,6 @@ func tlsSurfaces(t config.TLS) string {
 	return strings.Join(out, ",")
 }
 
-// startPprof serves the Go profiler on a dedicated mux. It is opt-in through
-// KAFKA_PPROF_LISTEN and bound to loopback unless KAFKA_PPROF_ALLOW_PUBLIC is
-// set: /debug/pprof exposes the command line, the heap and every goroutine
-// stack, and the CPU profiler is itself a denial-of-service lever.
 func startPprof() {
 	listen := strings.TrimSpace(os.Getenv("KAFKA_PPROF_LISTEN"))
 	if listen == "" {
@@ -492,9 +435,7 @@ func startPprof() {
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	// A bare http.ListenAndServe has no timeouts at all: a slow client could
-	// hold a connection open indefinitely. The write timeout is generous because
-	// /debug/pprof/profile streams for as long as the requested profile run.
+
 	srv := &http.Server{
 		Addr:              listen,
 		Handler:           mux,
@@ -517,9 +458,6 @@ func envTrue(name string) bool {
 	return err == nil && b
 }
 
-// runHealthcheck dials a listener and exits 0 when it accepts a connection.
-// The container HEALTHCHECK uses it, so the runtime image needs no netcat or
-// wget.
 func runHealthcheck(args []string) int {
 	fs := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:9092", "host:port of the Kafka listener")
@@ -536,9 +474,6 @@ func runHealthcheck(args []string) int {
 	return 0
 }
 
-// runHashPassword prints a PBKDF2 verifier for security.users[].password_hash.
-// The password is read from the flag or, preferably, from stdin so it stays out
-// of the shell history.
 func runHashPassword(args []string) int {
 	fs := flag.NewFlagSet("hash-password", flag.ContinueOnError)
 	password := fs.String("password", "", "password to hash (read from stdin when empty)")
@@ -559,9 +494,6 @@ func runHashPassword(args []string) int {
 	return 0
 }
 
-// runScramVerifier prints a SCRAM verifier for security.users[].scram_verifier:
-// the form that lets the broker authenticate a SCRAM client without ever
-// holding the password.
 func runScramVerifier(args []string) int {
 	fs := flag.NewFlagSet("scram-verifier", flag.ContinueOnError)
 	password := fs.String("password", "", "password to derive the verifier from (read from stdin when empty)")
@@ -594,8 +526,6 @@ func runScramVerifier(args []string) int {
 	return 0
 }
 
-// resolveSecret returns the flag value, or reads one line from stdin when the
-// flag is empty.
 func resolveSecret(flagValue string) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
@@ -612,10 +542,6 @@ func resolveSecret(flagValue string) (string, error) {
 	return line, nil
 }
 
-// newHTTPServer builds an http.Server with the network timeouts from config.
-// allowWebSocket must be true for servers that hijack connections for
-// WebSockets: a WriteTimeout deadline would survive the hijack and break the
-// long-lived tail stream, so it is left unset for those.
 func newHTTPServer(cfg config.Config, addr string, h http.Handler, allowWebSocket bool) *http.Server {
 	srv := &http.Server{Addr: addr, Handler: h}
 	if ms := cfg.Network.ReadTimeoutMs; ms > 0 {
@@ -634,8 +560,6 @@ func newHTTPServer(cfg config.Config, addr string, h http.Handler, allowWebSocke
 	return srv
 }
 
-// limitBody bounds the size of any request body a handler will read, so a
-// client cannot exhaust memory with an oversized payload.
 func limitBody(next http.Handler, max int64) http.Handler {
 	if max <= 0 {
 		return next
@@ -648,8 +572,6 @@ func limitBody(next http.Handler, max int64) http.Handler {
 	})
 }
 
-// shutdownHTTP gracefully stops an HTTP server. It is nil-safe so callers do not
-// need to special-case servers that were never started (e.g. a disabled web UI).
 func shutdownHTTP(srv *http.Server) {
 	if srv == nil {
 		return
@@ -659,7 +581,6 @@ func shutdownHTTP(srv *http.Server) {
 	_ = srv.Shutdown(ctx)
 }
 
-// listenerAddrs returns the sorted listener addresses from config.
 func listenerAddrs(cfg config.Config) []string {
 	out := make([]string, 0, len(cfg.Listeners))
 	for _, v := range cfg.Listeners {
@@ -669,15 +590,10 @@ func listenerAddrs(cfg config.Config) []string {
 	return out
 }
 
-// advertisedString returns the primary advertised address (host:port).
 func advertisedString(cfg config.Config) string {
 	return primaryAdvertised(cfg)
 }
 
-// primaryAdvertised picks the advertised address used when a connection does
-// not arrive through a listener with an entry of its own: the "plain" listener
-// when there is one, otherwise the first name in sorted order. Iterating the map
-// directly would pick a different address on every start.
 func primaryAdvertised(cfg config.Config) string {
 	if addr := cfg.AdvertisedListeners["plain"]; addr != "" {
 		return addr
@@ -695,7 +611,6 @@ func primaryAdvertised(cfg config.Config) string {
 	return ""
 }
 
-// securityModeOf reports the auth mode: SASL/PLAIN, SASL/SCRAM, or PLAINTEXT.
 func securityModeOf(cfg config.Config) string {
 	if !cfg.Security.Enabled {
 		return "PLAINTEXT"
@@ -703,7 +618,6 @@ func securityModeOf(cfg config.Config) string {
 	return "SASL"
 }
 
-// advertised extracts the host and port of the primary advertised listener.
 func advertised(cfg config.Config) (string, int32) {
 	addr := primaryAdvertised(cfg)
 	host, portStr, err := net.SplitHostPort(addr)

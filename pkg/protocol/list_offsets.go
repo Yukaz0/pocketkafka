@@ -1,6 +1,5 @@
 package protocol
 
-// ListOffsetsRequestPartition is one partition offset lookup.
 type ListOffsetsRequestPartition struct {
 	Partition          int32
 	CurrentLeaderEpoch int32
@@ -8,13 +7,11 @@ type ListOffsetsRequestPartition struct {
 	MaxNumOffsets      int32
 }
 
-// ListOffsetsRequestTopic groups offset lookups by topic.
 type ListOffsetsRequestTopic struct {
 	Topic      string
 	Partitions []ListOffsetsRequestPartition
 }
 
-// ListOffsetsRequest (Key 2), decoded at v5.
 type ListOffsetsRequest struct {
 	Version        int16
 	ReplicaID      int32
@@ -22,7 +19,6 @@ type ListOffsetsRequest struct {
 	Topics         []ListOffsetsRequestTopic
 }
 
-// DecodeListOffsetsRequest parses the request body for versions up to 5.
 func DecodeListOffsetsRequest(version int16, body []byte) (*ListOffsetsRequest, error) {
 	r := NewReader(body)
 	req := &ListOffsetsRequest{Version: version}
@@ -75,7 +71,6 @@ func DecodeListOffsetsRequest(version int16, body []byte) (*ListOffsetsRequest, 
 	return req, nil
 }
 
-// ListOffsetsResponsePartition is the offset result for one partition.
 type ListOffsetsResponsePartition struct {
 	Partition       int32
 	ErrorCode       int16
@@ -85,20 +80,17 @@ type ListOffsetsResponsePartition struct {
 	LeaderEpoch     int32
 }
 
-// ListOffsetsResponseTopic groups offset results by topic.
 type ListOffsetsResponseTopic struct {
 	Topic      string
 	Partitions []ListOffsetsResponsePartition
 }
 
-// ListOffsetsResponse (Key 2), encoded at v5.
 type ListOffsetsResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
 	Topics         []ListOffsetsResponseTopic
 }
 
-// EncodeListOffsetsResponse serializes the response body.
 func EncodeListOffsetsResponse(resp *ListOffsetsResponse) ([]byte, error) {
 	w := NewWriter(128)
 	if resp.Version >= 2 {

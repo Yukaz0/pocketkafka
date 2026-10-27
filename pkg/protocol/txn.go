@@ -1,14 +1,10 @@
 package protocol
 
-// AddPartitionsToTxn (Key 24), v0-v1
-
-// AddPartitionsToTxnRequestTopic groups partitions to add to a transaction.
 type AddPartitionsToTxnRequestTopic struct {
 	Topic      string
 	Partitions []int32
 }
 
-// AddPartitionsToTxnRequest registers partitions with the transaction coordinator.
 type AddPartitionsToTxnRequest struct {
 	Version         int16
 	TransactionalID string
@@ -17,7 +13,6 @@ type AddPartitionsToTxnRequest struct {
 	Topics          []AddPartitionsToTxnRequestTopic
 }
 
-// DecodeAddPartitionsToTxnRequest parses the request body for versions up to 1.
 func DecodeAddPartitionsToTxnRequest(version int16, body []byte) (*AddPartitionsToTxnRequest, error) {
 	r := NewReader(body)
 	req := &AddPartitionsToTxnRequest{Version: version}
@@ -49,19 +44,16 @@ func DecodeAddPartitionsToTxnRequest(version int16, body []byte) (*AddPartitions
 	return req, nil
 }
 
-// AddPartitionsToTxnResponsePartition is the result for one partition.
 type AddPartitionsToTxnResponsePartition struct {
 	Partition int32
 	ErrorCode int16
 }
 
-// AddPartitionsToTxnResponseTopic groups partition results by topic.
 type AddPartitionsToTxnResponseTopic struct {
 	Topic      string
 	Partitions []AddPartitionsToTxnResponsePartition
 }
 
-// AddPartitionsToTxnResponse reports the registration results.
 type AddPartitionsToTxnResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
@@ -69,7 +61,6 @@ type AddPartitionsToTxnResponse struct {
 	Topics         []AddPartitionsToTxnResponseTopic
 }
 
-// EncodeAddPartitionsToTxnResponse serializes the response body.
 func EncodeAddPartitionsToTxnResponse(resp *AddPartitionsToTxnResponse) ([]byte, error) {
 	w := NewWriter(64)
 	if resp.Version >= 1 {
@@ -88,7 +79,6 @@ func EncodeAddPartitionsToTxnResponse(resp *AddPartitionsToTxnResponse) ([]byte,
 	return w.Bytes(), nil
 }
 
-// EncodeAddPartitionsToTxnRequest serializes the request body (client side).
 func EncodeAddPartitionsToTxnRequest(req *AddPartitionsToTxnRequest) ([]byte, error) {
 	w := NewWriter(64)
 	w.WriteString(req.TransactionalID)
@@ -105,7 +95,6 @@ func EncodeAddPartitionsToTxnRequest(req *AddPartitionsToTxnRequest) ([]byte, er
 	return w.Bytes(), nil
 }
 
-// DecodeAddPartitionsToTxnResponse parses the response body (client side).
 func DecodeAddPartitionsToTxnResponse(version int16, body []byte) (*AddPartitionsToTxnResponse, error) {
 	r := NewReader(body)
 	resp := &AddPartitionsToTxnResponse{Version: version}
@@ -148,9 +137,6 @@ func DecodeAddPartitionsToTxnResponse(version int16, body []byte) (*AddPartition
 	return resp, nil
 }
 
-// AddOffsetsToTxn (Key 25), v0-v1
-
-// AddOffsetsToTxnRequest registers a consumer group's offsets with a transaction.
 type AddOffsetsToTxnRequest struct {
 	Version         int16
 	TransactionalID string
@@ -159,7 +145,6 @@ type AddOffsetsToTxnRequest struct {
 	GroupID         string
 }
 
-// DecodeAddOffsetsToTxnRequest parses the request body for versions up to 1.
 func DecodeAddOffsetsToTxnRequest(version int16, body []byte) (*AddOffsetsToTxnRequest, error) {
 	r := NewReader(body)
 	req := &AddOffsetsToTxnRequest{Version: version}
@@ -179,14 +164,12 @@ func DecodeAddOffsetsToTxnRequest(version int16, body []byte) (*AddOffsetsToTxnR
 	return req, nil
 }
 
-// AddOffsetsToTxnResponse reports the registration result.
 type AddOffsetsToTxnResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
 	ErrorCode      int16
 }
 
-// EncodeAddOffsetsToTxnResponse serializes the response body.
 func EncodeAddOffsetsToTxnResponse(resp *AddOffsetsToTxnResponse) ([]byte, error) {
 	w := NewWriter(16)
 	if resp.Version >= 1 {
@@ -196,7 +179,6 @@ func EncodeAddOffsetsToTxnResponse(resp *AddOffsetsToTxnResponse) ([]byte, error
 	return w.Bytes(), nil
 }
 
-// EncodeAddOffsetsToTxnRequest serializes the request body (client side).
 func EncodeAddOffsetsToTxnRequest(req *AddOffsetsToTxnRequest) ([]byte, error) {
 	w := NewWriter(32)
 	w.WriteString(req.TransactionalID)
@@ -206,7 +188,6 @@ func EncodeAddOffsetsToTxnRequest(req *AddOffsetsToTxnRequest) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// DecodeAddOffsetsToTxnResponse parses the response body (client side).
 func DecodeAddOffsetsToTxnResponse(version int16, body []byte) (*AddOffsetsToTxnResponse, error) {
 	r := NewReader(body)
 	resp := &AddOffsetsToTxnResponse{Version: version}
@@ -222,9 +203,6 @@ func DecodeAddOffsetsToTxnResponse(version int16, body []byte) (*AddOffsetsToTxn
 	return resp, nil
 }
 
-// EndTxn (Key 26), v0-v2
-
-// EndTxnRequest commits or aborts a transaction.
 type EndTxnRequest struct {
 	Version         int16
 	TransactionalID string
@@ -233,7 +211,6 @@ type EndTxnRequest struct {
 	Committed       bool
 }
 
-// DecodeEndTxnRequest parses the request body for versions up to 2.
 func DecodeEndTxnRequest(version int16, body []byte) (*EndTxnRequest, error) {
 	r := NewReader(body)
 	req := &EndTxnRequest{Version: version}
@@ -253,14 +230,12 @@ func DecodeEndTxnRequest(version int16, body []byte) (*EndTxnRequest, error) {
 	return req, nil
 }
 
-// EndTxnResponse reports the transaction result.
 type EndTxnResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
 	ErrorCode      int16
 }
 
-// EncodeEndTxnResponse serializes the response body.
 func EncodeEndTxnResponse(resp *EndTxnResponse) ([]byte, error) {
 	w := NewWriter(16)
 	if resp.Version >= 1 {
@@ -270,7 +245,6 @@ func EncodeEndTxnResponse(resp *EndTxnResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// EncodeEndTxnRequest serializes the request body (client side).
 func EncodeEndTxnRequest(req *EndTxnRequest) ([]byte, error) {
 	w := NewWriter(32)
 	w.WriteString(req.TransactionalID)
@@ -280,7 +254,6 @@ func EncodeEndTxnRequest(req *EndTxnRequest) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// DecodeEndTxnResponse parses the response body (client side).
 func DecodeEndTxnResponse(version int16, body []byte) (*EndTxnResponse, error) {
 	r := NewReader(body)
 	resp := &EndTxnResponse{Version: version}

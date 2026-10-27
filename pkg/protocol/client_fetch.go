@@ -73,12 +73,12 @@ func DecodeFetchResponse(version int16, body []byte) (*FetchResponse, error) {
 				}
 			}
 			if version >= 4 {
-				if _, err = r.ReadArrayLen(); err != nil { // aborted_transactions
+				if _, err = r.ReadArrayLen(); err != nil {
 					return nil, err
 				}
 			}
 			if version >= 11 {
-				if _, err = r.ReadInt32(); err != nil { // preferred_read_replica
+				if _, err = r.ReadInt32(); err != nil {
 					return nil, err
 				}
 			}

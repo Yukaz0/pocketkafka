@@ -9,37 +9,16 @@ import (
 	"os"
 )
 
-// Offset commit write-ahead log.
-//
-// A commit appends one length-prefixed record instead of rewriting the whole
-// offsets.gob snapshot, which is O(1) per commit instead of O(groups). The
-// snapshot (offsets.gob) is rewritten periodically and the WAL truncated, so
-// replay stays bounded.
-//
-// Record framing:
-//   [uint32 payloadLen][payload][uint32 crc32c(payload)]
-// Payload:
-//   [uint8 version][uint8 type][string group][string topic][int32 partition]
-//   [int64 offset][int32 leaderEpoch][nullable string metadata][int64 timestamp]
-//
-// A truncated trailing record (partial frame at EOF) is ignored on replay: it is
-// the expected result of a crash mid-append and must not invalidate earlier
-// records. A record whose checksum does not match is a hard error, because it
-// means the file was corrupted rather than merely cut short.
-
 const (
 	offsetWALVersion = 1
 
 	walRecordCommit byte = 1
 
-	// maxWALRecordSize bounds a single record so a corrupt length prefix cannot
-	// cause an unbounded allocation.
 	maxWALRecordSize = 1 << 20
 )
 
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
 
-// walRecord is one logged offset commit.
 type walRecord struct {
 	Type        byte
 	Group       string
@@ -51,13 +30,11 @@ type walRecord struct {
 	Timestamp   int64
 }
 
-// offsetWAL is an append-only log file.
 type offsetWAL struct {
 	path string
 	f    *os.File
 }
 
-// openWAL opens (or creates) the WAL for append.
 func openWAL(path string) (*offsetWAL, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
@@ -66,8 +43,6 @@ func openWAL(path string) (*offsetWAL, error) {
 	return &offsetWAL{path: path, f: f}, nil
 }
 
-// appendBatch writes every record and fsyncs once so a batch of acknowledged
-// commits survives a crash without paying one fsync per record.
 func (w *offsetWAL) appendBatch(recs []walRecord) error {
 	if len(recs) == 0 {
 		return nil
@@ -85,8 +60,6 @@ func (w *offsetWAL) appendBatch(recs []walRecord) error {
 	return nil
 }
 
-// replay reads every intact record, invoking fn in order. A truncated trailing
-// record stops replay without error; a corrupt record returns an error.
 func (w *offsetWAL) replay(fn func(walRecord)) error {
 	if _, err := w.f.Seek(0, io.SeekStart); err != nil {
 		return err
@@ -96,7 +69,7 @@ func (w *offsetWAL) replay(fn func(walRecord)) error {
 	for {
 		if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				return nil // truncated tail (or clean end)
+				return nil
 			}
 			return err
 		}
@@ -107,14 +80,14 @@ func (w *offsetWAL) replay(fn func(walRecord)) error {
 		payload := make([]byte, n)
 		if _, err := io.ReadFull(r, payload); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				return nil // partial payload: truncated tail
+				return nil
 			}
 			return err
 		}
 		var crcBuf [4]byte
 		if _, err := io.ReadFull(r, crcBuf[:]); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				return nil // missing checksum: truncated tail
+				return nil
 			}
 			return err
 		}
@@ -130,7 +103,6 @@ func (w *offsetWAL) replay(fn func(walRecord)) error {
 	}
 }
 
-// reset truncates the WAL to empty after a snapshot has been written.
 func (w *offsetWAL) reset() error {
 	if err := w.f.Truncate(0); err != nil {
 		return fmt.Errorf("offset WAL truncate: %w", err)
@@ -148,7 +120,6 @@ func (w *offsetWAL) close() error {
 	return w.f.Close()
 }
 
-// encodeWALRecord serializes one record with its framing.
 func encodeWALRecord(rec walRecord) []byte {
 	var p []byte
 	p = append(p, offsetWALVersion, rec.Type)

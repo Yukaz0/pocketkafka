@@ -10,7 +10,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/pkg/protocol"
 )
 
-// GroupState models the consumer group rebalance state machine.
 type GroupState int
 
 const (
@@ -34,20 +33,17 @@ func (s GroupState) String() string {
 	return "Unknown"
 }
 
-// Member is one consumer in a group.
 type Member struct {
 	ID             string
 	InstanceID     *string
 	SessionTimeout int32
-	// RebalanceTimeout bounds how long this member may take to rejoin during a
-	// rebalance; it is the per-member deadline the join barrier uses.
+
 	RebalanceTimeout time.Duration
 	ProtocolType     string
 	Protocols        []protocol.JoinGroupRequestProtocol
 	LastHeartbeat    time.Time
 }
 
-// Group is the coordinator state for a single consumer group.
 type Group struct {
 	mu           sync.Mutex
 	Name         string
@@ -58,26 +54,18 @@ type Group struct {
 	LeaderID     string
 	Members      map[string]*Member
 	JoinOrder    []string
-	assignments  map[string][]byte // memberID -> assignment bytes (from SyncGroup)
-	// assignmentsChanged is closed (and replaced) whenever assignments are
-	// written, so SyncGroup followers can wait event-driven instead of
-	// sleep-polling every 20ms.
+	assignments  map[string][]byte
+
 	assignmentsChanged chan struct{}
 	offsets            *OffsetStore
 
-	// Join barrier: a rebalance completes only once every known member has
-	// rejoined (or its rebalance timeout elapsed), so the generation is bumped
-	// once per round instead of once per join.
-	joined            map[string]bool // members that rejoined in the current round
+	joined            map[string]bool
 	rebalanceDeadline time.Time
-	joinNotify        chan struct{} // closed+replaced when a join round completes
+	joinNotify        chan struct{}
 
-	// deleted is set by DeleteGroup so a concurrent caller holding this pointer
-	// can detect that the group was removed and stop mutating a detached group.
 	deleted atomic.Bool
 }
 
-// minDuration returns the smaller of two durations.
 func minDuration(a, b time.Duration) time.Duration {
 	if a < b {
 		return a
@@ -85,11 +73,8 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-// syncWaitTimeout bounds how long a follower's SyncGroup blocks waiting for
-// the leader to upload assignments (Kafka uses the rebalance sync timeout).
 const syncWaitTimeout = 10 * time.Second
 
-// GroupManager coordinates all consumer groups.
 type GroupManager struct {
 	mu             sync.RWMutex
 	groups         map[string]*Group
@@ -98,15 +83,12 @@ type GroupManager struct {
 	brokerHost     string
 	brokerPort     int32
 	defaultSession int32
-	// defaultRebalance is used only when a JoinGroup request carries neither a
-	// rebalance nor a session timeout, so coordinator.rebalance_timeout_ms is
-	// not dead config.
+
 	defaultRebalance time.Duration
 	nextMemberSeq    int64
 	producers        *ProducerIDManager
 }
 
-// NewGroupManager builds a coordinator for the given broker identity.
 func NewGroupManager(offsets *OffsetStore, nodeID int32, host string, port int32, defaultSession int32) *GroupManager {
 	return &GroupManager{
 		groups:         make(map[string]*Group),
@@ -119,20 +101,14 @@ func NewGroupManager(offsets *OffsetStore, nodeID int32, host string, port int32
 	}
 }
 
-// NextProducerID allocates a producer ID/epoch for idempotent or transactional
-// producers (InitProducerId, Key 22).
 func (gm *GroupManager) NextProducerID(transactionalID *string) (int64, int16) {
 	return gm.producers.Next(transactionalID)
 }
 
-// ValidateProducer checks a producer's (transactional ID, PID, epoch) triple.
 func (gm *GroupManager) ValidateProducer(transactionalID string, pid int64, epoch int16) bool {
 	return gm.producers.Validate(transactionalID, pid, epoch)
 }
 
-// PruneOffsets drops committed offsets that have not been updated within
-// retention relative to now, implementing offsets_retention_minutes. It returns
-// the number of offsets removed. A non-positive retention disables pruning.
 func (gm *GroupManager) PruneOffsets(now time.Time, retention time.Duration) int {
 	if retention <= 0 {
 		return 0
@@ -140,8 +116,6 @@ func (gm *GroupManager) PruneOffsets(now time.Time, retention time.Duration) int
 	return gm.offsets.PruneOlderThan(now.Add(-retention))
 }
 
-// get returns an existing group without creating one. Read paths use it so a
-// mistyped group name cannot grow the map forever.
 func (gm *GroupManager) get(name string) *Group {
 	gm.mu.RLock()
 	defer gm.mu.RUnlock()
@@ -188,18 +162,15 @@ func (gm *GroupManager) nextMemberID() string {
 	return fmt.Sprintf("pocketkafka-%d", seq)
 }
 
-// GroupInfo is a read-only snapshot of a consumer group for the web UI.
 type GroupInfo struct {
 	Name       string
 	State      string
 	Generation int32
 	LeaderID   string
 	Members    []string
-	Offsets    map[string]map[int32]int64 // topic -> partition -> committed offset
+	Offsets    map[string]map[int32]int64
 }
 
-// MemberInfo is a read-only member snapshot used by DescribeGroups and the web
-// UI group detail page.
 type MemberInfo struct {
 	MemberID     string
 	ClientID     string
@@ -207,10 +178,9 @@ type MemberInfo struct {
 	ProtocolType string
 	Metadata     []byte
 	Assignment   []byte
-	Assigned     map[string][]int32 // topic -> partitions (decoded from assignment)
+	Assigned     map[string][]int32
 }
 
-// ListGroups returns a snapshot of all consumer groups.
 func (gm *GroupManager) ListGroups() []GroupInfo {
 	gm.mu.RLock()
 	names := make([]string, 0, len(gm.groups))
@@ -242,7 +212,6 @@ func (gm *GroupManager) ListGroups() []GroupInfo {
 	return out
 }
 
-// FindCoordinator returns this broker's identity as the coordinator.
 func (gm *GroupManager) FindCoordinator(req *protocol.FindCoordinatorRequest) *protocol.FindCoordinatorResponse {
 	return &protocol.FindCoordinatorResponse{
 		Version:   req.Version,
@@ -253,12 +222,6 @@ func (gm *GroupManager) FindCoordinator(req *protocol.FindCoordinatorRequest) *p
 	}
 }
 
-// JoinGroup processes a member join request. It implements Kafka's join barrier:
-// a rebalance starts when a member joins a Stable/Empty group, and it completes
-// only once every known member has rejoined or its rebalance timeout has
-// elapsed. The generation is bumped once per completed round, so members that
-// rejoin in the same round agree on it and the group settles instead of
-// endlessly invalidating itself.
 func (gm *GroupManager) JoinGroup(req *protocol.JoinGroupRequest) *protocol.JoinGroupResponse {
 	g := gm.getOrCreate(req.Group)
 	g.mu.Lock()
@@ -279,12 +242,10 @@ func (gm *GroupManager) JoinGroup(req *protocol.JoinGroupRequest) *protocol.Join
 	memberID := req.MemberID
 	member, existing := g.Members[memberID]
 	if req.MemberID != "" && !existing {
-		// Unknown member ID; assign a fresh one on the re-join.
+
 		memberID = ""
 	}
 
-	// Rejoining a stable group with unchanged metadata must not start a
-	// rebalance, otherwise a reconnecting client churns the generation.
 	if existing && g.State == StateStable && sameMemberMetadata(member, req) {
 		member.LastHeartbeat = time.Now()
 		g.fillJoinResponseLocked(resp, memberID)
@@ -321,7 +282,7 @@ func (gm *GroupManager) JoinGroup(req *protocol.JoinGroupRequest) *protocol.Join
 				g.expireRebalanceLocked()
 				break
 			}
-			// Wait for the round to complete without holding g.mu.
+
 			ch := g.joinNotify
 			g.mu.Unlock()
 			timer := time.NewTimer(remaining)
@@ -332,7 +293,7 @@ func (gm *GroupManager) JoinGroup(req *protocol.JoinGroupRequest) *protocol.Join
 			timer.Stop()
 			g.mu.Lock()
 			if _, ok := g.Members[memberID]; !ok {
-				// Dropped as a non-responder while waiting.
+
 				resp.ErrorCode = protocol.ErrUnknownMemberID
 				g.mu.Unlock()
 				return resp
@@ -349,8 +310,6 @@ func (gm *GroupManager) JoinGroup(req *protocol.JoinGroupRequest) *protocol.Join
 	return resp
 }
 
-// sameMemberMetadata reports whether a rejoining member's subscription metadata
-// is unchanged, so the rejoin cannot require a new assignment.
 func sameMemberMetadata(m *Member, req *protocol.JoinGroupRequest) bool {
 	if m.ProtocolType != req.ProtocolType {
 		return false
@@ -379,16 +338,11 @@ func sameStringPtr(a, b *string) bool {
 	return *a == *b
 }
 
-// WithDefaultRebalanceTimeout sets the rebalance timeout used when a JoinGroup
-// request supplies neither a rebalance nor a session timeout.
 func (gm *GroupManager) WithDefaultRebalanceTimeout(d time.Duration) *GroupManager {
 	gm.defaultRebalance = d
 	return gm
 }
 
-// rebalanceTimeout resolves the join barrier deadline for one request: the
-// request's rebalance timeout, else its session timeout, else the configured
-// default, else 10s.
 func (gm *GroupManager) rebalanceTimeout(req *protocol.JoinGroupRequest) time.Duration {
 	ms := req.RebalanceTimeoutMs
 	if ms <= 0 {
@@ -403,7 +357,6 @@ func (gm *GroupManager) rebalanceTimeout(req *protocol.JoinGroupRequest) time.Du
 	return time.Duration(ms) * time.Millisecond
 }
 
-// beginRebalanceLocked opens a new join round and arms the rebalance deadline.
 func (g *Group) beginRebalanceLocked() {
 	g.State = StatePreparingRebalance
 	g.joined = make(map[string]bool, len(g.Members))
@@ -425,8 +378,6 @@ func (g *Group) beginRebalanceLocked() {
 	g.rebalanceDeadline = deadline
 }
 
-// completeJoinLocked finishes the current round: it bumps the generation once,
-// selects the protocol and leader, and releases every waiting JoinGroup call.
 func (g *Group) completeJoinLocked() {
 	if len(g.Members) == 0 {
 		g.State = StateEmpty
@@ -448,8 +399,6 @@ func (g *Group) completeJoinLocked() {
 	g.closeJoinWaitersLocked()
 }
 
-// expireRebalanceLocked drops members that did not rejoin this round and
-// completes the round with the survivors.
 func (g *Group) expireRebalanceLocked() {
 	var dead []string
 	for id := range g.Members {
@@ -469,8 +418,6 @@ func (g *Group) closeJoinWaitersLocked() {
 	g.joinNotify = make(chan struct{})
 }
 
-// chooseProtocol picks the first protocol supported by every member, falling
-// back to the leader's first choice when there is no common protocol.
 func chooseProtocol(members map[string]*Member, order []string, leader *Member) string {
 	if leader == nil || len(leader.Protocols) == 0 {
 		return ""
@@ -501,8 +448,6 @@ func chooseProtocol(members map[string]*Member, order []string, leader *Member) 
 	return leader.Protocols[0].Name
 }
 
-// fillJoinResponseLocked sets the fields every JoinGroup reply carries. Only the
-// leader receives the full member list.
 func (g *Group) fillJoinResponseLocked(resp *protocol.JoinGroupResponse, memberID string) {
 	resp.GenerationID = g.Generation
 	resp.ProtocolName = g.Protocol
@@ -534,7 +479,6 @@ func (g *Group) fillJoinResponseLocked(resp *protocol.JoinGroupResponse, memberI
 	resp.Members = members
 }
 
-// SyncGroup processes assignment synchronization.
 func (gm *GroupManager) SyncGroup(req *protocol.SyncGroupRequest) *protocol.SyncGroupResponse {
 	g := gm.getOrCreate(req.Group)
 	g.mu.Lock()
@@ -549,35 +493,27 @@ func (gm *GroupManager) SyncGroup(req *protocol.SyncGroupRequest) *protocol.Sync
 		resp.ErrorCode = protocol.ErrUnknownMemberID
 		return resp
 	}
-	// A member from an older round must not upload assignments into the current
-	// generation.
+
 	if req.GenerationID != g.Generation {
 		resp.ErrorCode = protocol.ErrIllegalGeneration
 		return resp
 	}
 
-	// The leader uploads the assignments; store them for all members.
 	for _, a := range req.Assignments {
 		g.assignments[a.MemberID] = a.Assignment
 	}
-	// Bangunkan follower yang sedang menunggu assignment.
+
 	close(g.assignmentsChanged)
 	g.assignmentsChanged = make(chan struct{})
 
-	// Followers may reach SyncGroup before the leader uploads assignments.
-	// Blocking here (like Kafka does until the sync timeout) prevents them
-	// from receiving a null assignment, which clients such as sarama reject
-	// with "invalid byteslice length" while decoding the response.
 	if _, ok := g.assignments[req.MemberID]; !ok && req.MemberID != g.LeaderID {
-		// Event-driven: tunggu sinyal assignmentsChanged, bukan
-		// sleep-poll 20ms berkala.
+
 		deadline := time.Now().Add(syncWaitTimeout)
 		for {
 			if _, ok := g.assignments[req.MemberID]; ok {
 				break
 			}
-			// A new rebalance invalidated this round; stop waiting and let the
-			// client rejoin instead of applying a stale assignment.
+
 			if g.State != StateCompletingRebalance || g.Generation != req.GenerationID {
 				break
 			}
@@ -599,18 +535,13 @@ func (gm *GroupManager) SyncGroup(req *protocol.SyncGroupRequest) *protocol.Sync
 	if a, ok := g.assignments[req.MemberID]; ok {
 		resp.Assignment = a
 	}
-	// Only the round that produced these assignments may settle the group; a
-	// rebalance that started while this follower waited must not be marked
-	// Stable.
+
 	if g.State == StateCompletingRebalance && req.GenerationID == g.Generation {
 		g.State = StateStable
 	}
 	return resp
 }
 
-// Heartbeat keeps a member alive and detects stale generations. A heartbeat
-// during a rebalance tells the client to rejoin; an unknown group is not
-// created.
 func (gm *GroupManager) Heartbeat(req *protocol.HeartbeatRequest) *protocol.HeartbeatResponse {
 	resp := &protocol.HeartbeatResponse{Version: req.Version, ErrorCode: protocol.ErrNone}
 	g := gm.get(req.Group)
@@ -638,7 +569,6 @@ func (gm *GroupManager) Heartbeat(req *protocol.HeartbeatRequest) *protocol.Hear
 	return resp
 }
 
-// LeaveGroup removes members from a group.
 func (gm *GroupManager) LeaveGroup(req *protocol.LeaveGroupRequest) *protocol.LeaveGroupResponse {
 	resp := &protocol.LeaveGroupResponse{
 		Version:   req.Version,
@@ -672,8 +602,7 @@ func (gm *GroupManager) LeaveGroup(req *protocol.LeaveGroupRequest) *protocol.Le
 		g.Generation = 0
 		g.LeaderID = ""
 	} else {
-		// A member leaving triggers a rebalance for the rest; the generation is
-		// bumped when that round completes, not here.
+
 		if g.State == StatePreparingRebalance && len(g.joined) >= len(g.Members) {
 			g.completeJoinLocked()
 		} else {
@@ -683,9 +612,6 @@ func (gm *GroupManager) LeaveGroup(req *protocol.LeaveGroupRequest) *protocol.Le
 	return resp
 }
 
-// OffsetCommit stores committed offsets for a group. Generation-carrying commits
-// are fenced against the current member set, and all partitions in the request
-// are persisted with a single WAL fsync.
 func (gm *GroupManager) OffsetCommit(req *protocol.OffsetCommitRequest) *protocol.OffsetCommitResponse {
 	g := gm.getOrCreate(req.Group)
 	g.mu.Lock()
@@ -741,13 +667,9 @@ func (gm *GroupManager) OffsetCommit(req *protocol.OffsetCommitRequest) *protoco
 	return resp
 }
 
-// OffsetFetch returns committed offsets for a group. It reads the offset store
-// directly and does not take the group lock, so a fetch cannot be blocked behind
-// a heartbeat or commit.
 func (gm *GroupManager) OffsetFetch(req *protocol.OffsetFetchRequest) *protocol.OffsetFetchResponse {
 	resp := &protocol.OffsetFetchResponse{Version: req.Version, ErrorCode: protocol.ErrNone}
 
-	// Build the list of topics/partitions to look up.
 	type tp struct {
 		topic string
 		parts []int32
@@ -793,7 +715,6 @@ func filterOrder(order []string, remove []string) []string {
 	return out
 }
 
-// ListGroupIDs returns the names of all known consumer groups.
 func (gm *GroupManager) ListGroupIDs() []string {
 	gm.mu.RLock()
 	defer gm.mu.RUnlock()
@@ -804,7 +725,6 @@ func (gm *GroupManager) ListGroupIDs() []string {
 	return names
 }
 
-// GroupExists reports whether a group is registered with the coordinator.
 func (gm *GroupManager) GroupExists(name string) bool {
 	gm.mu.RLock()
 	defer gm.mu.RUnlock()
@@ -812,8 +732,6 @@ func (gm *GroupManager) GroupExists(name string) bool {
 	return ok
 }
 
-// DescribeGroup returns a detailed snapshot of one group for DescribeGroups and
-// the web UI. It returns nil when the group does not exist.
 func (gm *GroupManager) DescribeGroup(name string) *GroupInfo {
 	gm.mu.RLock()
 	g, ok := gm.groups[name]
@@ -840,7 +758,6 @@ func (gm *GroupManager) DescribeGroup(name string) *GroupInfo {
 	return info
 }
 
-// MembersDetail returns per-member metadata/assignment for a group.
 func (gm *GroupManager) MembersDetail(name string) []MemberInfo {
 	gm.mu.RLock()
 	g, ok := gm.groups[name]
@@ -873,8 +790,6 @@ func (gm *GroupManager) MembersDetail(name string) []MemberInfo {
 	return out
 }
 
-// DeleteGroup removes a group if it is Empty or Dead. It returns an error when
-// the group is actively consuming (Stable/PreparingRebalance).
 func (gm *GroupManager) DeleteGroup(name string) error {
 	gm.mu.RLock()
 	g, ok := gm.groups[name]
@@ -895,8 +810,7 @@ func (gm *GroupManager) DeleteGroup(name string) error {
 	g.JoinOrder = nil
 	g.assignments = make(map[string][]byte)
 	g.joined = make(map[string]bool)
-	// A caller that already holds this pointer must be able to detect that the
-	// group was deleted instead of adding members to a detached group.
+
 	g.deleted.Store(true)
 
 	gm.mu.Lock()
@@ -904,14 +818,10 @@ func (gm *GroupManager) DeleteGroup(name string) error {
 		delete(gm.groups, name)
 	}
 	gm.mu.Unlock()
-	// Kafka deletes the group's committed offsets with the group.
+
 	return gm.offsets.DeleteGroup(name)
 }
 
-// ResetOffsets sets the committed offset for a group/topic/partition to the
-// given value. It is the backend for the admin reset-offset API. The group lock
-// is taken when the group exists so an admin reset cannot reorder against an
-// in-flight OffsetCommit for the same key.
 func (gm *GroupManager) ResetOffsets(group, topic string, partition int32, offset int64) error {
 	if g := gm.get(group); g != nil {
 		g.mu.Lock()
@@ -920,9 +830,6 @@ func (gm *GroupManager) ResetOffsets(group, topic string, partition int32, offse
 	return gm.offsets.Commit(group, topic, partition, &CommittedOffset{Offset: offset})
 }
 
-// ReapExpiredSessions removes members whose session timeout elapsed without a
-// heartbeat and triggers a rebalance for the survivors. It returns the number of
-// members removed.
 func (gm *GroupManager) ReapExpiredSessions(now time.Time) int {
 	gm.mu.RLock()
 	groups := make([]*Group, 0, len(gm.groups))
@@ -938,8 +845,6 @@ func (gm *GroupManager) ReapExpiredSessions(now time.Time) int {
 	return removed
 }
 
-// StartSessionReaper runs ReapExpiredSessions on a ticker until the returned
-// stop function is called. A non-positive interval disables the loop.
 func (gm *GroupManager) StartSessionReaper(interval time.Duration) func() {
 	if interval <= 0 {
 		return func() {}
@@ -961,8 +866,6 @@ func (gm *GroupManager) StartSessionReaper(interval time.Duration) func() {
 	return func() { once.Do(func() { close(stop) }) }
 }
 
-// reapExpired drops members past their session timeout. A group that still has
-// members must rebalance, because the assignment lost a participant.
 func (g *Group) reapExpired(now time.Time, defaultSession int32) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -1003,17 +906,10 @@ func (g *Group) reapExpired(now time.Time, defaultSession int32) int {
 	return len(dead)
 }
 
-// GroupOffsetsSnapshot returns the committed offsets for one group as
-// topic -> partition -> offset (used by the UI snapshot export).
 func (gm *GroupManager) GroupOffsetsSnapshot(group string) map[string]map[int32]int64 {
 	return gm.offsets.GroupOffsets(group)
 }
 
-// CommittedGroups returns every group that has committed offsets, including
-// groups that have no live members. A consumer that stopped still holds a
-// backlog an operator must be able to see, so monitoring cannot rely on
-// ListGroups alone (which only knows about groups with live/buffered members).
-// The result is group -> topic -> partition -> offset.
 func (gm *GroupManager) CommittedGroups() map[string]map[string]map[int32]int64 {
 	out := map[string]map[string]map[int32]int64{}
 	for _, name := range gm.offsets.Groups() {
@@ -1028,7 +924,6 @@ func (gm *GroupManager) CommittedGroups() map[string]map[string]map[int32]int64 
 
 var errNonEmptyGroup = fmt.Errorf("group is not empty")
 
-// protocolMetadata picks the metadata bytes for the group's chosen protocol.
 func protocolMetadata(protocols []protocol.JoinGroupRequestProtocol, chosen string) []byte {
 	for _, p := range protocols {
 		if p.Name == chosen {
@@ -1041,8 +936,6 @@ func protocolMetadata(protocols []protocol.JoinGroupRequestProtocol, chosen stri
 	return nil
 }
 
-// decodeAssignmentFrom parses a consumer protocol assignment payload
-// (topic array -> partition array) into a map.
 func decodeAssignmentFrom(b []byte) map[string][]int32 {
 	out := make(map[string][]int32)
 	if len(b) == 0 {

@@ -11,8 +11,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/atomicfile"
 )
 
-// Rule grants a set of operations on a resource to a principal. ResourceType,
-// ResourceName, and Principal may be "*" to match anything.
 type Rule struct {
 	Principal    string   `json:"principal"`
 	ResourceType string   `json:"resourceType"`
@@ -20,30 +18,20 @@ type Rule struct {
 	Operations   []string `json:"operations"`
 }
 
-// Store is a file-backed ACL store. It is safe for concurrent use. A store with
-// an empty rule set denies everything (default-deny, decision D2); callers that
-// want allow-all must use AllowAllAuthorizer.
 type Store struct {
 	mu    sync.RWMutex
-	path  string // empty for an in-memory store
+	path  string
 	rules []Rule
-	// allowWildcardAdmin permits a rule that grants Admin (or "*") to "*", the
-	// principal wildcard. It is off by default: such a rule hands every
-	// authenticated identity — including a credential that carries no
-	// principal — cluster-wide administration.
+
 	allowWildcardAdmin bool
 }
 
-// SetAllowWildcardAdmin controls whether a wildcard principal may hold Admin.
-// Call it once during wiring, before the store is used.
 func (s *Store) SetAllowWildcardAdmin(allow bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.allowWildcardAdmin = allow
 }
 
-// WildcardAdminRules returns the rules that grant Admin to the wildcard
-// principal, so startup can warn about them.
 func (s *Store) WildcardAdminRules() []Rule {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -56,15 +44,10 @@ func (s *Store) WildcardAdminRules() []Rule {
 	return out
 }
 
-// grantsWildcardAdmin reports a rule that grants administration to every
-// principal. It is a property of the rule, independent of whether the operator
-// opted in, so startup can still warn about an existing rule.
 func grantsWildcardAdmin(rule Rule) bool {
 	return rule.Principal == wildcard && containsOperation(rule.Operations, OpAdmin)
 }
 
-// wildcardAdminErr reports a rule that grants administration to every
-// principal, which is refused unless the operator opted in.
 func (s *Store) wildcardAdminErr(rule Rule) error {
 	if !grantsWildcardAdmin(rule) || s.allowWildcardAdmin {
 		return nil
@@ -73,10 +56,6 @@ func (s *Store) wildcardAdminErr(rule Rule) error {
 		"grant it to named principals or set security.allow_wildcard_admin=true", wildcard)
 }
 
-// NewStore loads the ACL file at path. A missing file yields an empty
-// (deny-all) store. A corrupt file is an error: silently degrading a malformed
-// ACL set into "no rules" would turn a typo into an outage, and degrading into
-// "allow all" would be a security hole.
 func NewStore(path string) (*Store, error) {
 	s := &Store{path: path}
 	if path == "" {
@@ -100,10 +79,8 @@ func NewStore(path string) (*Store, error) {
 	return s, nil
 }
 
-// NewInMemory returns a store that never persists, useful for tests.
 func NewInMemory() *Store { return &Store{} }
 
-// Rules returns a copy of the current rule set, sorted for stable output.
 func (s *Store) Rules() []Rule {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -121,10 +98,6 @@ func (s *Store) Rules() []Rule {
 	return out
 }
 
-// Upsert inserts or replaces the rule keyed by principal/resourceType/resourceName.
-// It validates the rule first: a typo in an operation or resource type used to
-// be persisted as a rule that silently never matched, which reads to the
-// operator as "the ACL is there but does nothing".
 func (s *Store) Upsert(rule Rule) error {
 	if err := ValidateRule(rule); err != nil {
 		return err
@@ -154,7 +127,6 @@ func (s *Store) Upsert(rule Rule) error {
 	return s.persist()
 }
 
-// Delete removes the rule for the given key if present.
 func (s *Store) Delete(principal, resourceType, resourceName string) error {
 	rt, err := normalizeResourceType(resourceType)
 	if err != nil {
@@ -174,7 +146,6 @@ func (s *Store) Delete(principal, resourceType, resourceName string) error {
 	return s.persist()
 }
 
-// Replace swaps the entire rule set and persists it.
 func (s *Store) Replace(rules []Rule) error {
 	s.mu.RLock()
 	allowWildcard := s.allowWildcardAdmin
@@ -201,10 +172,6 @@ func (s *Store) Replace(rules []Rule) error {
 	return s.persist()
 }
 
-// ValidateRule reports whether a rule is well formed: a named principal, a
-// known resource type, and operations drawn from KnownOperations (or "*").
-// An empty resource type still means "*", which is how rules predating the
-// field were written.
 func ValidateRule(rule Rule) error {
 	if strings.TrimSpace(rule.Principal) == "" {
 		return fmt.Errorf("authz: rule principal must not be empty")
@@ -222,15 +189,6 @@ func ValidateRule(rule Rule) error {
 	return nil
 }
 
-// Authorize implements Authorizer with default-deny and deterministic
-// precedence: if any rule matches the resource exactly (both type and name),
-// only exact rules can grant; wildcard rules are consulted only when no exact
-// rule matches.
-//
-// An empty principal is never authorized. Callers that mean "unauthenticated"
-// must pass AnonymPrincipal explicitly, so a credential that carries no
-// principal (for example the cluster health token) can never be matched by a
-// wildcard rule.
 func (s *Store) Authorize(principal string, op Operation, res Resource) error {
 	if principal == "" {
 		return &DeniedError{Principal: principal, Operation: op, Resource: res}
@@ -261,7 +219,7 @@ func (s *Store) Authorize(principal string, op Operation, res Resource) error {
 		wildcardGrant = wildcardGrant || grant
 	}
 	if exactExists {
-		// Exact rules exist for this resource but none granted the operation.
+
 		return &DeniedError{Principal: principal, Operation: op, Resource: res}
 	}
 	if wildcardGrant {
@@ -270,9 +228,6 @@ func (s *Store) Authorize(principal string, op Operation, res Resource) error {
 	return &DeniedError{Principal: principal, Operation: op, Resource: res}
 }
 
-// CanDescribeAny reports whether any rule lets principal Describe at least one
-// resource of the given type. It exists for list endpoints: the endpoint is
-// allowed, and the handler then drops the items the principal may not see.
 func (s *Store) CanDescribeAny(principal, resourceType string) bool {
 	if principal == "" {
 		return false
@@ -310,9 +265,6 @@ func sameKey(a, b Rule) bool {
 	return a.Principal == b.Principal && a.ResourceType == b.ResourceType && a.ResourceName == b.ResourceName
 }
 
-// normalizeResourceType canonicalises a resource type. An empty value means
-// "*" (rules written before the field existed); anything else must name a
-// known type, so a typo fails the write instead of creating a dead rule.
 func normalizeResourceType(t string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(t)) {
 	case ResourceTopic:
@@ -340,9 +292,6 @@ func principalMatches(rulePrincipal, principal string) bool {
 	return rulePrincipal == principal || rulePrincipal == wildcard
 }
 
-// containsOperation reports whether an ACL rule's operation list grants op.
-// A grant of Admin also answers Read/Write/Describe, and Read/Write answer
-// Describe, so rules written before OpDescribe existed keep their meaning.
 func containsOperation(ops []string, op Operation) bool {
 	for _, o := range ops {
 		if o == wildcard {

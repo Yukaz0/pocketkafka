@@ -29,11 +29,6 @@ func main() {
 	schemaURL := fs.String("url", "http://localhost:8081", "schema registry URL (schema)")
 	subject := fs.String("subject", "", "schema subject (schema register)")
 
-	// Split the argument list at the first non-flag token (the subcommand),
-	// skipping the values of flags that take one.
-	// Everything before it is parsed by the global FlagSet; everything after
-	// it is scanned manually for subcommand flags (Go's flag package stops at
-	// the first positional argument).
 	valueFlags := map[string]bool{
 		"b": true, "o": true, "p": true, "g": true, "t": true, "n": true,
 		"k": true, "timeout": true, "file": true, "url": true, "subject": true,
@@ -56,14 +51,14 @@ func main() {
 			name := strings.TrimLeft(a, "-")
 			if valueFlags[name] && i+1 < len(os.Args[1:]) {
 				i++
-				globalArgs = append(globalArgs, os.Args[1:][i]) // keep the flag's value
+				globalArgs = append(globalArgs, os.Args[1:][i])
 			}
 		}
 	}
 	fs.Parse(globalArgs)
 	args := fs.Args()
 	if len(args) > 0 {
-		// fs.Args() holds flags that came after the subcommand; prepend them.
+
 		rest = append(args, rest...)
 	}
 	if len(rest) == 0 {
@@ -71,14 +66,11 @@ func main() {
 		os.Exit(1)
 	}
 	outputFormat = *output
-	// Validate arity before connecting: `pkctl produce` must say what it is
-	// missing, not try to reach a broker first. It also keeps the guard
-	// testable without a running broker.
+
 	if err := checkArity(rest); err != nil {
 		fatal("usage", err)
 	}
 
-	// Manual subcommand flag scanning.
 	subFlags := map[string]*string{
 		"group":   group,
 		"topic":   topic,
@@ -104,9 +96,7 @@ func main() {
 		if a == "--to-latest" {
 			*toLatest = true
 		}
-		// Both forms are advertised by the usage text, so both must work: the
-		// space-separated one used to be dropped silently, which read as a
-		// successful reset that reset nothing.
+
 		if strings.HasPrefix(a, "--to-offset=") {
 			if v, err := strconv.ParseInt(strings.TrimPrefix(a, "--to-offset="), 10, 64); err == nil {
 				*toOffset = v
@@ -127,10 +117,7 @@ func main() {
 	defer kc.Close()
 
 	cmd := rest[0]
-	// Positional arity is checked against rest, not args: args is fs.Args(),
-	// which only collects flags written AFTER the subcommand, so it is empty
-	// for the documented `pkctl -b host produce <topic> <value>` form. Checking
-	// args here rejected every well-formed invocation with a usage message.
+
 	switch cmd {
 	case "cluster":
 		cmdCluster(kc)
@@ -219,14 +206,6 @@ func splitBrokers(s string) []string {
 	return out
 }
 
-// checkArity reports the positional arguments a subcommand is missing. It is
-// called before any connection is attempted, so an incomplete command reports
-// what it needs instead of a connection error, and it deliberately reads rest
-// rather than fs.Args(): the flag package stops at the first positional token,
-// so fs.Args() holds only flags written AFTER the subcommand and is therefore
-// empty for the documented `pkctl -b <broker> <subcommand> ...` form. Using it
-// here once made every produce/create/delete/consume invocation exit 1 with a
-// usage message even when its arguments were complete.
 func checkArity(rest []string) error {
 	if len(rest) == 0 {
 		return errors.New("missing subcommand")

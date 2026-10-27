@@ -6,16 +6,12 @@ import (
 	"hash/crc32"
 )
 
-// crc32cTable is the Castagnoli CRC-32C table used by Kafka's record format v2.
 var crc32cTable = crc32.MakeTable(crc32.Castagnoli)
 
-// CalculateRecordBatchCRC computes the Castagnoli CRC over the batch bytes
-// that follow the CRC field (i.e. from Attributes to the end of the batch).
 func CalculateRecordBatchCRC(batchDataAfterCRC []byte) uint32 {
 	return crc32.Checksum(batchDataAfterCRC, crc32cTable)
 }
 
-// Record is a single Kafka record inside a RecordBatch.
 type Record struct {
 	Attributes     int8
 	TimestampDelta int64
@@ -25,13 +21,11 @@ type Record struct {
 	Headers        []RecordHeader
 }
 
-// RecordHeader is a key/value header attached to a record.
 type RecordHeader struct {
 	Key   string
 	Value []byte
 }
 
-// RecordBatch is a serialized Kafka record batch in record format v2.
 type RecordBatch struct {
 	BaseOffset           int64
 	PartitionLeaderEpoch int32
@@ -47,14 +41,12 @@ type RecordBatch struct {
 	Records              []Record
 }
 
-// EncodeRecord appends a single record's wire form to dst and returns the
-// updated slice.
 func EncodeRecord(dst []byte, rec Record) []byte {
 	body := make([]byte, 0, 16+len(rec.Key)+len(rec.Value))
 	body = append(body, byte(rec.Attributes))
 	body = appendVarint(body, rec.TimestampDelta)
 	body = appendVarint(body, int64(rec.OffsetDelta))
-	body = appendVarint(body, int64(len(rec.Key))) // key length, -1 if null
+	body = appendVarint(body, int64(len(rec.Key)))
 	if rec.Key != nil {
 		body = append(body, rec.Key...)
 	}
@@ -79,8 +71,6 @@ func EncodeRecord(dst []byte, rec Record) []byte {
 	return append(dst, body...)
 }
 
-// EncodeRecordBatch serializes a RecordBatch to its full wire form, computing
-// the CRC32C checksum and populating LastOffsetDelta.
 func EncodeRecordBatch(b *RecordBatch) ([]byte, error) {
 	b.Magic = RecordMagic
 	if b.LastOffsetDelta == 0 && len(b.Records) > 0 {
@@ -91,8 +81,7 @@ func EncodeRecordBatch(b *RecordBatch) ([]byte, error) {
 		records = EncodeRecord(records, rec)
 	}
 
-	// Total batch length covers everything from PartitionLeaderEpoch onward.
-	length := int32(4 + 1 + 4 + 2 + 4 + 8 + 8 + 8 + 2 + 4 + 4) // 49
+	length := int32(4 + 1 + 4 + 2 + 4 + 8 + 8 + 8 + 2 + 4 + 4)
 	length += int32(len(records))
 
 	out := make([]byte, 0, 12+int(length))
@@ -100,7 +89,7 @@ func EncodeRecordBatch(b *RecordBatch) ([]byte, error) {
 	out = binary.BigEndian.AppendUint32(out, uint32(length))
 	out = binary.BigEndian.AppendUint32(out, uint32(b.PartitionLeaderEpoch))
 	out = append(out, byte(b.Magic))
-	out = binary.BigEndian.AppendUint32(out, 0) // CRC placeholder
+	out = binary.BigEndian.AppendUint32(out, 0)
 	out = binary.BigEndian.AppendUint16(out, uint16(b.Attributes))
 	out = binary.BigEndian.AppendUint32(out, uint32(b.LastOffsetDelta))
 	out = binary.BigEndian.AppendUint64(out, uint64(b.BaseTimestamp))
@@ -117,7 +106,6 @@ func EncodeRecordBatch(b *RecordBatch) ([]byte, error) {
 	return out, nil
 }
 
-// DecodeRecordBatch parses a raw RecordBatch v2 byte slice into a struct.
 func DecodeRecordBatch(raw []byte) (*RecordBatch, error) {
 	if len(raw) < 61 {
 		return nil, fmt.Errorf("record batch too short: %d bytes", len(raw))
@@ -200,14 +188,10 @@ func decodeRecord(src []byte) (Record, int, error) {
 	return rec, n + int(length), nil
 }
 
-// DecodeRecordBytes parses a single varint-length-prefixed record (as stored in
-// a RecordBatch payload) and returns the record plus its total byte size.
 func DecodeRecordBytes(src []byte) (Record, int, error) {
 	return decodeRecord(src)
 }
 
-// ReadBytesVarint reads a length-prefixed byte array where the length is a
-// signed varint (as used inside records).
 func (r *Reader) ReadBytesVarint() ([]byte, error) {
 	l, err := r.ReadVarint()
 	if err != nil {
@@ -225,7 +209,6 @@ func (r *Reader) ReadBytesVarint() ([]byte, error) {
 	return out, nil
 }
 
-// ReadVarintString reads a varint-length-prefixed string.
 func (r *Reader) ReadVarintString() (string, error) {
 	b, err := r.ReadBytesVarint()
 	if err != nil {

@@ -1,10 +1,5 @@
-// Package protocol is a hand-written, zero external dependency implementation
-// of the Apache Kafka binary wire protocol. It provides BigEndian binary
-// readers/writers, frame slicing, a RecordBatch v2 codec with Castagnoli
-// CRC-32C, and request/response codecs for the API keys the broker supports.
 package protocol
 
-// Kafka API keys (ApiKey values in the request header).
 const (
 	APKProduce          int16 = 0
 	APKFetch            int16 = 1
@@ -28,29 +23,20 @@ const (
 	APKDeleteGroups     int16 = 42
 )
 
-// Transaction API keys (AddPartitionsToTxn, AddOffsetsToTxn, EndTxn). The wire
-// codecs exist in txn.go, but the broker has no transaction state and therefore
-// must not advertise or accept these until transactional semantics land. They
-// are kept as named identifiers so callers can recognise and reject them.
 const (
 	APKAddPartitionsToTxn int16 = 24
 	APKAddOffsetsToTxn    int16 = 25
 	APKEndTxn             int16 = 26
 )
 
-// DisabledTransactionAPIKeys lists the transactional API keys that are known to
-// the protocol package but intentionally not implemented by the broker. The
-// broker must fail closed (UNSUPPORTED_VERSION) instead of answering success.
 var DisabledTransactionAPIKeys = []int16{
 	APKAddPartitionsToTxn,
 	APKAddOffsetsToTxn,
 	APKEndTxn,
 }
 
-// RecordBatch magic byte for the modern (v2) record format.
 const RecordMagic = int8(2)
 
-// Error codes used by the broker engine.
 const (
 	ErrNone                               int16 = 0
 	ErrUnknownServerError                 int16 = -1
@@ -94,42 +80,34 @@ const (
 	ErrMemberIDRequired                   int16 = 79
 )
 
-// maxVersions advertises the maximum API version the broker supports for each
-// key. All chosen maxima are at or below the "flexible" protocol threshold, so
-// the codecs only need to handle the classic (non-compact) wire format. The
-// threshold differs per API, so each entry names it where the two are close: a
-// key advertised one version too high is not a cosmetic error - a real broker
-// fails to parse the body and closes the connection.
 var maxVersions = map[int16]int16{
-	APKProduce:          3, // v3 makes clients use RecordBatch v2 (magic 2); v9+ flexible
-	APKFetch:            5, // v12+ flexible
-	APKListOffsets:      5, // v6+ flexible
-	APKMetadata:         8, // v9+ flexible
-	APKOffsetCommit:     7, // v8+ flexible
-	APKOffsetFetch:      5, // v6+ flexible
-	APKFindCoordinator:  2, // v3+ flexible
-	APKJoinGroup:        5, // v6+ flexible (cooperative-sticky needs v5)
-	APKHeartbeat:        3, // v4+ flexible
-	APKLeaveGroup:       3, // v4+ flexible
-	APKSyncGroup:        3, // v4+ flexible
-	APKDescribeGroups:   3, // v5+ flexible
-	APKListGroups:       2, // v3 is flexible, and the request body is empty
-	APKSaslHandshake:    1, // not flexible
-	APKApiVersions:      2, // v3+ flexible
-	APKCreateTopics:     4, // v5+ flexible
-	APKDeleteTopics:     3, // v4+ flexible
-	APKInitProducerID:   2, // v3+ flexible
-	APKSaslAuthenticate: 1, // v2 is flexible; v1 carries the session lifetime
-	APKDeleteGroups:     1, // v2+ flexible
+	APKProduce:          3,
+	APKFetch:            5,
+	APKListOffsets:      5,
+	APKMetadata:         8,
+	APKOffsetCommit:     7,
+	APKOffsetFetch:      5,
+	APKFindCoordinator:  2,
+	APKJoinGroup:        5,
+	APKHeartbeat:        3,
+	APKLeaveGroup:       3,
+	APKSyncGroup:        3,
+	APKDescribeGroups:   3,
+	APKListGroups:       2,
+	APKSaslHandshake:    1,
+	APKApiVersions:      2,
+	APKCreateTopics:     4,
+	APKDeleteTopics:     3,
+	APKInitProducerID:   2,
+	APKSaslAuthenticate: 1,
+	APKDeleteGroups:     1,
 }
 
-// SupportsKey reports whether the broker implements the given API key.
 func SupportsKey(key int16) bool {
 	_, ok := maxVersions[key]
 	return ok
 }
 
-// MaxVersion returns the maximum supported version for a key, or -1 if unknown.
 func MaxVersion(key int16) int16 {
 	if v, ok := maxVersions[key]; ok {
 		return v

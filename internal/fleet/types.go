@@ -4,7 +4,6 @@ import (
 	"time"
 )
 
-// Server represents a managed server/host in the fleet.
 type Server struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
@@ -15,20 +14,18 @@ type Server struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Agent represents an enrolled fleet agent executing on a host.
 type Agent struct {
 	ID         string    `json:"id"`
 	ServerID   string    `json:"server_id"`
-	Secret     string    `json:"secret"`               // Stored as PBKDF2 hash
-	SealedKey  string    `json:"sealed_key,omitempty"` // AES-GCM encrypted agent key
-	RawSecret  string    `json:"-"`                    // Plaintext secret returned only upon ConsumeToken, never persisted
+	Secret     string    `json:"secret"`
+	SealedKey  string    `json:"sealed_key,omitempty"`
+	RawSecret  string    `json:"-"`
 	Revoked    bool      `json:"revoked"`
 	RevokedAt  time.Time `json:"revoked_at,omitempty"`
 	EnrolledAt time.Time `json:"enrolled_at"`
 	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
 }
 
-// Enrollment represents a single-use token issued to register an agent.
 type Enrollment struct {
 	Token     string     `json:"token"`
 	ServerID  string     `json:"server_id"`
@@ -38,7 +35,6 @@ type Enrollment struct {
 	UsedAt    time.Time  `json:"used_at,omitempty"`
 }
 
-// JobStatus represents the execution lifecycle of a fleet job.
 type JobStatus string
 
 const (
@@ -49,7 +45,6 @@ const (
 	JobStatusFailed    JobStatus = "failed"
 )
 
-// Job represents a background task dispatched to an agent.
 type Job struct {
 	ID             string    `json:"id"`
 	ServerID       string    `json:"server_id"`
@@ -67,7 +62,6 @@ type Job struct {
 	CompletedAt    time.Time `json:"completed_at,omitempty"`
 }
 
-// AuditEvent records a security- or operational-relevant action in fleet.
 type AuditEvent struct {
 	ID            string    `json:"id"`
 	Actor         string    `json:"actor"`
@@ -79,7 +73,6 @@ type AuditEvent struct {
 	Detail        string    `json:"detail,omitempty"`
 }
 
-// Envelope wraps signed messages between agent and control server.
 type Envelope struct {
 	ProtocolVersion int    `json:"protocol_version"`
 	MessageID       string `json:"message_id"`
@@ -93,10 +86,8 @@ type Envelope struct {
 	Payload         []byte `json:"payload,omitempty"`
 }
 
-// HMACEnvelope is an alias for Envelope.
 type HMACEnvelope = Envelope
 
-// ErrorResponse represents the consistent Fleet API error envelope.
 type ErrorResponse struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`

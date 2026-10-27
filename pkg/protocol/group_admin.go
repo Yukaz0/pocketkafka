@@ -1,24 +1,18 @@
 package protocol
 
-// ListGroups (Key 16), v0-v3
-
-// ListGroupsRequest lists all consumer groups.
 type ListGroupsRequest struct {
 	Version int16
 }
 
-// DecodeListGroupsRequest parses the request body (empty for v0-v3).
 func DecodeListGroupsRequest(version int16, body []byte) (*ListGroupsRequest, error) {
 	return &ListGroupsRequest{Version: version}, nil
 }
 
-// ListGroupsResponseGroup is one group in the list.
 type ListGroupsResponseGroup struct {
 	GroupID      string
 	ProtocolType string
 }
 
-// ListGroupsResponse reports the group IDs known to the broker.
 type ListGroupsResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
@@ -26,7 +20,6 @@ type ListGroupsResponse struct {
 	Groups         []ListGroupsResponseGroup
 }
 
-// EncodeListGroupsResponse serializes the response body.
 func EncodeListGroupsResponse(resp *ListGroupsResponse) ([]byte, error) {
 	w := NewWriter(64)
 	if resp.Version >= 1 {
@@ -41,12 +34,10 @@ func EncodeListGroupsResponse(resp *ListGroupsResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// EncodeListGroupsRequest serializes the request body (client side).
 func EncodeListGroupsRequest(req *ListGroupsRequest) ([]byte, error) {
 	return nil, nil
 }
 
-// DecodeListGroupsResponse parses the response body (client side).
 func DecodeListGroupsResponse(version int16, body []byte) (*ListGroupsResponse, error) {
 	r := NewReader(body)
 	resp := &ListGroupsResponse{Version: version}
@@ -77,16 +68,12 @@ func DecodeListGroupsResponse(version int16, body []byte) (*ListGroupsResponse, 
 	return resp, nil
 }
 
-// DescribeGroups (Key 15), v0-v3
-
-// DescribeGroupsRequest asks for detail on one or more groups.
 type DescribeGroupsRequest struct {
 	Version     int16
 	GroupIDs    []string
 	IncludeAuth bool
 }
 
-// DecodeDescribeGroupsRequest parses the request body for versions up to 3.
 func DecodeDescribeGroupsRequest(version int16, body []byte) (*DescribeGroupsRequest, error) {
 	r := NewReader(body)
 	req := &DescribeGroupsRequest{Version: version}
@@ -110,7 +97,6 @@ func DecodeDescribeGroupsRequest(version int16, body []byte) (*DescribeGroupsReq
 	return req, nil
 }
 
-// DescribeGroupsResponseGroup is the detail for one group.
 type DescribeGroupsResponseGroup struct {
 	ErrorCode    int16
 	GroupID      string
@@ -118,12 +104,10 @@ type DescribeGroupsResponseGroup struct {
 	ProtocolType string
 	Protocol     string
 	Members      []DescribeGroupsResponseMember
-	// AuthorizedOperations is present from v3 (INT32_MIN when the request did
-	// not ask for it, as the protocol prescribes).
+
 	AuthorizedOperations int32
 }
 
-// DescribeGroupsResponseMember is one member of a described group.
 type DescribeGroupsResponseMember struct {
 	MemberID         string
 	ClientID         string
@@ -132,14 +116,12 @@ type DescribeGroupsResponseMember struct {
 	MemberAssignment []byte
 }
 
-// DescribeGroupsResponse reports detail for each requested group.
 type DescribeGroupsResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
 	Groups         []DescribeGroupsResponseGroup
 }
 
-// EncodeDescribeGroupsResponse serializes the response body.
 func EncodeDescribeGroupsResponse(resp *DescribeGroupsResponse) ([]byte, error) {
 	w := NewWriter(128)
 	if resp.Version >= 1 {
@@ -157,8 +139,7 @@ func EncodeDescribeGroupsResponse(resp *DescribeGroupsResponse) ([]byte, error) 
 			w.WriteString(m.MemberID)
 			w.WriteString(m.ClientID)
 			w.WriteString(m.ClientHost)
-			// getBytes-based decoders (e.g. sarama) reject a -1 length; write an
-			// empty byte array instead of null for empty member fields.
+
 			if len(m.MemberMetadata) == 0 {
 				w.WriteInt32(0)
 			} else {
@@ -180,7 +161,6 @@ func EncodeDescribeGroupsResponse(resp *DescribeGroupsResponse) ([]byte, error) 
 	return w.Bytes(), nil
 }
 
-// EncodeDescribeGroupsRequest serializes the request body (client side).
 func EncodeDescribeGroupsRequest(req *DescribeGroupsRequest) ([]byte, error) {
 	w := NewWriter(32)
 	w.WriteArrayLen(len(req.GroupIDs))
@@ -193,7 +173,6 @@ func EncodeDescribeGroupsRequest(req *DescribeGroupsRequest) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// DecodeDescribeGroupsResponse parses the response body (client side).
 func DecodeDescribeGroupsResponse(version int16, body []byte) (*DescribeGroupsResponse, error) {
 	r := NewReader(body)
 	resp := &DescribeGroupsResponse{Version: version}
@@ -248,7 +227,7 @@ func DecodeDescribeGroupsResponse(version int16, body []byte) (*DescribeGroupsRe
 				return nil, err
 			}
 			if version >= 4 {
-				// v4 added the static membership instance id per member.
+
 				if _, err = r.ReadNullableString(); err != nil {
 					return nil, err
 				}
@@ -256,9 +235,7 @@ func DecodeDescribeGroupsResponse(version int16, body []byte) (*DescribeGroupsRe
 			g.Members = append(g.Members, m)
 		}
 		if version >= 3 {
-			// v3 appends the group's authorized operations. Skipping it shifts
-			// every following group by four bytes, which shows up as a decode
-			// failure on the second group, not the first.
+
 			if g.AuthorizedOperations, err = r.ReadInt32(); err != nil {
 				return nil, err
 			}
@@ -268,15 +245,11 @@ func DecodeDescribeGroupsResponse(version int16, body []byte) (*DescribeGroupsRe
 	return resp, nil
 }
 
-// DeleteGroups (Key 42), v0-v1
-
-// DeleteGroupsRequest asks to delete one or more groups.
 type DeleteGroupsRequest struct {
 	Version  int16
 	GroupIDs []string
 }
 
-// DecodeDeleteGroupsRequest parses the request body for versions up to 1.
 func DecodeDeleteGroupsRequest(version int16, body []byte) (*DeleteGroupsRequest, error) {
 	r := NewReader(body)
 	req := &DeleteGroupsRequest{Version: version}
@@ -295,21 +268,18 @@ func DecodeDeleteGroupsRequest(version int16, body []byte) (*DeleteGroupsRequest
 	return req, nil
 }
 
-// DeleteGroupsResponseGroup is the result for one group deletion.
 type DeleteGroupsResponseGroup struct {
 	GroupID      string
 	ErrorCode    int16
 	ErrorMessage *string
 }
 
-// DeleteGroupsResponse reports deletion results.
 type DeleteGroupsResponse struct {
 	Version        int16
 	ThrottleTimeMs int32
 	Groups         []DeleteGroupsResponseGroup
 }
 
-// EncodeDeleteGroupsResponse serializes the response body.
 func EncodeDeleteGroupsResponse(resp *DeleteGroupsResponse) ([]byte, error) {
 	w := NewWriter(64)
 	if resp.Version >= 1 {
@@ -326,7 +296,6 @@ func EncodeDeleteGroupsResponse(resp *DeleteGroupsResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// EncodeDeleteGroupsRequest serializes the request body (client side).
 func EncodeDeleteGroupsRequest(req *DeleteGroupsRequest) ([]byte, error) {
 	w := NewWriter(32)
 	w.WriteArrayLen(len(req.GroupIDs))
@@ -336,7 +305,6 @@ func EncodeDeleteGroupsRequest(req *DeleteGroupsRequest) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
-// DecodeDeleteGroupsResponse parses the response body (client side).
 func DecodeDeleteGroupsResponse(version int16, body []byte) (*DeleteGroupsResponse, error) {
 	r := NewReader(body)
 	resp := &DeleteGroupsResponse{Version: version}

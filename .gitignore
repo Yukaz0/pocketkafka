@@ -33,6 +33,14 @@
 .hermes/
 .omp/
 
-# Internal design docs and local reviews (not published to GitHub)
-/docs/
+# Internal design docs, plans, specifications, and local reviews (not published to GitHub)
+/docs/superpowers/
+/docs/*_PLAN.md
+/docs/*_SPEC.md
+/docs/*REVIEW*.md
+/docs/ERROR_CODES_AND_PROTOCOLS.md
+/docs/FLEET_DESIGN.md
+/docs/DEPLOYMENT_AND_OPS.md
+/docs/TESTING_STRATEGY.md
+/docs/RULES.md
 /secrets/

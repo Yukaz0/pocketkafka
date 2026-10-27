@@ -1,4 +1,3 @@
-// SASL/SCRAM-SHA-256 and SCRAM-SHA-512 server implementation (RFC 5802).
 package server
 
 import (
@@ -11,8 +10,6 @@ import (
 	"github.com/Yukaz0/pocketkafka/internal/credential"
 )
 
-// scramSession drives the server side of one SCRAM authentication exchange.
-// It holds a verifier, never the password.
 type scramSession struct {
 	mech        credential.Mechanism
 	verifier    credential.Verifier
@@ -23,8 +20,6 @@ type scramSession struct {
 	finished    bool
 }
 
-// newScramSession starts a session and returns the ServerFirstMessage ready to
-// send to the client.
 func newScramSession(m credential.Mechanism, v credential.Verifier, clientFirst string) (*scramSession, string, error) {
 	clientNonce := scramNonce(clientFirst)
 	if clientNonce == "" {
@@ -43,18 +38,13 @@ func newScramSession(m credential.Mechanism, v credential.Verifier, clientFirst 
 	}
 	serverFirst := fmt.Sprintf("r=%s,s=%s,i=%d", clientNonce+serverNonce,
 		base64.StdEncoding.EncodeToString(v.Salt), v.Iterations)
-	// RFC 5802: AuthMessage is built from client-first-message-bare, so the gs2
-	// header ("n,," or "n,a=<authzid>,") is excluded. Including it would make
-	// this broker's signatures disagree with every compliant client.
+
 	s.authMessage = scramBare(clientFirst) + "," + serverFirst + ","
 	return s, serverFirst, nil
 }
 
-// finish verifies the ClientFinalMessage and returns the ServerFinalMessage.
-// The final message is either "v=<serverSignature>" (success) or an
-// "e=<error>" payload (failure).
 func (s *scramSession) finish(clientFinal string) ([]byte, error) {
-	// client-final: c=<base64>,r=<fullNonce>,p=<clientProof>
+
 	parts := strings.Split(clientFinal, ",")
 	if len(parts) < 3 {
 		return nil, fmt.Errorf("malformed client-final-message")
@@ -88,7 +78,7 @@ func (s *scramSession) finish(clientFinal string) ([]byte, error) {
 	if len(clientProof) != s.mech.KeySize {
 		return nil, fmt.Errorf("proof size mismatch")
 	}
-	// ClientKey = ClientProof XOR ClientSignature; StoredKey = H(ClientKey).
+
 	clientKey := make([]byte, len(clientProof))
 	for i := range clientProof {
 		clientKey[i] = clientProof[i] ^ clientSignature[i]
@@ -112,8 +102,6 @@ func randomNonce() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
-// scramBare strips the gs2 header from a client-first message: "n,," or
-// "n,a=<authzid>," leaves the bare "n=<user>,r=<nonce>[,extensions]".
 func scramBare(clientFirst string) string {
 	if idx := strings.Index(clientFirst, ",,"); idx >= 0 {
 		return clientFirst[idx+2:]
@@ -126,7 +114,6 @@ func scramBare(clientFirst string) string {
 	return clientFirst
 }
 
-// scramNonce extracts the client nonce (r=) from a client-first message.
 func scramNonce(clientFirst string) string {
 	for _, part := range strings.Split(scramBare(clientFirst), ",") {
 		if strings.HasPrefix(part, "r=") {
@@ -136,7 +123,6 @@ func scramNonce(clientFirst string) string {
 	return ""
 }
 
-// unescapeSCRAMName decodes the RFC 5802 "=2C"/"=3D" escapes in a username.
 func unescapeSCRAMName(name string) string {
 	if !strings.Contains(name, "=") {
 		return name

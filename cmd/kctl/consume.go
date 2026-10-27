@@ -14,7 +14,7 @@ func cmdConsume(kc *client.KafkaClient, topic, group string, n int, timeout time
 	}
 	received := 0
 	cfg := client.DefaultConsumerGroupConfig()
-	cfg.InitialOffset = -2 // read existing messages from the beginning
+	cfg.InitialOffset = -2
 	cg := client.NewConsumerGroup(kc, cfg, func(msg *client.ConsumedMessage) error {
 		fmt.Printf("%s\tpartition=%d\toffset=%d\tkey=%q\tvalue=%q\n",
 			msg.Topic, msg.Partition, msg.Offset, string(msg.Key), string(msg.Value))
