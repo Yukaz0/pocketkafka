@@ -253,7 +253,7 @@ docker build -f Dockerfile.fleet-agent -t pocketkafka-fleet-agent:latest .
 docker run -d --name fleet-agent --restart always \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v fleet-agent-state:/data \
-  -e FLEET_SERVER_URL=https://<controller-host>:18090 \
+  -e FLEET_SERVER_URL=http://<controller-host>:8080 \
   -e FLEET_ENROLL_TOKEN="<token>" \
   pocketkafka-fleet-agent:latest
 ```
@@ -263,7 +263,7 @@ docker run -d --name fleet-agent --restart always \
 - **Option B (Native Binary `fleet-agent.exe`)**:
   Compile with `GOOS=windows GOARCH=amd64 go build -o fleet-agent.exe ./cmd/fleet-agent`. Enable *"Expose daemon on tcp://localhost:2375 without TLS"* in Docker Desktop settings, then run:
   ```cmd
-  fleet-agent.exe -server https://<controller-host>:18090 -token <token> -docker-socket tcp://127.0.0.1:2375
+  fleet-agent.exe -server http://<controller-host>:8080 -token <token> -docker-socket tcp://127.0.0.1:2375
   ```
 
 Detailed operation, systemd setup, and troubleshooting are available in [`docs/FLEET_RUNBOOK.md`](docs/FLEET_RUNBOOK.md).
