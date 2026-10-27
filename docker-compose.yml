@@ -32,6 +32,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VERSION: ${PK_VERSION:-dev}
     image: pocketkafka:latest
     container_name: local-kafka
     deploy:

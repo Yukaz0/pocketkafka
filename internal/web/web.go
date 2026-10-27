@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -174,10 +175,29 @@ func (s *Server) WithBrokerInfo(listeners []string, advertised, securityMode str
 
 func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.Registry, brokerID int32, clusterID string, version string) *Server {
 	acl := authz.NewInMemory()
-	v := version
-	if v == "" {
-		v = "dev"
+	v := strings.TrimSpace(version)
+	if v == "" || v == "dev" {
+		h := sha256.New()
+		_ = fs.WalkDir(webui.FS(), ".", func(path string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				if b, rErr := fs.ReadFile(webui.FS(), path); rErr == nil {
+					h.Write([]byte(path))
+					h.Write(b)
+				}
+			}
+			return nil
+		})
+		sum := fmt.Sprintf("%x", h.Sum(nil))
+		if len(sum) > 8 {
+			sum = sum[:8]
+		}
+		if v == "dev" {
+			v = "dev-" + sum
+		} else {
+			v = sum
+		}
 	}
+	v = url.QueryEscape(v)
 	var indexHTML []byte
 	if data, err := fs.ReadFile(webui.FS(), "index.html"); err == nil {
 		indexHTML = []byte(strings.ReplaceAll(string(data), "${version}", v))
