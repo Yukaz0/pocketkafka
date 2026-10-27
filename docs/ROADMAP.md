@@ -3,12 +3,13 @@
 Sumber kebenaran status: kode + `test/interop/compatibility.yaml`.
 Dokumen `docs/` di-ignore git (tidak ikut rilis); peta ini self-contained.
 
-## Kini: v0.1.0 (ter-tag)
+## Kini: v0.1.1 (ter-tag)
 
 Broker single-node siap: wire protocol, UI, registry subset,
 REST/MQTT gateway, compaction, S3 tiering (off default), SASL/SCRAM+TLS,
 Prometheus `/metrics`, `/healthz`+`/livez`, provenance rilis.
-
+v0.1.1 update: Modular Web UI (ES modules), MQTT Studio zone mandiri,
+Fleet server & token lifecycle management, flat core navigation, dan dynamic asset cache-buster.
 ## v0.2 — External interop
 
 - `test/interop/run.sh` Docker matrix hijau: kcat/librdkafka, KafkaJS, franz-go.
