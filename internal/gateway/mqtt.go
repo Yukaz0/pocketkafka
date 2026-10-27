@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -61,6 +62,9 @@ type MQTTBridge struct {
 
 	connMu sync.Mutex
 	conns  map[net.Conn]struct{}
+
+	clientMu sync.RWMutex
+	clients  map[string]*mqttClientEntry
 
 	connSem chan struct{}
 
@@ -130,11 +134,100 @@ func (b *MQTTBridge) ActiveClients() int32 { return b.active.Load() }
 
 func (b *MQTTBridge) BridgedCount() int64 { return b.bridged.Load() }
 
+type MQTTClientInfo struct {
+	ClientID    string    `json:"clientId"`
+	RemoteAddr  string    `json:"remoteAddr"`
+	ConnectedAt time.Time `json:"connectedAt"`
+	SubsCount   int       `json:"subsCount"`
+}
+
+type mqttClientEntry struct {
+	clientID    string
+	remoteAddr  string
+	connectedAt time.Time
+	client      *mqttClient
+}
+
+func (b *MQTTBridge) registerClient(remoteAddr, clientID string, c *mqttClient) {
+	b.clientMu.Lock()
+	if b.clients == nil {
+		b.clients = make(map[string]*mqttClientEntry)
+	}
+	b.clients[remoteAddr] = &mqttClientEntry{
+		clientID:    clientID,
+		remoteAddr:  remoteAddr,
+		connectedAt: time.Now(),
+		client:      c,
+	}
+	b.clientMu.Unlock()
+}
+
+func (b *MQTTBridge) unregisterClient(remoteAddr string) {
+	b.clientMu.Lock()
+	delete(b.clients, remoteAddr)
+	b.clientMu.Unlock()
+}
+
+func (b *MQTTBridge) ClientsSnapshot() []MQTTClientInfo {
+	b.clientMu.RLock()
+	type item struct {
+		info MQTTClientInfo
+		c    *mqttClient
+	}
+	items := make([]item, 0, len(b.clients))
+	for _, e := range b.clients {
+		items = append(items, item{
+			info: MQTTClientInfo{
+				ClientID:    e.clientID,
+				RemoteAddr:  e.remoteAddr,
+				ConnectedAt: e.connectedAt,
+			},
+			c: e.client,
+		})
+	}
+	b.clientMu.RUnlock()
+
+	out := make([]MQTTClientInfo, len(items))
+	for i, it := range items {
+		subs := 0
+		if it.c != nil {
+			it.c.subMu.Lock()
+			subs = len(it.c.subs)
+			it.c.subMu.Unlock()
+		}
+		it.info.SubsCount = subs
+		out[i] = it.info
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ConnectedAt.Equal(out[j].ConnectedAt) {
+			return out[i].RemoteAddr < out[j].RemoteAddr
+		}
+		return out[i].ConnectedAt.Before(out[j].ConnectedAt)
+	})
+	return out
+}
+
+func (b *MQTTBridge) Publish(principal, mqttTopic string, data []byte) error {
+	if mqttTopic == "" {
+		return fmt.Errorf("mqtt topic is required")
+	}
+	kt := mqttTopicToKafka(mqttTopic)
+	if err := b.authorize(principal, authz.OpWrite, kt); err != nil {
+		return err
+	}
+	return b.bridgePublish(mqttTopic, data)
+}
+
+func MQTTTopicToKafka(mqttTopic string) string {
+	return mqttTopicToKafka(mqttTopic)
+}
+
 func NewMQTTBridge(store *storage.Store) *MQTTBridge {
 	return &MQTTBridge{
 		store:       store,
 		closeCh:     make(chan struct{}),
 		conns:       make(map[net.Conn]struct{}),
+		clients:     make(map[string]*mqttClientEntry),
 		connSem:     make(chan struct{}, mqttMaxConnections),
 		authLimiter: ratelimit.New(3, time.Second, 30*time.Second),
 	}
@@ -244,6 +337,7 @@ func (b *MQTTBridge) Close() error {
 }
 
 type mqttClient struct {
+	clientID  string
 	conn      net.Conn
 	br        *bufio.Reader
 	mu        sync.Mutex
@@ -338,6 +432,10 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 	b.active.Add(1)
 	defer b.active.Add(-1)
 	addr := remoteHost(conn)
+	remoteAddr := addr
+	if ra := conn.RemoteAddr(); ra != nil {
+		remoteAddr = ra.String()
+	}
 	if b.secure {
 		if ok, _ := b.authLimiter.Allow(addr); !ok {
 
@@ -376,14 +474,13 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 		}
 		switch ptype {
 		case mqttConnect:
+			info, parseErr := parseConnect(payload)
 			if b.secure {
-				info, err := parseConnect(payload)
-				if err != nil {
+				if parseErr != nil {
 					c.writePacket(mqttConnack, []byte{0x00, 0x01})
 					return
 				}
 				if b.requireTLS && !isTLSConn(conn) && (info.Username != "" || info.Password != "") {
-
 					audit.Log(audit.Event{
 						Actor: audit.Anonymous, Action: "auth.mqtt", Resource: "mqtt",
 						Result: audit.ResultDeny, Detail: "credentials over an unencrypted connection",
@@ -401,7 +498,6 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 						Detail:     fmt.Sprintf("invalid credentials backoff_ms=%d", delay.Milliseconds()),
 						RemoteAddr: addr,
 					})
-
 					c.writePacket(mqttConnack, []byte{0x00, 0x05})
 					return
 				}
@@ -409,9 +505,14 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 				c.principal = user
 				c.authed = true
 			}
+			if parseErr == nil && info != nil {
+				c.clientID = info.ClientID
+			}
 			if err := c.writePacket(mqttConnack, []byte{0x00, 0x00}); err != nil {
 				return
 			}
+			b.registerClient(remoteAddr, c.clientID, c)
+			defer b.unregisterClient(remoteAddr)
 		case mqttPublish:
 			ptopic, data, qos, packetID, err := parsePublish(flags, payload)
 			if err != nil {

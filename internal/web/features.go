@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -286,18 +287,65 @@ func (c *captureResponse) Write(b []byte) (int, error) { return c.buf.Write(b) }
 func (c *captureResponse) WriteHeader(code int)        { c.code = code }
 
 func (s *Server) handleMQTTStatus(w http.ResponseWriter, r *http.Request) {
+	clients := []gateway.MQTTClientInfo{}
 	status := map[string]any{
 		"enabled":     false,
 		"listen":      s.mqttListen,
 		"connections": int32(0),
 		"bridged":     int64(0),
+		"clients":     clients,
 	}
 	if s.mqtt != nil && s.mqttRunning {
 		status["enabled"] = true
 		status["connections"] = s.mqtt.ActiveClients()
 		status["bridged"] = s.mqtt.BridgedCount()
+		snap := s.mqtt.ClientsSnapshot()
+		if snap != nil {
+			status["clients"] = snap
+		}
 	}
 	writeJSON(w, 200, status)
+}
+
+func (s *Server) handleMQTTPublish(w http.ResponseWriter, r *http.Request) {
+	if s.mqtt == nil || !s.mqttRunning {
+		writeErr(w, 503, "mqtt bridge is not running")
+		return
+	}
+	var req struct {
+		Topic   string `json:"topic"`
+		Payload string `json:"payload"`
+		QoS     int    `json:"qos"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeErr(w, 400, "invalid JSON body")
+		return
+	}
+	req.Topic = strings.TrimSpace(req.Topic)
+	if req.Topic == "" {
+		writeErr(w, 400, "topic is required")
+		return
+	}
+	if req.QoS < 0 || req.QoS > 2 {
+		writeErr(w, 400, "qos must be 0, 1, or 2")
+		return
+	}
+	principal := s.actorFrom(r)
+	if err := s.mqtt.Publish(principal, req.Topic, []byte(req.Payload)); err != nil {
+		var denied *authz.DeniedError
+		if errors.As(err, &denied) {
+			writeErr(w, 403, err.Error())
+			return
+		}
+		writeErr(w, 502, err.Error())
+		return
+	}
+	kafkaTopic := gateway.MQTTTopicToKafka(req.Topic)
+	s.auditRequest(r, "mqtt.publish", req.Topic, fmt.Sprintf("kafka_topic=%s qos=%d bytes=%d", kafkaTopic, req.QoS, len(req.Payload)))
+	writeJSON(w, 201, map[string]string{
+		"topic":      req.Topic,
+		"kafkaTopic": kafkaTopic,
+	})
 }
 
 func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {

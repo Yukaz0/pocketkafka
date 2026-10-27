@@ -329,6 +329,7 @@ func (s *Server) routes() *http.ServeMux {
 	s.route(mux, "GET /api/v1/throughput", s.handleThroughput)
 	s.route(mux, "POST /api/v1/schemas/register", s.handleRegisterSchema)
 	s.route(mux, "GET /api/v1/mqtt", s.handleMQTTStatus)
+	s.route(mux, "POST /api/v1/mqtt/publish", s.handleMQTTPublish)
 	s.route(mux, "GET /api/v1/integrations", s.handleIntegrations)
 	s.route(mux, "GET /api/v1/config", s.handleConfig)
 	s.route(mux, "GET /api/v1/schemas", s.handleSchemas)
@@ -468,6 +469,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"license":      "MIT",
 		"version":      s.version,
 		"fleetEnabled": s.fleetEnabled,
+		"mqttEnabled":  s.mqtt != nil && s.mqttRunning,
 	})
 }
 

@@ -52,6 +52,7 @@ var apiRules = map[string]apiRule{
 	"GET /api/v1/schemas":                        {op: authz.OpDescribe, res: clusterScoped},
 	"GET /api/v1/schemas/{subject}":              {op: authz.OpDescribe, res: clusterScoped},
 	"GET /api/v1/mqtt":                           {op: authz.OpDescribe, res: clusterScoped},
+	"POST /api/v1/mqtt/publish":                  {op: authz.OpWrite, res: clusterScoped},
 	"GET /api/v1/integrations":                   {op: authz.OpAdmin, res: clusterScoped},
 	"GET /api/v1/config":                         {op: authz.OpAdmin, res: clusterScoped},
 	"GET /api/v1/acls":                           {op: authz.OpAdmin, res: clusterScoped},

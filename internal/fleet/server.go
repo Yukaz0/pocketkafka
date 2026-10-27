@@ -295,10 +295,12 @@ func (s *FleetServer) routes() {
 	s.mux.HandleFunc("GET /api/v1/fleet/servers", s.wrap(s.handleListServers))
 	s.mux.HandleFunc("GET /api/v1/fleet/servers/{id}", s.wrap(s.handleGetServer))
 	s.mux.HandleFunc("POST /api/v1/fleet/servers/{id}/revoke", s.wrap(s.handleRevokeServer))
-	s.mux.HandleFunc("DELETE /api/v1/fleet/servers/{id}", s.wrap(s.handleRevokeServer))
+	s.mux.HandleFunc("DELETE /api/v1/fleet/servers/{id}", s.wrap(s.handleDeleteServer))
 
 	s.mux.HandleFunc("GET /api/v1/fleet/enrollments", s.wrap(s.handleListEnrollments))
 	s.mux.HandleFunc("POST /api/v1/fleet/enrollments", s.wrap(s.handleCreateEnrollment))
+	s.mux.HandleFunc("DELETE /api/v1/fleet/enrollments/{prefix}", s.wrap(s.handleRevokeEnrollment))
+	s.mux.HandleFunc("POST /api/v1/fleet/enrollments/{prefix}/reissue", s.wrap(s.handleReissueEnrollment))
 	s.mux.HandleFunc("POST /api/v1/fleet/enroll", s.wrap(s.handleAgentEnroll))
 
 	s.mux.HandleFunc("GET /api/v1/fleet/containers", s.wrap(s.handleListContainers))
@@ -423,6 +425,139 @@ func (s *FleetServer) handleRevokeServer(w http.ResponseWriter, r *http.Request)
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":    "revoked",
 		"server_id": id,
+	})
+}
+func (s *FleetServer) handleDeleteServer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	principal, ok := s.checkAuthz(w, r, authz.OpAdmin, authz.ResourceFleetServer, id)
+	if !ok {
+		return
+	}
+
+	if s.registry == nil {
+		s.writeError(w, r, http.StatusNotFound, ErrCodeNotFound, "registry not configured")
+		return
+	}
+
+	if s.manager != nil {
+		s.manager.UnregisterServerSessions(id)
+	}
+
+	err := s.registry.DeleteServer(id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			s.writeError(w, r, http.StatusNotFound, ErrCodeNotFound, err.Error())
+			return
+		}
+		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, err.Error())
+		return
+	}
+
+	if s.audit != nil {
+		s.audit.Log(AuditEvent{
+			Actor:  principal,
+			Target: id,
+			Action: "server.delete",
+			Time:   time.Now(),
+			Result: "success",
+			Detail: "server deleted by admin",
+		})
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":    "deleted",
+		"server_id": id,
+	})
+}
+
+func (s *FleetServer) handleRevokeEnrollment(w http.ResponseWriter, r *http.Request) {
+	prefix := r.PathValue("prefix")
+	principal, ok := s.checkAuthz(w, r, authz.OpAdmin, authz.ResourceFleetServer, "*")
+	if !ok {
+		return
+	}
+
+	if s.registry == nil {
+		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, "registry not configured")
+		return
+	}
+
+	if err := s.registry.RevokeEnrollment(prefix); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			s.writeError(w, r, http.StatusNotFound, ErrCodeNotFound, "enrollment token not found")
+			return
+		}
+		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, err.Error())
+		return
+	}
+
+	if s.audit != nil {
+		s.audit.Log(AuditEvent{
+			Actor:  principal,
+			Target: prefix,
+			Action: "enrollment.revoke",
+			Time:   time.Now(),
+			Result: "success",
+			Detail: "enrollment token revoked",
+		})
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "revoked",
+		"prefix": prefix,
+	})
+}
+
+func (s *FleetServer) handleReissueEnrollment(w http.ResponseWriter, r *http.Request) {
+	prefix := r.PathValue("prefix")
+	principal, ok := s.checkAuthz(w, r, authz.OpAdmin, authz.ResourceFleetServer, "*")
+	if !ok {
+		return
+	}
+
+	if s.registry == nil {
+		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, "registry not configured")
+		return
+	}
+
+	var req struct {
+		Duration string `json:"duration,omitempty"`
+	}
+	dur := 15 * time.Minute
+	if r.Body != nil && r.ContentLength > 0 {
+		_ = s.readJSON(w, r, &req)
+		if req.Duration != "" {
+			if d, err := time.ParseDuration(req.Duration); err == nil && d > 0 {
+				dur = d
+			}
+		}
+	}
+
+	newToken, srvID, err := s.registry.ReissueEnrollment(prefix, dur)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			s.writeError(w, r, http.StatusNotFound, ErrCodeNotFound, "enrollment token not found")
+			return
+		}
+		s.writeError(w, r, http.StatusInternalServerError, ErrCodeInternal, err.Error())
+		return
+	}
+
+	if s.audit != nil {
+		s.audit.Log(AuditEvent{
+			Actor:  principal,
+			Target: srvID,
+			Action: "enrollment.reissue",
+			Time:   time.Now(),
+			Result: "success",
+			Detail: "token reissued for server " + srvID,
+		})
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]interface{}{
+		"token":      newToken,
+		"server_id":  srvID,
+		"expires_in": dur.String(),
 	})
 }
 

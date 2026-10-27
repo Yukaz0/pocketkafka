@@ -56,7 +56,8 @@ func peerTargetRouteAllowed(method, path string) bool {
 	}
 	if (method == http.MethodPost && path == "/api/v1/topics") ||
 		((method == http.MethodPut || method == http.MethodDelete) && path == "/api/v1/acls") ||
-		(method == http.MethodPost && path == "/api/v1/schemas/register") {
+		(method == http.MethodPost && path == "/api/v1/schemas/register") ||
+		(method == http.MethodPost && path == "/api/v1/mqtt/publish") {
 		return true
 	}
 

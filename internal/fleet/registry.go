@@ -337,6 +337,102 @@ func (r *Registry) RevokeServer(serverID string) error {
 	return r.persistLocked()
 }
 
+func (r *Registry) DeleteServer(serverID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	found := false
+	for agentID, a := range r.agents {
+		if a.ServerID == serverID {
+			delete(r.agents, agentID)
+			found = true
+		}
+	}
+	if _, ok := r.servers[serverID]; ok {
+		delete(r.servers, serverID)
+		found = true
+	}
+	for tok, e := range r.enrollments {
+		if e.ServerID == serverID {
+			delete(r.enrollments, tok)
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf("fleet: server %q not found: %w", serverID, ErrNotFound)
+	}
+	return r.persistLocked()
+}
+
+func (r *Registry) RevokeEnrollment(tokenPrefix string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	tokenPrefix = strings.TrimSpace(tokenPrefix)
+	if tokenPrefix == "" {
+		return ErrTokenInvalid
+	}
+	found := false
+	for tok := range r.enrollments {
+		if tok == tokenPrefix || strings.HasPrefix(tok, tokenPrefix) {
+			delete(r.enrollments, tok)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ErrNotFound
+	}
+	return r.persistLocked()
+}
+
+func (r *Registry) ReissueEnrollment(tokenPrefix string, duration time.Duration) (string, string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	tokenPrefix = strings.TrimSpace(tokenPrefix)
+	if tokenPrefix == "" {
+		return "", "", ErrTokenInvalid
+	}
+	var serverID string
+	found := false
+	for tok, e := range r.enrollments {
+		if tok == tokenPrefix || strings.HasPrefix(tok, tokenPrefix) {
+			serverID = e.ServerID
+			delete(r.enrollments, tok)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return "", "", ErrNotFound
+	}
+
+	tokBytes := make([]byte, 32)
+	if _, err := rand.Read(tokBytes); err != nil {
+		return "", "", fmt.Errorf("fleet: generate token: %w", err)
+	}
+	token := hex.EncodeToString(tokBytes)
+
+	now := time.Now()
+	e := &Enrollment{
+		Token:     token,
+		ServerID:  serverID,
+		CreatedAt: now,
+		Used:      false,
+	}
+	if duration != 0 {
+		exp := now.Add(duration)
+		e.ExpiresAt = &exp
+	}
+
+	r.enrollments[token] = e
+	if err := r.persistLocked(); err != nil {
+		return "", "", err
+	}
+	return token, serverID, nil
+}
+
 func (r *Registry) ListServers() []*Server {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

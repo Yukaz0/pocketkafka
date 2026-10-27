@@ -12,6 +12,7 @@
 # Local data
 /data/
 *.log
+fleet-agent.json
 
 # Never commit credentials or key material: TLS keys/certs and env files are
 # generated per deployment and must stay out of the repository.
