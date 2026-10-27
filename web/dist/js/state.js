@@ -48,15 +48,16 @@ const state={zone:'kafka',fleetEnabled:false,fleetStatus:null,fleetServers:[],fl
   diffSel:[], diffOpen:false,
 };
 const navItems=[
-  ['overview','Overview',I.overview,'core'],
-  ['topics','Topics',I.tag,'core'],
-  ['databrowser','Data Browser',I.search,'core'],
-  ['groups','Consumer Groups',I.users,'core'],
-  ['metrics','Metrics',I.chart,'core'],
-  ['producer','Producer Studio',I.send,'more'],
-  ['schemas','Schemas',I.schema,'more'],
-  ['logs','Broker Logs',I.document,'more'],
-  ['settings','Settings',I.gear,'more']
+  ['overview','Overview',I.overview],
+  ['topics','Topics',I.tag],
+  ['databrowser','Data Browser',I.search],
+  ['groups','Consumer Groups',I.users],
+  ['metrics','Metrics',I.chart],
+  ['health','Health',I.pulse],
+  ['producer','Producer Studio',I.send],
+  ['schemas','Schemas',I.schema],
+  ['logs','Broker Logs',I.document],
+  ['settings','Settings',I.gear]
 ];
 
 function initTheme(){
