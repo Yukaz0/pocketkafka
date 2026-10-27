@@ -53,14 +53,14 @@ All services are baked into a single binary and boot in milliseconds:
 | Component | Port | Description |
 | :--- | :---: | :--- |
 | **Kafka Wire Protocol** | `9092` / `29092` | Core broker listener (`PLAINTEXT` / internal network) |
-| **Embedded Web UI** | `8080` | Control Center dashboard with grouped navigation, health monitoring, live tail, and message inspector |
-| **Schema Registry** | `8081` | Confluent API-compatible subset: AVRO/JSON syntax-checked, PROTOBUF rejected, no compatibility checking |
+| **Embedded Web UI** | `8080` | Multi-zone SPA (Kafka, Fleet, MQTT) with live tail, inspector & settings |
+| **Schema Registry** | `8081` | Confluent API-compatible subset: AVRO/JSON syntax-checked, PROTOBUF rejected |
 | **HTTP REST Proxy** | `8082` | Publish and consume messages over standard HTTP POST/GET |
 | **MQTT 3.1.1 Bridge** | `1883` | Direct IoT sensor telemetry bridged to Kafka topics |
+| **Fleet Controller** | `18090` (proxy `:8080`) | Remote host onboarding & Docker container lifecycle control |
 | **TLS / SSL** | `9093` | Optional encrypted listener |
 | **Prometheus Metrics** | `8080` `/metrics` | Standard Prometheus metric exporter |
 | **Health Probes** | `8080` `/healthz` | Kubernetes / Docker liveness and readiness endpoints |
-
 ---
 
 ## 🚀 Quick Start
@@ -87,8 +87,8 @@ docker compose -f docker-compose.minimal.yml down
 # 1. Build binary
 go build -o bin/pocketkafka ./cmd/server
 go build -o bin/pkctl ./cmd/kctl               # Admin CLI tool
+go build -o bin/fleet-agent ./cmd/fleet-agent   # Optional Fleet host agent
 go build -o bin/client-example ./cmd/client-example
-
 # 2. Start the PocketKafka broker
 ./bin/pocketkafka -config config/config.yaml
 ```
@@ -216,23 +216,24 @@ only holds Read permission.
 
 ## 🎨 Embedded Web UI
 
-PocketKafka ships a single-file SPA at `http://localhost:8080`, served directly from the Go binary via `//go:embed`. No Node.js, no build step, no external fonts or CDN.
+PocketKafka ships a modern, zero-build, native ES modules Single-Page Application (SPA) at `http://localhost:8080`, served directly from the Go binary via `//go:embed`. No Node.js, no bundler/build step, no npm packages, and no external CDN dependencies.
 
-- **Grouped sidebar navigation** with collapsible rail (56 px collapsed / 224 px expanded), organized into *Overview*, *Operations*, *Developer Tools*, and *Connections* groups.
-- **Overview dashboard**: broker health status, attention items, throughput and consumer lag summary cards with links to detailed views.
-- **Health view**: per-broker health report with configurable time window, consumed rate, and attention alerts from `GET /api/v1/health/overview`.
-- **Global broker selector**: switch the dashboard between this broker and registered PocketKafka peers or Kafka clusters. Kafka targets expose read-only Overview, Health, Connections, Topics, and Consumer Groups; unsupported features explain why. The Clusters registry remains local.
-- **Peer dashboard credentials**: with security/ACLs enabled, a cluster Admin can issue a bearer token bound to an existing user via `POST /api/v1/auth/delegated-tokens`, list ID/principal metadata with `GET /api/v1/auth/delegated-tokens`, and revoke by ID with `DELETE /api/v1/auth/delegated-tokens/{id}`. The raw token is returned once; only its SHA-256 verifier is stored in `<data_dir>/__dashboard_tokens.json` (mode `0600`). Unlike `web.cluster_token`, a delegated token acts only within its principal's ACL grants; the health token remains read-only.
-- **Data Browser**: WebSocket live-tail with message inspector (collapsible JSON tree, syntax-highlighted), topic explorer panel, and message diff.
-- **Topics & Consumer Groups**: partition detail, log-end/high-watermark offsets, per-partition lag visualization.
-- **Producer Studio & Dev Studio**: compose and inject test records; experiment with schema payloads.
-- **Topology map**: SVG-rendered broker-to-topic-to-consumer-group graph.
-- **Metrics**: message throughput charts and MQTT bridge status.
-- **Broker Logs**: filterable log viewer by severity level.
-- **Security & ACL**: manage SASL users and ACL rules.
-- **Dark / Light theme toggle** with `localStorage` persistence.
-- **Responsive**: full mobile layout with hamburger drawer and slide-out topic explorer at narrow viewports.
+### Multi-Zone Architecture
+The topbar features an instant zone switcher separating the application into three isolated operational domains:
+- **`[ Kafka ]` Control Center**: Core broker operations, topics, consumer groups, partition data browser, schemas, metrics, health, producer studio, broker logs, and settings.
+- **`[ Fleet ]` Fleet Studio**: Multi-node infrastructure manager. Onboard remote hosts via single-use HMAC enrollment tokens, track container states (Docker), dispatch async lifecycle jobs, and view append-only audit trails.
+- **`[ MQTT ]` MQTT Studio**: IoT gateway management. Inspect active client connections with keep-alive trackers, publish test payloads directly to Kafka-bridged topics, test topic wildcard matchers (`+`/`#`), and monitor ingress throughput.
 
+### Key Capabilities
+- **Flat 10-Item Sidebar**: Clean, unbloated sidebar in the Kafka zone (*Overview*, *Topics*, *Data Browser*, *Consumer Groups*, *Metrics*, *Health*, *Producer Studio*, *Schemas*, *Broker Logs*, *Settings*) with collapsible rail (56 px collapsed / 224 px expanded).
+- **Consolidated Settings**: Settings view organized into clear sub-tabs: *General*, *Clusters*, *Connections* (ingress surfaces & endpoint details), *Storage*, and *Security & ACL*.
+- **Data Browser**: WebSocket live-tail with message inspector (collapsible JSON tree, syntax-highlighted), topic explorer drawer, and message diff viewer.
+- **Topics & Consumer Groups**: Partition detail, log-end/high-watermark offsets, commit history, and per-partition lag visualization.
+- **Isolated Sign-In Screen**: When authentication is enabled, non-authenticated requests render a dedicated, centered login card with zero dashboard chrome or leaking menus.
+- **Dynamic Asset Cache-Buster**: Query parameters (`v=${version}`) automatically hash embedded frontend files on build to guarantee fresh browser caches across upgrades.
+- **Global Broker Selector**: Switch between local broker and registered Kafka/PocketKafka peer clusters.
+- **Dark / Light Theme Toggle**: Native theme switcher persisted in `localStorage`.
+- **Responsive**: Full mobile layout with drawer navigation at narrow viewports.
 ---
 
 ## 🚀 Fleet Agent (Host & Container Management)
@@ -277,29 +278,56 @@ pocketkafka/
 ├── cmd/
 │   ├── server/             # All-in-one PocketKafka broker entrypoint
 │   ├── kctl/               # Admin CLI management tool (pkctl)
-│   └── client-example/     # Bundled SDK demo
+│   ├── fleet-agent/        # Remote host daemon for container management
+│   └── client-example/     # Bundled zero-dependency SDK demo
 ├── pkg/
 │   ├── protocol/           # Hand-written Kafka wire protocol codecs (Zero deps)
 │   └── client/             # Zero-dependency Go client SDK
 ├── internal/
 │   ├── server/             # TCP socket server, dispatcher, SASL/SCRAM, TLS
 │   ├── handler/            # Core Kafka API handlers (0..42) + dispatcher
-│   ├── storage/            # Commit log, sparse index, compaction, S3 tiered storage
-│   ├── coordinator/        # Consumer group coordinator, offsets (snapshot + WAL)
-│   ├── schemaregistry/     # Embedded registry subset (AVRO/JSON; PROTOBUF rejected), persisted
+│   ├── storage/            # Commit log, sparse index, compaction, recovery
+│   ├── tier/               # S3 tiered storage engine & object offloader
+│   ├── coordinator/        # Consumer group coordinator & offset snapshot/WAL
+│   ├── schemaregistry/     # Embedded Schema Registry subset (AVRO/JSON)
 │   ├── gateway/            # HTTP REST proxy & MQTT 3.1.1 bridge
-│   ├── authz/              # Shared ACL store + Authorizer (all ingresses)
-│   ├── httpauth/           # HTTP authentication/authorization middleware
-│   ├── atomicfile/         # Durable temp-file + fsync + rename helper
-│   ├── web/                # Embedded UI HTTP server & WebSocket live tail
-│   └── config/             # YAML & 12-factor loader, normalizer and validator
-├── web/                    # Frontend SPA source code & embedded assets
-│   └── dist/index.html     # Embedded single-file dashboard
+│   ├── fleet/              # Fleet controller, token enrollment & job dispatcher
+│   ├── authz/              # Shared ACL store & Authorizer engine
+│   ├── httpauth/           # HTTP authentication & session middleware
+│   ├── credential/         # Password hashing & secret credential management
+│   ├── ratelimit/          # Token-bucket rate limiter & brute-force defense
+│   ├── audit/              # Append-only security audit log & event exporter
+│   ├── netguard/           # SSRF protection & CIDR socket validator
+│   ├── metrics/            # Prometheus metrics registry & collectors
+│   ├── logger/             # Structured slog handler & log buffer
+│   ├── atomicfile/         # Durable temp-file + fsync + atomic rename helper
+│   ├── web/                # Web UI HTTP server, API endpoints & WebSocket proxy
+│   └── config/             # YAML & 12-factor loader, normalizer, and validator
+├── web/                    # Embedded frontend assets (//go:embed dist/*)
+│   ├── web.go              # Embedded filesystem root accessor
+│   └── dist/               # Native ES modules Single-Page Application (Zero build)
+│       ├── index.html      # Shell template with dynamic cache-buster
+│       ├── css/style.css   # Unified dark/light design system stylesheet
+│       └── js/             # Modular application architecture
+│           ├── app.js      # Bootstrap, event lifecycle & theme init
+│           ├── state.js    # Central reactive state & SVG icon registry
+│           ├── api.js      # HTTP REST & WebSocket streaming client
+│           ├── router.js   # Hash-based SPA router
+│           ├── render.js   # Layout dispatcher & DOM renderer
+│           ├── refresh.js  # Live polling coordinator
+│           └── zones/      # Domain-specific UI views
+│               ├── kafka.js # Kafka broker views & detail drawers
+│               ├── fleet.js # Fleet servers, tokens, containers & jobs
+│               └── mqtt.js  # MQTT Studio, client tracker & publisher
+├── config/                 # Reference server configurations (default, docker, secure)
+├── deploy/                 # Production deployment configs (Grafana dashboards)
+├── docs/                   # Public guides (Runbooks, Security, Contributing, Roadmap)
 ├── test/
 │   ├── interop/            # External client compatibility matrix & runners
 │   └── bench/              # Reproducible benchmark runner
-├── deploy/                 # Docker Compose, Prometheus & Grafana configs
-├── Dockerfile              # Ultra-lightweight multi-stage container (< 29MB)
+├── Dockerfile              # Ultra-lightweight multi-stage broker container (< 29MB)
+├── Dockerfile.fleet-agent  # Standalone fleet-agent container
+├── docker-compose.yml      # Multi-service stack (Broker, Postgres, Fleet Agent)
 ├── go.mod                  # 100% clean - zero external requires
 └── LICENSE                 # MIT License
 ```
