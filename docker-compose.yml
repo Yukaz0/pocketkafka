@@ -84,6 +84,31 @@ services:
       timeout: 3s
       retries: 5
 
+  # Fleet Agent (Optional container runner):
+  # Jalankan jika ingin memonitor/mengontrol container host lokal via Fleet:
+  #   FLEET_ENROLL_TOKEN=<token_dari_ui> docker compose --profile fleet up -d fleet-agent
+  # Di Windows / macOS, pastikan Docker socket dapat diakses container.
+  fleet-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.fleet-agent
+    image: pocketkafka-fleet-agent:latest
+    container_name: local-fleet-agent
+    profiles:
+      - fleet
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - fleet_agent_data:/data
+    environment:
+      - FLEET_SERVER_URL=http://kafka-engine:8080
+      - FLEET_ENROLL_TOKEN=${FLEET_ENROLL_TOKEN:-}
+      - FLEET_INSECURE=true
+    depends_on:
+      kafka-engine:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   kafka_data:
+  fleet_agent_data:

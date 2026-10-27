@@ -205,5 +205,22 @@ docker run -d --restart=always --name fleet-agent \
 docker logs fleet-agent  # expect "fleet-agent active: agent_id=..."
 ```
 
+### Menjalankan dengan Docker Compose
+Jika PocketKafka broker dan agen dijalankan di host yang sama:
+```bash
+FLEET_ENROLL_TOKEN=<token> docker compose --profile fleet up -d fleet-agent
+```
+
+### Menjalankan di Windows
+1. **Opsi Docker Desktop (Rekomendasi)**:
+   Jalankan container menggunakan perintah Docker di atas di lingkungan Docker Desktop (WSL 2 backend).
+2. **Opsi Biner Native (`fleet-agent.exe`)**:
+   - Kompilasi biner: `GOOS=windows GOARCH=amd64 go build -o fleet-agent.exe ./cmd/fleet-agent`
+   - Buka Docker Desktop -> Settings -> General -> centang *Expose daemon on tcp://localhost:2375 without TLS*.
+   - Jalankan agen via TCP:
+     ```cmd
+     fleet-agent.exe -server https://<controller-host>:18090 -token <token> -docker-socket tcp://127.0.0.1:2375
+     ```
+
 Use `--network host` or the host LAN IP if `localhost` inside the
 container does not reach the controller.

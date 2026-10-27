@@ -235,6 +235,41 @@ PocketKafka ships a single-file SPA at `http://localhost:8080`, served directly 
 
 ---
 
+## 🚀 Fleet Agent (Host & Container Management)
+
+PocketKafka includes an optional, zero-dependency Fleet Agent daemon (`cmd/fleet-agent`) for monitoring and controlling Docker containers across remote or local nodes directly from the Web UI Fleet zone.
+
+### 1. Run with Docker Compose
+Start the agent alongside the broker on a local Docker host:
+```sh
+# 1. Generate enrollment token from Web UI: Fleet -> Servers -> Enroll Server
+# 2. Run with fleet profile:
+FLEET_ENROLL_TOKEN="<token>" docker compose --profile fleet up -d fleet-agent
+```
+
+### 2. Standalone Container
+```sh
+docker build -f Dockerfile.fleet-agent -t pocketkafka-fleet-agent:latest .
+docker run -d --name fleet-agent --restart always \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v fleet-agent-state:/data \
+  -e FLEET_SERVER_URL=https://<controller-host>:18090 \
+  -e FLEET_ENROLL_TOKEN="<token>" \
+  pocketkafka-fleet-agent:latest
+```
+
+### 3. Windows Usage
+- **Option A (Docker Desktop WSL 2 - Recommended)**: Run via the Docker container command above.
+- **Option B (Native Binary `fleet-agent.exe`)**:
+  Compile with `GOOS=windows GOARCH=amd64 go build -o fleet-agent.exe ./cmd/fleet-agent`. Enable *"Expose daemon on tcp://localhost:2375 without TLS"* in Docker Desktop settings, then run:
+  ```cmd
+  fleet-agent.exe -server https://<controller-host>:18090 -token <token> -docker-socket tcp://127.0.0.1:2375
+  ```
+
+Detailed operation, systemd setup, and troubleshooting are available in [`docs/FLEET_RUNBOOK.md`](docs/FLEET_RUNBOOK.md).
+
+---
+
 ## 📁 Project Layout
 
 ```
