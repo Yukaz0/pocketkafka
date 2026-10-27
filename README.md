@@ -57,7 +57,7 @@ All services are baked into a single binary and boot in milliseconds:
 | **Schema Registry** | `8081` | Confluent API-compatible subset: AVRO/JSON syntax-checked, PROTOBUF rejected |
 | **HTTP REST Proxy** | `8082` | Publish and consume messages over standard HTTP POST/GET |
 | **MQTT 3.1.1 Bridge** | `1883` | Direct IoT sensor telemetry bridged to Kafka topics |
-| **Fleet Controller** | `18090` (proxy `:8080`) | Remote host onboarding & Docker container lifecycle control |
+| **Fleet Controller** | `18090` (proxy `:8080`) | Remote host onboarding & container lifecycle (disabled by default; loopback/proxied via `:8080`) |
 | **TLS / SSL** | `9093` | Optional encrypted listener |
 | **Prometheus Metrics** | `8080` `/metrics` | Standard Prometheus metric exporter |
 | **Health Probes** | `8080` `/healthz` | Kubernetes / Docker liveness and readiness endpoints |
