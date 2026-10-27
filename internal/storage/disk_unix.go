@@ -2,7 +2,10 @@
 
 package storage
 
-import "syscall"
+import (
+	"os"
+	"syscall"
+)
 
 func diskUsagePct(dir string) float64 {
 	var fs syscall.Statfs_t
@@ -14,4 +17,13 @@ func diskUsagePct(dir string) float64 {
 	}
 	used := float64(fs.Blocks - fs.Bfree)
 	return used / float64(fs.Blocks) * 100
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }

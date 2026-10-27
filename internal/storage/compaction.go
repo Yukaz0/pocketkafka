@@ -282,16 +282,6 @@ func dirFileNames(dir string) ([]string, error) {
 	}
 	return out, nil
 }
-
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
-}
-
 type compactWriter struct {
 	dir          string
 	maxBytes     int64

@@ -44,15 +44,3 @@ func Write(path string, data []byte, perm os.FileMode) error {
 	}
 	return syncDir(dir)
 }
-
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return fmt.Errorf("atomicfile: open dir: %w", err)
-	}
-	defer d.Close()
-	if err := d.Sync(); err != nil {
-		return fmt.Errorf("atomicfile: sync dir: %w", err)
-	}
-	return nil
-}

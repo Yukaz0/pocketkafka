@@ -33,3 +33,7 @@ func diskUsagePct(dir string) float64 {
 	used := float64(totalNumberOfBytes - totalNumberOfFreeBytes)
 	return used / float64(totalNumberOfBytes) * 100
 }
+
+func syncDir(dir string) error {
+	return nil
+}
