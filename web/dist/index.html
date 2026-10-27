@@ -3915,9 +3915,10 @@ window.viewContainerInspect = function(id){
 window.viewContainerLogs=async function(id, name, serverId){
   const prevLevel = state._fleetLogsState ? state._fleetLogsState.level : 'all';
   const prevFilter = state._fleetLogsState ? state._fleetLogsState.filter : '';
-  state._fleetLogsState = { mode: 'single', id, name, serverId, rawLines: [], filter: prevFilter, level: prevLevel };
+  state._fleetLogsState = { mode: 'single', id, name, serverId, rawLines: [], filter: prevFilter, level: prevLevel, autoRefresh: true };
   openDrw('Logs: ' + (name || id), `<div id="fleetLogMeta" style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:8px">Loading logs...</div><div id="fleetLogWrap" style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:8px 0;max-width:100%;overflow-x:hidden"><div class="muted" style="padding:14px;text-align:center">Fetching container logs...</div></div>`, true);
   renderFleetLogsActions();
+  startFleetLogsAuto();
   await refreshFleetLogs();
 };
 
@@ -3926,9 +3927,10 @@ window.viewAllContainersLogs=async function(){
   const running = cnts.filter(c => (c.state||'').toLowerCase() === 'running');
   const prevLevel = state._fleetLogsState ? state._fleetLogsState.level : 'all';
   const prevFilter = state._fleetLogsState ? state._fleetLogsState.filter : '';
-  state._fleetLogsState = { mode: 'all', id: 'all', name: 'All Running Containers', serverId: '', rawLines: [], filter: prevFilter, level: prevLevel };
+  state._fleetLogsState = { mode: 'all', id: 'all', name: 'All Running Containers', serverId: '', rawLines: [], filter: prevFilter, level: prevLevel, autoRefresh: true };
   openDrw('Logs: All Containers', `<div id="fleetLogMeta" style="font:11px/1.9 var(--font-mono);color:var(--muted);margin-bottom:8px">Fetching logs from ${running.length} containers...</div><div id="fleetLogWrap" style="font-family:var(--font-mono);font-size:12px;line-height:1.7;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:8px 0;max-width:100%;overflow-x:hidden"><div class="muted" style="padding:14px;text-align:center">Fetching logs from ${running.length} running containers...</div></div>`, true);
   renderFleetLogsActions();
+  startFleetLogsAuto();
   await refreshFleetLogs();
 };
 
@@ -3961,10 +3963,9 @@ function renderFleetLogsActions(){
     + `<button class="cbtn" onclick="refreshFleetLogs()">Refresh</button>`;
 }
 
-window.toggleFleetLogsAuto = function(){
+function startFleetLogsAuto(){
   const s = state._fleetLogsState;
   if(!s) return;
-  s.autoRefresh = !s.autoRefresh;
   if(s.autoTimer){ clearInterval(s.autoTimer); s.autoTimer = null; }
   if(s.autoRefresh){
     s.autoTimer = setInterval(async () => {
@@ -3975,6 +3976,13 @@ window.toggleFleetLogsAuto = function(){
       await refreshFleetLogs(true);
     }, 3000);
   }
+}
+
+window.toggleFleetLogsAuto = function(){
+  const s = state._fleetLogsState;
+  if(!s) return;
+  s.autoRefresh = !s.autoRefresh;
+  startFleetLogsAuto();
   const btn = document.getElementById('drwLogAutoBtn');
   if(btn){
     btn.textContent = s.autoRefresh ? '⏸ Auto' : '▶ Auto';
@@ -4193,7 +4201,8 @@ window.goFleetContainers=function(serverId){
 
 /* Broker logs viewer */
 function viewLogs(){
-  const s = state._brokerLogsState = state._brokerLogsState || { filter: '', level: 'all', auto: false, rawLines: [] };
+  const s = state._brokerLogsState = state._brokerLogsState || { filter: '', level: 'all', auto: true, rawLines: [] };
+  s.auto = true;
   return `<div>${pageHeader('Broker Logs','Review recent PocketKafka broker log entries with level filtering.')}
     <div class="card" style="margin-bottom:14px;padding:12px">
       <div class="row" style="gap:10px;justify-content:space-between;flex-wrap:wrap">
@@ -4228,7 +4237,16 @@ function viewLogs(){
 async function loadLogs(silent){
   const out = document.getElementById('logOut');
   if(!out) return;
-  const s = state._brokerLogsState = state._brokerLogsState || { filter: '', level: 'all', auto: false, rawLines: [] };
+  const s = state._brokerLogsState = state._brokerLogsState || { filter: '', level: 'all', auto: true, rawLines: [] };
+  if(s.auto && !s.timer){
+    s.timer = setInterval(async () => {
+      if(state.view !== 'logs' || !state._brokerLogsState || !state._brokerLogsState.auto){
+        if(s.timer) { clearInterval(s.timer); s.timer = null; }
+        return;
+      }
+      await loadLogs(true);
+    }, 3000);
+  }
   try{
     const lines = await api('/api/v1/logs');
     s.rawLines = lines || [];
