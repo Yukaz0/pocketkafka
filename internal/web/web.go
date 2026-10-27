@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -39,6 +40,7 @@ type Server struct {
 	brokerID  int32
 	clusterID string
 	version   string
+	indexHTML []byte
 	startTime time.Time
 	metrics   *metrics.Registry
 	monitor   *Monitor
@@ -172,6 +174,14 @@ func (s *Server) WithBrokerInfo(listeners []string, advertised, securityMode str
 
 func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.Registry, brokerID int32, clusterID string, version string) *Server {
 	acl := authz.NewInMemory()
+	v := version
+	if v == "" {
+		v = "dev"
+	}
+	var indexHTML []byte
+	if data, err := fs.ReadFile(webui.FS(), "index.html"); err == nil {
+		indexHTML = []byte(strings.ReplaceAll(string(data), "${version}", v))
+	}
 	return &Server{
 		store:           store,
 		gm:              gm,
@@ -179,6 +189,7 @@ func New(store *storage.Store, gm *coordinator.GroupManager, sr *schemaregistry.
 		brokerID:        brokerID,
 		clusterID:       clusterID,
 		version:         version,
+		indexHTML:       indexHTML,
 		startTime:       time.Now(),
 		metrics:         newWebMetrics(),
 		monitor:         NewMonitor(),
@@ -305,7 +316,15 @@ func (s *Server) route(mux *http.ServeMux, pattern string, h func(http.ResponseW
 
 func (s *Server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.Handle("/", noCache(http.FileServer(http.FS(webui.FS()))))
+	fsHandler := http.FileServer(http.FS(webui.FS()))
+	mux.Handle("/", noCache(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if (r.URL.Path == "/" || r.URL.Path == "/index.html") && len(s.indexHTML) > 0 {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write(s.indexHTML)
+			return
+		}
+		fsHandler.ServeHTTP(w, r)
+	})))
 	s.route(mux, "GET /api/v1/info", s.handleInfo)
 	s.route(mux, "GET /api/v1/cluster", s.handleCluster)
 	s.route(mux, "GET /api/v1/topics", s.handleTopics)
