@@ -1,5 +1,5 @@
 // PocketKafka Render Orchestration
-import { state, $, I, esc, redactTargetEndpoint, activeAlerts, groupLagWarn } from './state.js';
+import { state, $, I, esc, redactTargetEndpoint, activeAlerts, groupLagWarn, navItems } from './state.js';
 import {
   isTargetUnavailable, isKafkaTarget, activeTargetEntry, activeTargetKind,
   targetUnavailableMessage, activeClusterLabel
@@ -29,7 +29,6 @@ const goView = (...args) => window.goView?.(...args);
 const refresh = (...args) => window.refresh?.(...args);
 
 
-const navItems=[['overview','Overview',I.overview,'core'],['topics','Topics',I.tag,'core'],['databrowser','Data Browser',I.search,'core'],['groups','Consumer Groups',I.users,'core'],['metrics','Metrics',I.chart,'core'],['health','Health',I.pulse,'more'],['integrations','Integrations',I.topology,'more'],['logs','Broker Logs',I.document,'more'],['schemas','Schemas',I.schema,'more'],['producer','Producer Studio',I.send,'more'],['devstudio','Dev Studio',I.flask,'more'],['topology','Topology',I.topology,'more'],['storage','Storage',I.archive,'more'],['settings','Settings',I.gear,'more']];
 
 function renderFatal(err){ const v=document.getElementById('view'); if(!v)return; const msg=esc(redactTargetEndpoint(String((err&&err.message)||err||'unknown'))); v.innerHTML='<div class="card"><h3>Something went wrong</h3><div class="muted" style="font-family:var(--font-mono);font-size:11px;margin:8px 0 14px;word-break:break-word">'+msg+'</div><button class="btn" onclick="recoverFatal()">Back to Overview</button></div>'; }
 window.recoverFatal=function(){ state.group=null; state.topicDetail=null; goView('connections'); };
@@ -74,19 +73,14 @@ function buildNav(){
     </section>`;
   }else{
     if(headText)headText.textContent='Control center';
-    const groups=[['core',''],['more','More Tools']];
-    nav.innerHTML=groups.map(([group,label])=>{
-      const items=navItems.filter(item=>item[3]===group);
-      if(!items.length)return '';
-      const collapsible=group==='more';
-      const collapsed=collapsible&&state.navGroupsCollapsed[group];
-      const heading=label?`<button class="navGroupToggle" id="navGroupToggle-${group}" type="button" onclick="toggleNavGroup('${group}')" aria-label="Toggle ${esc(label)} navigation" aria-expanded="${collapsed?'false':'true'}" aria-controls="navGroup-${group}"><span>${esc(label)}</span><span class="navGroupChevron" aria-hidden="true"></span></button>`:'';
-      const links=items.map(([key,name,icon])=>{
-        const unavailable=navUnavailableReason(key);
-        return `<button class="navLink ${state.view===key?'active':''}" type="button" ${unavailable?'disabled aria-disabled="true" title="'+esc(unavailable)+'"':'onclick="goView(\''+key+'\')"'} ${state.view===key?'aria-current="page"':''}><span>${icon}</span><span class="navText">${esc(name)}</span></button>`;
-      }).join('');
-      return `<section class="navGroup ${collapsed?'is-collapsed':''}" aria-label="${label||'Primary'}">${heading}<div class="navGroupLinks" ${label?`id="navGroup-${group}"`:''}>${links}</div></section>`;
-    }).join('');
+    nav.innerHTML=`<section class="navGroup" aria-label="Kafka Navigation">
+      <div class="navGroupLinks">
+        ${navItems.map(([key,name,icon])=>{
+          const unavailable=navUnavailableReason(key);
+          return `<button class="navLink ${state.view===key?'active':''}" type="button" ${unavailable?'disabled aria-disabled="true" title="'+esc(unavailable)+'"':'onclick="goView(\''+key+'\')"'} ${state.view===key?'aria-current="page"':''}><span>${icon}</span><span class="navText">${esc(name)}</span></button>`;
+        }).join('')}
+      </div>
+    </section>`;
   }
   const navEl=document.getElementById('appNav');
   navEl.classList.toggle('collapsed',!!state.sidebarCollapsed);
