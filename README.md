@@ -124,6 +124,11 @@ PocketKafka comes with a powerful zero-dependency CLI tool:
 
 ## 💻 Client SDK & Multi-Language Usage
 
+PocketKafka implements the standard Apache Kafka binary wire protocol (compatible with Kafka 0.11 through 2.4, RecordBatch v2 format). Client options across programming languages:
+- **Native Kafka Protocol (`localhost:9092`)**: Direct TCP streaming with standard Kafka client libraries (in-tree Go SDK and `librdkafka` legacy mode verified; full external matrix tracked in [`test/interop/compatibility.yaml`](test/interop/compatibility.yaml)).
+- **HTTP REST Proxy (`localhost:8082`)**: Universal publish/consume over standard HTTP (`curl`, `fetch`, `requests`) without requiring any Kafka client library.
+- **MQTT Bridge (`localhost:1883`)**: Direct sensor and IoT device streaming.
+
 ### 1. Go (Native SDK)
 
 ```go

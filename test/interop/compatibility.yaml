@@ -75,13 +75,13 @@ api_versions:
   LeaveGroup: 3
   SyncGroup: 3
   DescribeGroups: 3
-  ListGroups: 3
+  ListGroups: 2
   SaslHandshake: 1
   ApiVersions: 2
   CreateTopics: 4
   DeleteTopics: 3
   InitProducerID: 2
-  SaslAuthenticate: 2
+  SaslAuthenticate: 1
   DeleteGroups: 1
   # Transactional APIs (AddPartitionsToTxn=24, AddOffsetsToTxn=25, EndTxn=26)
   # are intentionally NOT advertised: the broker has no transaction state and
