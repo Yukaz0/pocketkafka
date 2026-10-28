@@ -166,7 +166,7 @@ func loadOrEnroll(ctx context.Context, client *http.Client, serverURL, token, st
 		Secret:   sec,
 	}
 
-	data, err := json.MarshalIndent(state, "", "  ")
+	data, err := json.MarshalIndent(state, "", "  ") //#nosec G117 -- AgentState.Secret is sealed credential material persisted by design; file written 0600 under dir 0700
 	if err != nil {
 		return nil, err
 	}

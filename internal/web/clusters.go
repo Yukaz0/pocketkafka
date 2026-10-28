@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -467,10 +468,13 @@ var clusterHTTPClient = &http.Client{
 
 func (s *Server) fetchClusterReport(ctx context.Context, e ClusterEntry, window time.Duration, token string) ([]byte, time.Duration, error) {
 	endpoint := strings.TrimRight(e.URL, "/") + "/api/v1/health/overview?window=" + fmt.Sprintf("%d", int(window.Seconds()))
+	if eu, uerr := url.Parse(endpoint); uerr != nil || peerHostAllowed(eu.Host) != nil {
+		return nil, 0, errInvalidPeerHost
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, clusterFetchTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil) //#nosec G704 -- endpoint host pre-validated by peerHostAllowed (IP literals via netguard.CheckAddr; dial via clusterDialContext); URL registered by admin, not end-user input
 	if err != nil {
 		return nil, 0, err
 	}
@@ -480,7 +484,7 @@ func (s *Server) fetchClusterReport(ctx context.Context, e ClusterEntry, window 
 	}
 	start := time.Now()
 
-	resp, err := clusterHTTPClient.Do(req)
+	resp, err := clusterHTTPClient.Do(req) //#nosec G704 -- req built from endpoint pre-validated by peerHostAllowed above; dial via clusterDialContext/netguard
 	latency := time.Since(start)
 	if err != nil {
 		return nil, latency, err

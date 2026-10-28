@@ -229,7 +229,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		secure := s.secureRequest(r)
 
-		http.SetCookie(w, &http.Cookie{
+		http.SetCookie(w, &http.Cookie{ //#nosec G124 -- Secure is runtime-dependent (TLS or trusted-proxy X-Forwarded-Proto); HttpOnly and SameSite=Strict always set
 			Name:     cookieName(secure),
 			Value:    signToken(sessionPayload(u.Username, exp, id), s.authSecret),
 			Path:     "/",
@@ -278,7 +278,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, name := range []string{hostCookieName, authCookieName} {
 
-		http.SetCookie(w, &http.Cookie{
+		http.SetCookie(w, &http.Cookie{ //#nosec G124 -- Secure is runtime-dependent (TLS or trusted-proxy X-Forwarded-Proto); HttpOnly and SameSite=Strict always set
 			Name:     name,
 			Value:    "",
 			Path:     "/",

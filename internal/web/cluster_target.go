@@ -893,7 +893,7 @@ func (s *Server) proxyPeerAPI(w http.ResponseWriter, r *http.Request, entry Clus
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	response, err := peerTargetClient.Do(request)
+	response, err := peerTargetClient.Do(request) //#nosec G704 -- target host pre-validated by peerTargetURL/peerHostAllowed (IP literals via netguard.CheckAddr; dial via clusterDialContext); URL registered by admin, not end-user input
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "peer request failed")
 		return
@@ -973,6 +973,9 @@ func peerTargetURL(rawURL, path, query string) (*url.URL, error) {
 	target, err := url.Parse(rawURL)
 	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" || target.User != nil || target.Fragment != "" {
 		return nil, errors.New("invalid peer URL")
+	}
+	if peerHostAllowed(target.Host) != nil {
+		return nil, errors.New("invalid peer host")
 	}
 	target.Path = strings.TrimRight(target.Path, "/") + path
 	target.RawPath = ""
