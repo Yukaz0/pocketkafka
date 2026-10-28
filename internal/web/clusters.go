@@ -468,7 +468,7 @@ var clusterHTTPClient = &http.Client{
 
 func (s *Server) fetchClusterReport(ctx context.Context, e ClusterEntry, window time.Duration, token string) ([]byte, time.Duration, error) {
 	endpoint := strings.TrimRight(e.URL, "/") + "/api/v1/health/overview?window=" + fmt.Sprintf("%d", int(window.Seconds()))
-	if eu, uerr := url.Parse(endpoint); uerr != nil || peerHostAllowed(eu.Host) != nil {
+	if eu, uerr := url.Parse(endpoint); uerr != nil || peerHostAllowed(eu) != nil {
 		return nil, 0, errInvalidPeerHost
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, clusterFetchTimeout)

@@ -974,7 +974,7 @@ func peerTargetURL(rawURL, path, query string) (*url.URL, error) {
 	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" || target.User != nil || target.Fragment != "" {
 		return nil, errors.New("invalid peer URL")
 	}
-	if peerHostAllowed(target.Host) != nil {
+	if peerHostAllowed(target) != nil {
 		return nil, errors.New("invalid peer host")
 	}
 	target.Path = strings.TrimRight(target.Path, "/") + path
