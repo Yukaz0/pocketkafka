@@ -282,6 +282,7 @@ func dirFileNames(dir string) ([]string, error) {
 	}
 	return out, nil
 }
+
 type compactWriter struct {
 	dir          string
 	maxBytes     int64
