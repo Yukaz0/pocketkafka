@@ -42,7 +42,7 @@ function targetUnavailablePanel(){return `<div class="card" role="alert"><h3>Bro
 function unsupportedPanel(view){
   const reason=navUnavailableReason(view)||'This feature is not supported by the selected broker.';
   const back=view==='topics'&&state.topicDetail?`<button class="btn ghost" style="margin-top:12px" onclick="state.topicDetail=null;state.topicParts=[];state.topicCfg=null;render()">Back to Topics</button>`:
-    view==='groups'&&state.group?`<button class="btn ghost" style="margin-top:12px" onclick="state.group=null;state.groupDetail=null;location.hash='#/groups';render()">Back to Consumer Groups</button>`:'';
+    view==='groups'&&state.group?`<button class="btn ghost" style="margin-top:12px" onclick="state.group=null;state.groupDetail=null;state.groupError=null;location.hash='#/groups';render()">Back to Consumer Groups</button>`:'';
   return `<div class="card" role="status"><h3>Unavailable for ${esc(activeClusterLabel())}</h3><p class="muted" style="margin-top:8px">${esc(reason)}</p>${back}</div>`;
 }
 function targetSwitchingPanel(){return `<div class="card" role="status" aria-live="polite"><h3>Switching broker</h3><p class="muted" style="margin-top:8px">Loading ${esc(activeClusterLabel())}. Data from the previous broker has been cleared.</p></div>`;}
@@ -89,12 +89,12 @@ function renderTopoSvg(){
     <text class="sub" x="${B.x+16}" y="${B.y+56}">${fmtBytes(state.cluster?.totalBytes||0)} on disk</text>
   </g>`;
   T.forEach(t=>{
-    s+=`<g><rect class="nrect" x="${t.x}" y="${t.y}" width="150" height="${L.h}" rx="2" onclick="topoPickTopic('${esc(t.id)}')"/>
+    s+=`<g><rect class="nrect" x="${t.x}" y="${t.y}" width="150" height="${L.h}" rx="2" onclick="topoPickTopic(${jsArg(t.id)})"/>
       <text x="${t.x+12}" y="${t.y+(L.h/2)-2}">${esc(t.id)}</text>
       <text class="sub" x="${t.x+12}" y="${t.y+L.h-6}">${t.parts} parts - ${t.bytes}${t.dlq?' <tspan fill="var(--danger)">DLQ</tspan>':''}</text></g>`;
   });
   gc.forEach(g=>{
-    s+=`<g><rect class="nrect" x="${g.x}" y="${g.y}" width="180" height="${L.h}" rx="2" onclick="topoPickGroup('${esc(g.id)}')"/>
+    s+=`<g><rect class="nrect" x="${g.x}" y="${g.y}" width="180" height="${L.h}" rx="2" onclick="topoPickGroup(${jsArg(g.id)})"/>
       <text x="${g.x+12}" y="${g.y+(L.h/2)-2}">${esc(g.id)}</text>
       <text class="sub" x="${g.x+12}" y="${g.y+L.h-6}">lag ${g.lag.toLocaleString()} - ${esc(g.state||'')}</text>
       ${g.lag>groupLagWarn()?`<circle class="errdot" cx="${g.x+168}" cy="${g.y+10}" r="4"/>`:''}</g>`;
@@ -141,7 +141,7 @@ window.topoPickGroup=function(name){
     const rows=(d.offsets||[]).map(o=>`<tr><td>${esc(o.topic)}</td><td>P${o.partition}</td><td>${(o.current_offset??0).toLocaleString()}</td><td>${(o.log_end_offset??0).toLocaleString()}</td><td><span class="badge ${o.lag>0?'b-amber':'b-green'}">${o.lag??0}</span></td></tr>`).join('')||'<tr><td colspan="5" class="muted">no committed offsets</td></tr>';
     const meta=`state ${esc(g.state||'-')} &middot; total lag ${g.lag.toLocaleString()} &middot; subscribed: ${g.subs.map(esc).join(', ')||'(none)'}`;
     nodeDrw('group: '+name,meta,tableScroll(`<table><thead><tr><th>Topic</th><th>Part</th><th>Current</th><th>Log End</th><th>Lag</th></tr></thead><tbody>${rows}</tbody></table>`),
-      [{label:'open group page',fn:`closeDrw();openGroup('${esc(name)}')`}]);
+      [{label:'open group page',fn:`closeDrw();openGroup(${jsArg(name)})`}]);
   }).catch(e=>{toast(e.message);});
 };
 function topoLayer(label,nodesHtml){ return `<div class="topoLayer"><div class="topoLabel">${label}</div><div class="topoNodes">${nodesHtml}</div></div>`; }
@@ -164,7 +164,7 @@ function viewTopology(){
     const subs=topicSubs[t.name]||[];
     const ps=t.partitions||[];
     const bytes=fmtBytes(t.totalBytes||0);
-    return `<div class="topoNode" onclick="topoPickTopic('${esc(t.name)}')">
+    return `<div class="topoNode" onclick="topoPickTopic(${jsArg(t.name)})">
       <b>${esc(t.name)}</b>
       <small>${ps.length||t.partitionCount||'-'} parts &middot; ${bytes}</small>
       ${subs.length?`<div class="chips">${subs.map(g=>`<span title="${esc(g)}">${esc(g)}</span>`).join('')}</div>`:''}
@@ -173,7 +173,7 @@ function viewTopology(){
   const groupCards=grps.length?grps.map(g=>{
     const lagTotal=Object.values(g.lag||{}).reduce((a,b)=>a+b,0);
     const subs=[...new Set(Object.keys(g.lag||{}).map(k=>k.split('-').slice(0,-1).join('-')))];
-    return `<div class="topoNode ${lagTotal>0?'topoNodeErr':''}" onclick="topoPickGroup('${esc(g.name)}')">
+    return `<div class="topoNode ${lagTotal>0?'topoNodeErr':''}" onclick="topoPickGroup(${jsArg(g.name)})">
       <b>${esc(g.name)}</b>
       <small>lag ${lagTotal.toLocaleString()} &middot; ${esc(g.state||'-')}</small>
       ${subs.length?`<div class="chips">${subs.map(s=>`<span title="${esc(s)}">${esc(s)}</span>`).join('')}</div>`:''}
@@ -885,9 +885,9 @@ function viewTopics(){
   ${sortedTopics().map(t=>{
     const ps=t.partitions||[],max=Math.max(1,...ps.map(p=>p.logEndOffset||0));
     const bars=ps.map(p=>`<div class="pbar" title="P${p.partition}: LEO ${p.logEndOffset||0}"><span style="width:${Math.max(4,((p.logEndOffset||0)/max)*100)}%"></span></div>`).join('')||'<span class="muted">-</span>',p=ps[0]||{};
-    const topicLink=canDetail?`<a style="color:var(--primary-text);cursor:pointer" onclick="openTopicDetail('${esc(t.name)}')">${esc(t.name)}</a>`:`<span title="${detailUnavailable}">${esc(t.name)}</span>`;
-    const detail=canDetail?`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="openTopicDetail('${esc(t.name)}')">Detail</button>`:`<button class="btn ghost" aria-disabled="true" title="${detailUnavailable}" onclick="toast('${detailUnavailable}')">Detail</button>`;
-    const remove=readOnly?`<button class="btn danger" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Delete</button>`:`<button class="btn danger" style="padding:4px 10px;font-size:11px" onclick="delTopic('${esc(t.name)}')">Delete</button>`;
+    const topicLink=canDetail?`<a style="color:var(--primary-text);cursor:pointer" onclick="openTopicDetail(${jsArg(t.name)})">${esc(t.name)}</a>`:`<span title="${detailUnavailable}">${esc(t.name)}</span>`;
+    const detail=canDetail?`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="openTopicDetail(${jsArg(t.name)})">Detail</button>`:`<button class="btn ghost" aria-disabled="true" title="${detailUnavailable}" onclick="toast('${detailUnavailable}')">Detail</button>`;
+    const remove=readOnly?`<button class="btn danger" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Delete</button>`:`<button class="btn danger" style="padding:4px 10px;font-size:11px" onclick="delTopic(${jsArg(t.name)})">Delete</button>`;
     const roFlag=readOnly?'<span class="badge muted">Read-only</span>':'';
     return `<tr><td class="mono">${topicLink}</td><td>${p.logEndOffset??0}</td><td>${fmtBytesOpt(t.totalBytes)}</td><td style="min-width:90px">${bars}</td><td><div class="clRowActions">${detail}${remove}${roFlag}</div></td></tr>`;
   }).join('')||`<tr><td colspan="5" class="muted" style="padding:20px">No topics yet.${readOnly?'':' <button class="btn" style="padding:4px 12px;font-size:12px" onclick="document.getElementById(\'newT\').focus()">Create the first one</button>'}</td></tr>`}
@@ -935,10 +935,10 @@ function viewGroups(){
   if(!(state.groups||[]).length)return `<div>${pageHeader('Consumer Groups','Review consumer membership, offsets, and lag.')}<div class="card" style="padding:32px;text-align:center"><div class="muted">No consumer groups reported by this broker.</div>${readOnly?`<div class="card" style="padding:10px 12px;border-color:var(--warn-line);margin-top:10px"><span class="badge b-amber">Read-only</span><span class="muted" style="font-size:12px;margin-left:8px">${readOnlyNote}</span></div>`:''}</div></div>`;
   return `<div>${pageHeader('Consumer Groups','Review consumer membership, offsets, and lag.')}<div class="card">${readOnly?`<div class="card" style="padding:10px 12px;border-color:var(--warn-line);margin-bottom:10px"><span class="badge b-amber">Read-only</span><span class="muted" style="font-size:12px;margin-left:8px">${readOnlyNote}</span></div>`:''}<div class="tableScroll"><table><thead><tr><th class="sortable" onclick="sortRows('groups','name')">Group<span class="sortInd">${sortInd('groups','name')}</span></th><th>State</th><th class="sortable" onclick="sortRows('groups','members')">Members<span class="sortInd">${sortInd('groups','members')}</span></th><th class="sortable" onclick="sortRows('groups','lag')">Lag<span class="sortInd">${sortInd('groups','lag')}</span></th><th></th></tr></thead><tbody>
   ${sortedGroups().map(g=>{
-    const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0),memberText=Array.isArray(g.members)?(g.members.join(', ')||'-'):'n/a',rowAttrs=canDetail?`class="rowclick" onclick="openGroup('${esc(g.name)}')"`:`title="${detailUnavailable}"`;
+    const lag=Object.values(g.lag||{}).reduce((a,b)=>a+b,0),memberText=Array.isArray(g.members)?(g.members.join(', ')||'-'):'n/a',rowAttrs=canDetail?`class="rowclick" onclick="openGroup(${jsArg(g.name)})"`:`title="${detailUnavailable}"`;
     const detail=canDetail?'':`<button class="btn ghost" aria-disabled="true" title="${detailUnavailable}" onclick="toast('${detailUnavailable}')">Details</button>`;
     const groupExportNote='Group offset export is not supported by Kafka targets';
-    const mutations=readOnly?`<button class="btn ghost" aria-disabled="true" title="${groupExportNote}" onclick="toast('${groupExportNote}')">Export</button><button class="btn ghost" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Import</button><button class="btn danger" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Delete</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();exportGroupOffsets('${esc(g.name)}')" title="Export offset snapshot">Export</button><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();importGroupOffsets('${esc(g.name)}')" title="Import offset snapshot">Import</button><button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();delGroup('${esc(g.name)}')">Delete</button>`;
+    const mutations=readOnly?`<button class="btn ghost" aria-disabled="true" title="${groupExportNote}" onclick="toast('${groupExportNote}')">Export</button><button class="btn ghost" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Import</button><button class="btn danger" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Delete</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();exportGroupOffsets(${jsArg(g.name)})" title="Export offset snapshot">Export</button><button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();importGroupOffsets(${jsArg(g.name)})" title="Import offset snapshot">Import</button><button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();delGroup(${jsArg(g.name)})">Delete</button>`;
     return `<tr ${rowAttrs}><td class="mono">${esc(g.name)}</td><td><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span></td><td class="mono">${memberText}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td><td><div class="clRowActions">${detail}${mutations}</div></td></tr>`;
   }).join('')}
   </tbody></table></div></div></div>`;
@@ -947,19 +947,20 @@ let _groupDetailLoading = false;
 window.openGroup=async g=>{
   if(isTargetUnavailable()){toast(targetUnavailableMessage());return;}
   if(isKafkaTarget()&&!hasTargetCapability('group.detail.read')){toast('Consumer group details are not supported by this Kafka target.');return;}
-  state.group=g;state.groupDetail=null;
+  state.group=g;state.groupDetail=null;state.groupError=null;
   const h='#/groups/'+encodeURIComponent(g);
   if(location.hash!==h)location.hash=h;
   else render();
-  loadGroupDetail();
 };
 async function loadGroupDetail(){
   const generation=state.targetGeneration,name=state.group;
   if(!name||_groupDetailLoading)return;
   _groupDetailLoading=true;
+  state.groupError=null;
   try{
     const detail=await api(`/api/v1/groups/${encodeURIComponent(name)}`);
     if(generation!==state.targetGeneration||name!==state.group)return;
+    state.groupError=null;
     state.groupDetail=detail;
     const gid=detail.groupId||detail.group_id||name;
     const lag=((detail.offsets)||[]).reduce((a,o)=>a+(o.lag||0),0);
@@ -969,14 +970,19 @@ async function loadGroupDetail(){
     if(h.length>60)h.shift();
     render();
   }catch(e){
-    if(generation!==state.targetGeneration||e.staleTargetResponse)return;
-    toast(e.message);
+    if(generation!==state.targetGeneration||name!==state.group||e.staleTargetResponse)return;
+    state.groupError=(e&&e.message)||'Failed to load consumer group';
+    render();
   }finally{
     _groupDetailLoading=false;
+    if(state.view==='groups'&&state.group&&!state.groupDetail&&!state.groupError)loadGroupDetail();
   }
 }
 window.loadGroupDetail=loadGroupDetail;
 function viewGroupDetail(){
+  if(state.groupError){
+    return `<div class="card" role="alert"><h3>Failed to load consumer group</h3><p class="muted" style="margin:8px 0 14px">${esc(state.groupError)}</p><div style="display:flex;gap:8px"><button class="btn" onclick="loadGroupDetail()">Retry</button><button class="btn ghost" onclick="state.group=null;state.groupDetail=null;state.groupError=null;location.hash='#/groups';">Back</button></div></div>`;
+  }
   const g=state.groupDetail;
   if(!g)return '<div class="card">'+skel(140)+' '+skel(90)+' '+skel(60)+'</div>';
   const readOnly=isKafkaTarget(),reason='Kafka consumer groups are read-only; offset reset is disabled.';
@@ -985,7 +991,7 @@ function viewGroupDetail(){
     const cur=o.currentOffset??o.current_offset??'-';
     const end=o.logEndOffset??o.log_end_offset??'-';
     const lag=o.lag??0;
-    return `<tr><td class="mono">${esc(o.topic)}</td><td>${o.partition}</td><td>${cur}</td><td>${end}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td><td>${readOnly?`<button class="btn ghost" aria-disabled="true" title="${reason}" onclick="toast('${reason}')">Reset</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="resetGroupOffset('${esc(o.topic)}',${o.partition})">Reset</button>`}</td></tr>`;
+    return `<tr><td class="mono">${esc(o.topic)}</td><td>${o.partition}</td><td>${cur}</td><td>${end}</td><td><span class="badge ${lag>0?'b-amber':'b-green'}">${lag}</span></td><td>${readOnly?`<button class="btn ghost" aria-disabled="true" title="${reason}" onclick="toast('${reason}')">Reset</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="resetGroupOffset(${jsArg(o.topic)},${o.partition})">Reset</button>`}</td></tr>`;
   }).join('')||'<tr><td colspan="6" class="muted">No committed offsets</td></tr>';
   const memberRecords=Array.isArray(g.members)?g.members:null;
   const members=memberRecords?memberRecords.map(m=>{
@@ -995,7 +1001,7 @@ function viewGroupDetail(){
   }).join('')||'<span class="muted">No members reported.</span>':'<span class="muted">Member details unavailable.</span>';
   const memberCount=memberRecords?`${memberRecords.length} member(s)`:'n/a (member details unavailable)';
   const lh=(state.lagHist||{})[gid]||[],maxLag=Math.max(1,...lh),spark=lh.length>1?`<div class="spark" title="Lag history (last ${lh.length} polls)">${lh.map(v=>`<span style="height:${Math.max(3,v/maxLag*100)}%"></span>`).join('')}</div>`:'';
-  return `<div>${pageHeader(esc(gid),'Consumer membership and committed offsets.')}<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap"><h3 style="font-size:15px">${esc(gid)}</h3><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span><button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.group=null;state.groupDetail=null;location.hash='#/groups';">Back</button></div>
+  return `<div>${pageHeader(esc(gid),'Consumer membership and committed offsets.')}<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap"><h3 style="font-size:15px">${esc(gid)}</h3><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span><button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.group=null;state.groupDetail=null;state.groupError=null;location.hash='#/groups';">Back</button></div>
     <div class="muted" style="margin-bottom:14px">Protocol: ${esc(g.protocol||'range')} &middot; ${memberCount}</div><div style="margin-bottom:16px">${members}</div>${spark}${readOnly?`<p class="muted" style="font-size:11px;margin:8px 0">${reason}</p>`:''}${tableScroll(`<table><thead><tr><th>Topic</th><th>Partition</th><th>Current</th><th>Log End</th><th>Lag</th><th></th></tr></thead><tbody>${lagRows}</tbody></table>`)}</div></div>`;
 }
 window.resetGroupOffset=async function(topic,part){
@@ -1707,7 +1713,7 @@ function stopHealthPoll(){if(healthTimer){clearInterval(healthTimer);healthTimer
    local; browser metadata strips stored endpoints and credential values. */
 function clearTargetViewData(){
   state.cluster=null;state.topics=[];state.groups=[];state.schemas=[];state.topic=null;state.topicDetail=null;state.topicParts=[];state.topicCfg=null;
-  state.group=null;state.groupDetail=null;state.lagHist={};state.msgs=[];state.fieldHint=[];state.off=null;state.leo=null;state.earliest=null;
+  state.group=null;state.groupDetail=null;state.groupError=null;state.lagHist={};state.msgs=[];state.fieldHint=[];state.off=null;state.leo=null;state.earliest=null;
   state.filters=[];state.diffSel=[];state.tpSamples=[];state.tpTotal=0;healthData=null;healthErr=null;overviewData=null;overviewErr=null;overviewLoading=true;healthOpenTopics.clear();
   state.integrations=null;state.integrationsError='';
   state.brokerCfg=null;state.brokerCfgError='';
@@ -1733,8 +1739,8 @@ async function switchActiveCluster(name){
 window.switchActiveCluster=switchActiveCluster;
 async function loadClusterList(){
   const wasAvailable=!!activeTargetEntry();
-  try{const d=await apiLocal('/api/v1/clusters');clusterRegistry=(d.clusters||[]).map(clusterMetadataForUI);window.clusterRegistry=clusterRegistry;}
-  catch(e){clusterRegistry=clusterRegistry||[];window.clusterRegistry=clusterRegistry;updateBrokerPicker();return;}
+  try{const d=await apiLocal('/api/v1/clusters');clusterRegistry=(d.clusters||[]).map(clusterMetadataForUI);setClusterRegistry(clusterRegistry);}
+  catch(e){clusterRegistry=clusterRegistry||[];setClusterRegistry(clusterRegistry);updateBrokerPicker();return;}
   const available=!!activeTargetEntry();updateBrokerPicker();
   if(wasAvailable!==available){cancelTargetWork();clearTargetViewData();if(state.initialized){state.targetSwitching=true;const generation=state.targetGeneration;render();refresh().then(()=>{if(generation===state.targetGeneration){state.targetSwitching=false;render();}});}}
 }

@@ -355,7 +355,7 @@ function bindView(){
   if(localViewReady&&clustersActive)startClusterPoll();else stopClusterPoll();
   if(viewReady&&state.view==='databrowser')startMsgVirtWatch();else stopMsgVirtWatch();
   if(viewReady&&state.view==='databrowser'&&state.topic){loadMsgs();loadPosMeta();}
-  if(viewReady&&state.view==='groups'&&state.group&&!state.groupDetail)loadGroupDetail();
+  if(viewReady&&state.view==='groups'&&state.group&&!state.groupDetail&&!state.groupError)loadGroupDetail();
   const securityActive=state.view==='security'||(state.view==='settings'&&state.settingsTab==='security');
   if(localViewReady&&securityActive){
     loadDelegatedTokens();

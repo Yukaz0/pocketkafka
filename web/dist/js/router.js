@@ -77,7 +77,7 @@ function applyHash(){
     else{state.topic=parts[0]||null;state.partition=parts[1]||'all';state.off=parts[2]||null;}
     const prevGroup=state.group;
     state.group=state.view==='groups'?(parts[0]||null):null;
-    if(state.group!==prevGroup)state.groupDetail=null;
+    if(state.group!==prevGroup){state.groupDetail=null;state.groupError=null;}
     state.topicDetail=state.view==='topics'?(parts[0]||null):null;
   }
   render();
@@ -140,7 +140,7 @@ window.goView=async function(v,sub){
   if(v==='clusters'||v==='connections'||v==='security'||v==='storage'){
     state.view='settings';
     state.settingsTab=v;
-    state.topic=null;state.partition='all';state.off=null;state.group=null;state.topicDetail=null;
+    state.topic=null;state.partition='all';state.off=null;state.group=null;state.groupDetail=null;state.groupError=null;state.topicDetail=null;
     const h='#/settings/'+v;
     if(location.hash!==h)location.hash=h;
     await refresh();
@@ -156,7 +156,7 @@ window.goView=async function(v,sub){
   if(v==='settings'){
     state.view='settings';
     state.settingsTab=sub||state.settingsTab||'general';
-    state.topic=null;state.partition='all';state.off=null;state.group=null;state.topicDetail=null;
+    state.topic=null;state.partition='all';state.off=null;state.group=null;state.groupDetail=null;state.groupError=null;state.topicDetail=null;
     const h=state.settingsTab==='general'?'#/settings':'#/settings/'+state.settingsTab;
     if(location.hash!==h)location.hash=h;
     await refresh();
@@ -165,7 +165,7 @@ window.goView=async function(v,sub){
   }
   if(!navItems.some(([key])=>key===v)&&!['health','topology'].includes(v))return;
   if(v!=='databrowser'){state.topic=null;state.partition='all';state.off=null;}
-  if(v!=='groups')state.group=null;
+  if(v!=='groups'){state.group=null;state.groupDetail=null;state.groupError=null;}
   if(v!=='topics')state.topicDetail=null;
   state.view=v;
   const h=v==='overview'?'#/overview':'#/'+v;

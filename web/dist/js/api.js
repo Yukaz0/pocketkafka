@@ -18,7 +18,7 @@ function kafkaCapabilityFor(path,method){
   if(p==='/api/v1/health/overview'&&m==='GET')return 'health.read';
   return null;
 }
-function activeTargetEntry(){return (clusterRegistry||[]).find(c=>c.name===state.activeCluster)||null;}
+function activeTargetEntry(){return (getClusterRegistry()||[]).find(c=>c.name===state.activeCluster)||null;}
 function activeTargetKind(){return state.activeCluster==='local'?'local':(activeTargetEntry()?.kind||'');}
 function isTargetUnavailable(){return state.activeCluster!=='local'&&!activeTargetEntry();}
 function targetUnavailableMessage(){return `Selected broker "${state.activeCluster}" is unavailable. Select a registered broker; requests are not sent to this broker.`;}
