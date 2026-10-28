@@ -65,6 +65,13 @@ function initTheme(){
   state.theme=(saved==='dark'||saved==='light')?saved:(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
   localStorage.setItem('pk_theme',state.theme);
   document.documentElement.dataset.theme=state.theme;
+  const next=state.theme==='dark'?'light':'dark',toggle=document.getElementById('themeToggle');
+  if(toggle){
+    toggle.setAttribute('aria-label','Switch to '+next+' theme');
+    toggle.title='Switch to '+next+' theme';
+    const txt=toggle.querySelector('.navActionText');
+    if(txt)txt.textContent=next.charAt(0).toUpperCase()+next.slice(1)+' theme';
+  }
   state.sidebarCollapsed=localStorage.getItem('pk_sidebar_collapsed')==='1';
   try{state.navGroupsCollapsed=Object.assign({more:true},JSON.parse(localStorage.getItem('pk_nav_groups')||'{}'));}catch(e){state.navGroupsCollapsed={more:true};}
 }

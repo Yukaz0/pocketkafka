@@ -424,86 +424,111 @@ function viewDataBrowser(){
     +parts.map(p=>`<button class="pill part" style="${act(state.partition===p.partition)}" onclick="setPart('${p.partition}')">P-${p.partition}</button>`).join('');
   return `${pageHeader('Data Browser','Inspect, filter, and tail topic messages.')}
     ${readOnly?`<p class="muted" style="font-size:11px;margin:0 0 8px">${readOnlyNote}</p>`:''}
-    <div class="toolbar">
-      <select id="topicSel" onchange="state.filters=[];pickTopicNav(this.value)" style="width:180px"><option value="" ${state.topic?'':'selected'}>Select topic</option>${opts}</select>
-      <div class="group">${pills}</div>
-      <select id="decoder" onchange="state.decoder=this.value;renderMsgRows()" style="width:140px">
-        <option value="auto" ${state.decoder==='auto'?'selected':''}>Auto-Detect</option>
-        <option value="json" ${state.decoder==='json'?'selected':''}>JSON Pretty</option>
-        <option value="text" ${state.decoder==='text'?'selected':''}>Plaintext</option>
-        <option value="hex" ${state.decoder==='hex'?'selected':''}>Hex Dump</option>
-      </select>
-      <span style="flex:1"></span>
-      <div class="group"><button class="pill ${state.tail?'active':''}" id="liveBtn" onclick="toggleTail()">${state.tail?'<span class="live-dot"></span> Pause':'Live Tail'}</button></div>
-      <div class="group"><button class="pill" onclick="seek('begin')">Beginning</button><button class="pill" onclick="seek('latest')">Latest</button><input id="offInput" class="mono" placeholder="offset" style="width:76px" onkeydown="if(event.key==='Enter')seekOffsetGo()"><button class="pill" onclick="seekOffsetGo()">Go</button></div>
-      <span class="updatedAgo" id="posInfo"></span>
-    </div>
-    <div class="toolbar" style="flex-wrap:wrap;gap:6px">
-      <input id="searchBox" placeholder="Search key/value…" value="${esc(state.search)}" style="max-width:160px" oninput="state.search=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
-      <input id="fromTs" placeholder="From (ms)" value="${esc(state.fromTs)}" style="max-width:90px" oninput="state.fromTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
-      <input id="toTs" placeholder="To (ms)" value="${esc(state.toTs)}" style="max-width:90px" oninput="state.toTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
-      <button class="btn" onclick="loadMsgs()">Apply</button>
-      <span style="flex:1;min-width:4px"></span>
-      <div class="group">
-        <button class="pill ${state.filterPanel?'active':''}" onclick="toggleFilterPanel()">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M3 6h18M7 12h10M11 18h2"/></svg>
-          Filter${state.filters.length?' ('+state.filters.length+')':''}
-        </button>
-        <button class="pill ${state.projCols.length?'active':''}" onclick="openProj()">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M3 6h18M3 12h18M3 18h18"/><rect x="9" y="4" width="6" height="4" rx="1" fill="currentColor" stroke="none" opacity=".3"/></svg>
-          Columns${state.projCols.length?' ('+state.projCols.length+')':''}
-        </button>
-        <button class="pill ${state.diffSel.length>=2?'active':''}" onclick="runDiff()" title="Diff two selected messages">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M5 8h6M5 12h4M5 16h5M13 8l2 2-2 2M17 12l2-2-2-2M13 16l4 0"/></svg>
-          Diff
-        </button>
+    <div class="dbDeck">
+      <!-- Bar 1: Stream controls (Topic, Decoder, Live Tail) -->
+      <div class="dbRow dbRowTopic">
+        <select id="topicSel" onchange="state.filters=[];pickTopicNav(this.value)" class="dbTopicSelect"><option value="" ${state.topic?'':'selected'}>Select topic</option>${opts}</select>
+        <select id="decoder" onchange="state.decoder=this.value;renderMsgRows()" class="dbDecoderSelect">
+          <option value="auto" ${state.decoder==='auto'?'selected':''}>Auto-Detect</option>
+          <option value="json" ${state.decoder==='json'?'selected':''}>JSON Pretty</option>
+          <option value="text" ${state.decoder==='text'?'selected':''}>Plaintext</option>
+          <option value="hex" ${state.decoder==='hex'?'selected':''}>Hex Dump</option>
+        </select>
+        <button class="pill dbLiveBtn ${state.tail?'active':''}" id="liveBtn" onclick="toggleTail()">${state.tail?'<span class="live-dot"></span> Pause':'Live Tail'}</button>
       </div>
-      <div class="group"><button class="pill" onclick="prevPage()" title="Previous page">‹ Prev</button><button class="pill" onclick="nextPage()" title="Next page">Next ›</button><span class="muted" id="pageInfo" style="padding:0 6px;font-size:11px"></span></div>
-      <!-- Export dropdown -->
-      <div class="tbDrop">
-        <button class="tbDropBtn" tabindex="0">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13M7 11l5 5 5-5M5 20h14"/></svg>
-          Export <span class="caret">▾</span>
-        </button>
-        <div class="tbDropMenu right">
-          <button class="tbDropItem" onclick="exportMsgs('jsonl')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13M7 11l5 5 5-5M5 20h14"/></svg>
-            Download .jsonl <small>JSON Lines</small>
-          </button>
-          <button class="tbDropItem" onclick="exportMsgs('csv')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13M7 11l5 5 5-5M5 20h14"/></svg>
-            Download .csv <small>Spreadsheet</small>
-          </button>
-          <div class="tbDropSep"></div>
-          ${readOnly
-            ? `<button class="tbDropItem" style="opacity:.45" onclick="toast('${readOnlyNote}')">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16v-13M7 8l5-5 5 5M5 20h14"/></svg>
-                Import .jsonl <small>Read-only</small>
-              </button>`
-            : `<label class="tbDropItem" title="Import .jsonl messages into this topic">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16v-13M7 8l5-5 5 5M5 20h14"/></svg>
-                Import .jsonl <small>Upload file</small>
-                <input type="file" accept=".jsonl,.ndjson" style="display:none" onchange="doImportFile(this)">
-              </label>`
-          }
+
+      <!-- Bar 2: Horizontal Partition Pills -->
+      ${parts.length?`<div class="dbPillBar"><div class="dbPillScroll">${pills}</div></div>`:''}
+
+      <!-- Bar 3: Seek & Offset bar -->
+      <div class="dbRow dbRowSeek">
+        <div class="group dbSeekGroup">
+          <button class="pill" onclick="seek('begin')">Beginning</button>
+          <button class="pill" onclick="seek('latest')">Latest</button>
+          <input id="offInput" class="mono dbOffInput" placeholder="offset" onkeydown="if(event.key==='Enter')seekOffsetGo()">
+          <button class="pill" onclick="seekOffsetGo()">Go</button>
         </div>
+        <span class="updatedAgo" id="posInfo"></span>
       </div>
-      <!-- Snippets dropdown -->
-      <div class="tbDrop">
-        <button class="tbDropBtn" tabindex="0">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          Snippets <span class="caret">▾</span>
-        </button>
-        <div class="tbDropMenu right">
-          <button class="tbDropItem" onclick="copyCurl(state.topic)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            Copy curl command <small>REST API</small>
+      <!-- Bar 3: Search and Date Range -->
+      <div class="dbRow dbRowSearch">
+        <input id="searchBox" class="dbSearchInput" placeholder="Search key/value…" value="${esc(state.search)}" oninput="state.search=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
+        <input id="fromTs" class="dbTsInput" placeholder="From (ms)" value="${esc(state.fromTs)}" oninput="state.fromTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
+        <input id="toTs" class="dbTsInput" placeholder="To (ms)" value="${esc(state.toTs)}" oninput="state.toTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
+        <button class="btn dbApplyBtn" onclick="loadMsgs()">Apply</button>
+      </div>
+
+      <!-- Bar 4: Actions Deck (Filter, Columns, Diff, Pagination, Export, Snippets, Replay) -->
+      <div class="dbRow dbRowActions">
+        <div class="group dbActionGroup">
+          <button class="pill ${state.filterPanel?'active':''}" onclick="toggleFilterPanel()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M3 6h18M7 12h10M11 18h2"/></svg>
+            Filter${state.filters.length?' ('+state.filters.length+')':''}
           </button>
-          <button class="tbDropItem" onclick="copyConsumer(state.topic)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            Copy consumer.go <small>Go snippet</small>
+          <button class="pill ${state.projCols.length?'active':''}" onclick="openProj()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M3 6h18M3 12h18M3 18h18"/><rect x="9" y="4" width="6" height="4" rx="1" fill="currentColor" stroke="none" opacity=".3"/></svg>
+            Columns${state.projCols.length?' ('+state.projCols.length+')':''}
+          </button>
+          <button class="pill ${state.diffSel.length>=2?'active':''}" onclick="runDiff()" title="Diff two selected messages">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M5 8h6M5 12h4M5 16h5M13 8l2 2-2 2M17 12l2-2-2-2M13 16l4 0"/></svg>
+            Diff
           </button>
         </div>
+        <div class="group dbActionGroup">
+          <button class="pill" onclick="prevPage()" title="Previous page">‹ Prev</button>
+          <button class="pill" onclick="nextPage()" title="Next page">Next ›</button>
+          <span class="muted" id="pageInfo" style="padding:0 6px;font-size:11px"></span>
+        </div>
+        <!-- Export dropdown -->
+        <div class="tbDrop">
+          <button class="tbDropBtn" tabindex="0">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13M7 11l5 5 5-5M5 20h14"/></svg>
+            Export <span class="caret">▾</span>
+          </button>
+          <div class="tbDropMenu right">
+            <button class="tbDropItem" onclick="exportMsgs('jsonl')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13M7 11l5 5 5-5M5 20h14"/></svg>
+              Download .jsonl <small>JSON Lines</small>
+            </button>
+            <button class="tbDropItem" onclick="exportMsgs('csv')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v13M7 11l5 5 5-5M5 20h14"/></svg>
+              Download .csv <small>Spreadsheet</small>
+            </button>
+            <div class="tbDropSep"></div>
+            ${readOnly
+              ? `<button class="tbDropItem" style="opacity:.45" onclick="toast('${readOnlyNote}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16v-13M7 8l5-5 5 5M5 20h14"/></svg>
+                  Import .jsonl <small>Read-only</small>
+                </button>`
+              : `<label class="tbDropItem" title="Import .jsonl messages into this topic">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16v-13M7 8l5-5 5 5M5 20h14"/></svg>
+                  Import .jsonl <small>Upload file</small>
+                  <input type="file" accept=".jsonl,.ndjson" style="display:none" onchange="doImportFile(this)">
+                </label>`
+            }
+          </div>
+        </div>
+        <!-- Snippets dropdown -->
+        <div class="tbDrop">
+          <button class="tbDropBtn" tabindex="0">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Snippets <span class="caret">▾</span>
+          </button>
+          <div class="tbDropMenu right">
+            <button class="tbDropItem" onclick="copyCurl(state.topic)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy curl command <small>REST API</small>
+            </button>
+            <button class="tbDropItem" onclick="copyConsumer(state.topic)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy consumer.go <small>Go snippet</small>
+            </button>
+          </div>
+        </div>
+        ${readOnly
+          ? `<button class="btn ghost" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Replay / DLQ</button>`
+          : `<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="replaySelected()">Replay / DLQ</button>`
+        }
       </div>
     </div>
     <div id="tailBar"></div>
@@ -877,9 +902,9 @@ function prependMsgRow(m){const rows=$('#rows');if(!rows)return;const tr=documen
 function viewTopics(){
   const readOnly=isKafkaTarget(),readOnlyNote='Kafka targets are read-only; topic mutations are disabled.',canDetail=!isKafkaTarget()||hasTargetCapability('topic.partitions.read'),detailUnavailable='Topic partition details are not supported by this Kafka target.';
   const createControl=readOnly?`<button class="btn" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Create</button>`:`<input id="newT" placeholder="new topic name" style="max-width:220px"><input id="newP" type="number" min="1" max="64" value="1" title="Partitions" style="max-width:70px"><button class="btn" onclick="createTopic()">Create</button>`;
-  return `<div>${pageHeader('Topics','Create and inspect topics, partitions, and log positions.')}<div class="card"><div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap">
+  return `<div>${pageHeader('Topics','Create and inspect topics, partitions, and log positions.')}<div class="card"><div class="topicsHeaderRow" style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap">
     <div><div class="kicker">Namespace</div><div class="statXL">${(state.topics||[]).length}<small>topics</small></div></div>
-    <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${createControl}</div>
+    <div class="topicsCreateBar" style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${createControl}</div>
   </div>${readOnly?`<div class="card" style="padding:10px 12px;border-color:var(--warn-line);margin-bottom:10px"><span class="badge b-amber">Read-only</span><span class="muted" style="font-size:12px;margin-left:8px">${readOnlyNote}</span></div>`:''}
   <div class="tableScroll"><table><thead><tr><th class="sortable" onclick="sortRows('topics','name')">Topic<span class="sortInd">${sortInd('topics','name')}</span></th><th class="sortable" onclick="sortRows('topics','leo')">Log End<span class="sortInd">${sortInd('topics','leo')}</span></th><th class="sortable" onclick="sortRows('topics','size')">Size<span class="sortInd">${sortInd('topics','size')}</span></th><th>Partitions</th><th></th></tr></thead><tbody>
   ${sortedTopics().map(t=>{
@@ -1782,8 +1807,8 @@ function clusterFormCard(){
   return `<div class="card"><h3 style="margin-bottom:10px">${ed?'Edit cluster':'Add cluster'}</h3>
     <form onsubmit="event.preventDefault();saveCluster();">
       <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap">
-        <div><label class="muted" for="clKind" style="font-size:11px;display:block;margin-bottom:4px">Kind</label><select id="clKind" style="width:150px" onchange="clusterKindChanged(this.value)"><option value="peer" ${kafka?'':'selected'}>PocketKafka peer</option><option value="kafka" ${kafka?'selected':''}>Kafka cluster</option></select></div>
-        <div><label class="muted" for="clName" style="font-size:11px;display:block;margin-bottom:4px">Name</label><input id="clName" style="width:150px" placeholder="scada25" autocomplete="off" value="${ed?esc(ed.name):''}" ${ed?'readonly':''}></div>
+        <div id="clKindWrap"><label class="muted" for="clKind" style="font-size:11px;display:block;margin-bottom:4px">Kind</label><select id="clKind" style="width:150px" onchange="clusterKindChanged(this.value)"><option value="peer" ${kafka?'':'selected'}>PocketKafka peer</option><option value="kafka" ${kafka?'selected':''}>Kafka cluster</option></select></div>
+        <div id="clNameWrap"><label class="muted" for="clName" style="font-size:11px;display:block;margin-bottom:4px">Name</label><input id="clName" style="width:150px" placeholder="scada25" autocomplete="off" value="${ed?esc(ed.name):''}" ${ed?'readonly':''}></div>
         <div id="clUrlWrap" ${vis(!kafka,'flex:1;min-width:230px')}><label class="muted" for="clUrl" style="font-size:11px;display:block;margin-bottom:4px">Dashboard URL</label><input id="clUrl" placeholder="${ed?'leave blank to keep the saved URL':'http://10.0.0.26:8080'}" autocomplete="off" value=""></div>
         <div id="clBrokersWrap" ${vis(kafka,'flex:1;min-width:230px')}><label class="muted" for="clBrokers" style="font-size:11px;display:block;margin-bottom:4px">Brokers</label><input id="clBrokers" placeholder="192.168.212.25:9092" autocomplete="off" value="${ed?esc((ed.brokers||[]).join(', ')):''}"></div>
         <div id="clSaslUserWrap" ${vis(kafka)}><label class="muted" for="clSaslUser" style="font-size:11px;display:block;margin-bottom:4px">SASL user</label><input id="clSaslUser" style="width:130px" autocomplete="off" value="${ed?esc(ed.saslUser||''):''}"></div>

@@ -31,10 +31,14 @@ async function refreshFleetView(){
   }
   await Promise.allSettled(tasks);
 }
-function patchFleetView(){
+function patchFleetView(force){
   const v=document.getElementById('view'); if(!v)return false;
   const ae=document.activeElement;
-  if(ae&&v.contains(ae)&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'))return true;
+  if(!force && ae && v.contains(ae) && (ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'))return true;
+  const savedId = (ae && v.contains(ae)) ? ae.id : null;
+  const savedKey = (ae && v.contains(ae)) ? ae.getAttribute('data-filter-key') : null;
+  const savedSelStart = (ae && 'selectionStart' in ae) ? ae.selectionStart : null;
+  const savedSelEnd = (ae && 'selectionEnd' in ae) ? ae.selectionEnd : null;
   const html=state.view==='fleet-servers'?viewFleetServers()
     :state.view==='fleet-containers'?viewFleetContainers()
     :state.view==='fleet-jobs'?viewFleetJobs()
@@ -44,10 +48,19 @@ function patchFleetView(){
   if(html==null)return false;
   const keepScroll=v.scrollTop;
   v.innerHTML=html; bindView();
-  v.scrollTop=keepScroll; return true;
+  v.scrollTop=keepScroll;
+  const el = savedId ? document.getElementById(savedId) : (savedKey ? v.querySelector(`[data-filter-key="${savedKey}"]`) : null);
+  if(el){
+    el.focus();
+    if(savedSelStart != null && savedSelEnd != null){
+      try { el.setSelectionRange(savedSelStart, savedSelEnd); } catch(e){}
+    }
+  }
+  return true;
 }
 let fleetFilterTimer=null;
-function fleetFilter(key,val){ state[key]=val; clearTimeout(fleetFilterTimer); fleetFilterTimer=setTimeout(()=>{ patchFleetView(); },200); }
+function fleetFilter(key,val){ state[key]=val; clearTimeout(fleetFilterTimer); fleetFilterTimer=setTimeout(()=>{ patchFleetView(true); },150); }
+function fleetFilterFlush(){ clearTimeout(fleetFilterTimer); patchFleetView(true); }
 async function waitFleetJobDone(jobId, timeoutMs){
   const t0 = Date.now();
   timeoutMs = timeoutMs || 12000;
@@ -189,10 +202,10 @@ function viewFleetServers(){
 
   const toolbar = `<div class="card" style="margin-bottom:16px;padding:12px">
     <div class="row" style="gap:10px;justify-content:space-between;flex-wrap:wrap">
-      <div style="display:flex;gap:8px;align-items:center;flex:1;max-width:380px">
-        <input placeholder="Filter hosts by name, ID, or IP..." value="${esc(state.fleetSearch||'')}" oninput="fleetFilter('fleetSearch',this.value)" style="width:100%" aria-label="Filter servers">
+      <div class="fleetToolbarSearch" style="display:flex;gap:8px;align-items:center;flex:1 1 240px;max-width:380px">
+        <input id="srvSearchInput" data-filter-key="fleetSearch" placeholder="Filter hosts by name, ID, or IP..." value="${esc(state.fleetSearch||'')}" oninput="fleetFilter('fleetSearch',this.value)" onkeydown="if(event.key==='Enter')fleetFilterFlush()" style="width:100%" aria-label="Filter servers">
       </div>
-      <div style="display:flex;gap:8px">
+      <div class="fleetToolbarActions" style="display:flex;gap:8px">
         <button class="btn" onclick="openEnrollModal()">+ Enroll Server</button>
         <button class="btn ghost" onclick="refreshAll()">Refresh</button>
       </div>
@@ -256,9 +269,13 @@ function viewFleetContainers(){
     if(stFilter === 'exited' && st !== 'exited' && st !== 'stopped') return false;
     if(stFilter === 'paused' && st !== 'paused') return false;
     if(q){
-      const name = (c.names && c.names[0]) ? c.names[0].toLowerCase() : (c.id||'').toLowerCase();
+      const allNames = Array.isArray(c.names) ? c.names.join(' ').toLowerCase() : '';
+      const name = (c.name || '').toLowerCase();
       const img = (c.image || '').toLowerCase();
-      if(!name.includes(q) && !img.includes(q) && !(c.id||'').toLowerCase().includes(q)) return false;
+      const id = (c.id || '').toLowerCase();
+      const cmd = (c.command || '').toLowerCase();
+      const srv = (c.server_id || '').toLowerCase();
+      if(!allNames.includes(q) && !name.includes(q) && !img.includes(q) && !id.includes(q) && !cmd.includes(q) && !srv.includes(q)) return false;
     }
     return true;
   });
@@ -278,7 +295,7 @@ function viewFleetContainers(){
 
   const toolbar = `<div class="card" style="margin-bottom:16px;padding:12px">
     <div class="row" style="gap:10px;justify-content:space-between;flex-wrap:wrap">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div class="fleetToolbarSearch" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex:1 1 280px">
         <label for="cntServerSel" class="muted" style="font-size:11px">Server</label>
         <select id="cntServerSel" style="width:auto" onchange="state.fleetServerFilter=this.value;render()">${srvOpts}</select>
         <label for="cntStateSel" class="muted" style="font-size:11px">State</label>
@@ -288,9 +305,9 @@ function viewFleetContainers(){
           <option value="exited" ${stFilter==='exited'?'selected':''}>Exited / Stopped</option>
           <option value="paused" ${stFilter==='paused'?'selected':''}>Paused</option>
         </select>
-        <input placeholder="Search container or image..." value="${esc(state.fleetSearch||'')}" oninput="fleetFilter('fleetSearch',this.value)" style="max-width:240px" aria-label="Search containers">
+        <input id="cntSearchInput" data-filter-key="fleetSearch" placeholder="Search container or image..." value="${esc(state.fleetSearch||'')}" oninput="fleetFilter('fleetSearch',this.value)" onkeydown="if(event.key==='Enter')fleetFilterFlush()" style="max-width:240px" aria-label="Search containers">
       </div>
-      <div style="display:flex;gap:8px;align-items:center">
+      <div class="fleetToolbarActions" style="display:flex;gap:8px;align-items:center">
         <button class="btn ghost" onclick="viewAllContainersLogs()">All Logs</button>
         <button class="btn ghost" onclick="refreshAll()">Refresh</button>
       </div>
@@ -388,7 +405,7 @@ function viewFleetJobs(){
           <option value="succeeded" ${statusFilter==='succeeded'?'selected':''}>Succeeded</option>
           <option value="failed" ${statusFilter==='failed'?'selected':''}>Failed</option>
         </select>
-        <input placeholder="Filter by job ID, target, host..." value="${esc(state.fleetJobSearch||'')}" oninput="fleetFilter('fleetJobSearch',this.value)" style="max-width:240px" aria-label="Search jobs">
+        <input id="jobSearchInput" data-filter-key="fleetJobSearch" placeholder="Filter by job ID, target, host..." value="${esc(state.fleetJobSearch||'')}" oninput="fleetFilter('fleetJobSearch',this.value)" onkeydown="if(event.key==='Enter')fleetFilterFlush()" style="max-width:240px" aria-label="Search jobs">
       </div>
       <button class="btn ghost" onclick="refreshAll()">Refresh</button>
     </div>
@@ -455,7 +472,7 @@ function viewFleetAudit(){
 
   const toolbar = `<div class="card" style="margin-bottom:16px;padding:12px">
     <div class="row" style="gap:10px;justify-content:space-between;flex-wrap:wrap">
-      <input placeholder="Filter audit events by actor, action, target..." value="${esc(state.fleetAuditSearch||'')}" oninput="fleetFilter('fleetAuditSearch',this.value)" style="max-width:320px" aria-label="Search audit events">
+      <input id="auditSearchInput" data-filter-key="fleetAuditSearch" placeholder="Filter audit events by actor, action, target..." value="${esc(state.fleetAuditSearch||'')}" oninput="fleetFilter('fleetAuditSearch',this.value)" onkeydown="if(event.key==='Enter')fleetFilterFlush()" style="max-width:320px" aria-label="Search audit events">
       <button class="btn ghost" onclick="refreshAll()">Refresh</button>
     </div>
   </div>`;
@@ -1249,6 +1266,7 @@ window.goFleetContainers=goFleetContainers;
 window.refreshFleetView = refreshFleetView;
 window.patchFleetView = patchFleetView;
 window.fleetFilter = fleetFilter;
+window.fleetFilterFlush = fleetFilterFlush;
 window.waitFleetJobDone = waitFleetJobDone;
 window.waitFleetContainerGone = waitFleetContainerGone;
 window.fleetStatusBadge = fleetStatusBadge;
@@ -1291,6 +1309,6 @@ const filterFleetLogLevel = (...args) => window.filterFleetLogLevel?.(...args);
 
 
 export {
-  refreshFleetView, patchFleetView, fleetFilter, waitFleetJobDone, waitFleetContainerGone, fleetStatusBadge, serverStatusInfo, renderPortBadges, viewFleetDisabled, viewFleetServers, viewFleetContainers, viewFleetJobs, viewFleetAudit, viewFleetSettings, openEnrollModal, doCreateEnrollment, copyEnrollCmd, revokeServer, startContainer, stopContainer, restartContainer, removeContainer, handleJobOutcome, viewContainerInspect, viewContainerLogs, viewAllContainersLogs, renderFleetLogsActions, startFleetLogsAuto, toggleFleetLogsAuto, switchFleetLogContainer, filterFleetLogLevel, refreshFleetLogs, filterFleetLogs, copyFleetLogs, matchLogLevel, updateFleetLogsBody, renderLogLines, parseLogLine, shortTs, goFleetContainers,
+  refreshFleetView, patchFleetView, fleetFilter, fleetFilterFlush, waitFleetJobDone, waitFleetContainerGone, fleetStatusBadge, serverStatusInfo, renderPortBadges, viewFleetDisabled, viewFleetServers, viewFleetContainers, viewFleetJobs, viewFleetAudit, viewFleetSettings, openEnrollModal, doCreateEnrollment, copyEnrollCmd, revokeServer, startContainer, stopContainer, restartContainer, removeContainer, handleJobOutcome, viewContainerInspect, viewContainerLogs, viewAllContainersLogs, renderFleetLogsActions, startFleetLogsAuto, toggleFleetLogsAuto, switchFleetLogContainer, filterFleetLogLevel, refreshFleetLogs, filterFleetLogs, copyFleetLogs, matchLogLevel, updateFleetLogsBody, renderLogLines, parseLogLine, shortTs, goFleetContainers,
   deleteServer, revokeEnrollment, reissueEnrollment, showTokenModal, copyNewEnrollCmd
 };

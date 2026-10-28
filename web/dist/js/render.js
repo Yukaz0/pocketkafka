@@ -127,6 +127,27 @@ function buildStatusbar(){
     sb=document.createElement('div'); sb.id='sbar'; sb.className='sbar';
     document.body.appendChild(sb);
   }
+  if(state.zone==='fleet'){
+    const srvs=state.fleetServers||[];
+    const onlineCount=srvs.filter(s=>(s.status||'').toLowerCase()==='online').length;
+    sb.innerHTML=`<span><span class="sdot" style="background:#0ea5e9"></span>Fleet Controller</span>`
+      +`<span class="slink" onclick="goView('fleet-servers')">${srvs.length} servers (${onlineCount} online)</span>`
+      +`<span style="flex:1"></span>`
+      +`<span class="slink" onclick="goView('fleet-containers')">containers</span>`
+      +`<span class="slink" onclick="goView('fleet-jobs')">jobs</span>`
+      +`<span class="slink" onclick="goView('fleet-audit')">audit</span>`;
+    return;
+  }
+  if(state.zone==='mqtt'){
+    const st=state.mqttStatus||{};
+    const clientCount=st.connections!=null?st.connections:((st.clients&&st.clients.length)||0);
+    sb.innerHTML=`<span><span class="sdot" style="background:#10b981"></span>MQTT Bridge</span>`
+      +`<span class="slink" onclick="goView('mqtt-clients')">${clientCount} clients</span>`
+      +`<span style="flex:1"></span>`
+      +`<span class="slink" onclick="goView('mqtt-publisher')">publisher</span>`
+      +`<span class="slink" onclick="goView('mqtt-tracker')">tracker</span>`;
+    return;
+  }
   const c=state.cluster||{};
   const topicChip=state.view==='databrowser'&&state.topic?`<span>p: ${esc(state.partition)}</span>`:'';
   const posChip=(state.view==='databrowser'&&state.leo!=null)?`<span>LEO ${state.leo}</span>`:'';
