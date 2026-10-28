@@ -15,6 +15,7 @@ const clusterDialTimeout = 4 * time.Second
 func clusterDialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	return netguard.Dialer(clusterDialTimeout).DialContext(ctx, network, address)
 }
+
 // peerHostAllowed gates outbound peer/cluster URLs before any request is built.
 // IP literals are checked against netguard.CheckAddr (link-local, cloud metadata,
 // unspecified/multicast rejected). DNS names pass here; the actual connection still
