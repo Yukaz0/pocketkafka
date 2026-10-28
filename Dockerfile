@@ -7,7 +7,7 @@
 # Dependabot (docker) bumps these weekly.
 
 # Stage 1: build the broker binary
-FROM golang:1.26-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS builder
+FROM golang:1.26-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308 AS builder
 
 # Cross-compilation targets, injected by `docker buildx build --platform ...`.
 # Defaults keep plain `docker build` working on amd64.
