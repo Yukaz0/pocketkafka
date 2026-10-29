@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "pocketkafka": {
+      "command": "pocketkafka-mcp",
+      "args": ["-b", "localhost:9092"],
+      "env": {
+        "POCKETKAFKA_REGISTRY": "http://localhost:8081"
+      }
+    }
+  }
+}

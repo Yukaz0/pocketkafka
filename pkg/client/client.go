@@ -230,3 +230,8 @@ func (c *KafkaClient) Close() error {
 func (c *KafkaClient) RoundTrip(apiKey, version int16, reqBody []byte) ([]byte, error) {
 	return c.roundTrip(apiKey, version, reqBody)
 }
+
+// Version returns the negotiated API version for apiKey.
+func (c *KafkaClient) Version(apiKey int16) int16 {
+	return c.version(apiKey)
+}

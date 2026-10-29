@@ -44,6 +44,10 @@ jobs:
               go build -trimpath -buildvcs=true \
               -ldflags="-s -w -X main.version=${VERSION}" \
               -o "dist/fleet-agent-linux-${1#linux/}" ./cmd/fleet-agent
+            CGO_ENABLED=0 GOOS=linux GOARCH="${1#linux/}" \
+              go build -trimpath -buildvcs=true \
+              -ldflags="-s -w -X main.version=${VERSION}" \
+              -o "dist/pocketkafka-mcp-linux-${1#linux/}" ./cmd/mcp-server
           done
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
             go build -trimpath -buildvcs=true \
@@ -57,12 +61,16 @@ jobs:
             go build -trimpath -buildvcs=true \
             -ldflags="-s -w -X main.version=${VERSION}" \
             -o "dist/fleet-agent-windows-amd64.exe" ./cmd/fleet-agent
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+            go build -trimpath -buildvcs=true \
+            -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "dist/pocketkafka-mcp-windows-amd64.exe" ./cmd/mcp-server
           ./dist/pocketkafka-linux-amd64 about
           ./dist/fleet-agent-linux-amd64 -version
       - name: Attest binaries
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v2.3.0
         with:
-          subject-path: 'dist/pocketkafka-*, dist/pkctl-*, dist/fleet-agent-*'
+          subject-path: 'dist/pocketkafka-*, dist/pkctl-*, dist/fleet-agent-*, dist/pocketkafka-mcp-*'
 
       - name: SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
@@ -93,8 +101,11 @@ jobs:
             dist/pkctl-arm64
             dist/fleet-agent-linux-amd64
             dist/fleet-agent-linux-arm64
+            dist/pocketkafka-mcp-linux-amd64
+            dist/pocketkafka-mcp-linux-arm64
             dist/pocketkafka-windows-amd64.exe
             dist/pkctl-windows-amd64.exe
             dist/fleet-agent-windows-amd64.exe
+            dist/pocketkafka-mcp-windows-amd64.exe
             dist/SHA256SUMS.txt
             dist/pocketkafka-sbom.cdx.json
