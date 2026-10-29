@@ -18,11 +18,11 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.26'
 
@@ -68,7 +68,7 @@ jobs:
           ./dist/pocketkafka-linux-amd64 about
           ./dist/fleet-agent-linux-amd64 -version
       - name: Attest binaries
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v2.3.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v2.3.0
         with:
           subject-path: 'dist/pocketkafka-*, dist/pkctl-*, dist/fleet-agent-*, dist/pocketkafka-mcp-*'
 
@@ -82,7 +82,7 @@ jobs:
           dependency-snapshot: false
 
       - name: Attest SBOM
-        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v2.3.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v2.3.0
         with:
           subject-path: 'dist/pocketkafka-sbom.cdx.json'
 
@@ -92,7 +92,7 @@ jobs:
           cat dist/SHA256SUMS.txt
 
       - name: Publish release
-        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836 # v2.3.3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             dist/pocketkafka-linux-amd64
