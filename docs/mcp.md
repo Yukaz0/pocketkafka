@@ -64,6 +64,19 @@ Skema input kunci:
 Cap anti-ledakan-konteks: `limit` max 100, value truncate 4 KB/pesan
 (ditandai `"truncated": true`), total respons max ±100 KB.
 
+### Fleet & MQTT
+
+| Tool | Endpoint web |
+|---|---|
+| `fleet_status`, `fleet_list_servers`, `fleet_get_server` | `GET /api/v1/fleet/status`, `/servers[/{id}]` |
+| `fleet_list_containers`, `fleet_container_logs` | `GET /api/v1/fleet/containers[/{id}/logs]` |
+| `fleet_list_jobs`, `fleet_get_job`, `fleet_audit_events` | `GET /api/v1/fleet/jobs[/{id}]`, `/audit-events` |
+| `fleet_container_{start,stop,restart}` (write) | `POST /api/v1/fleet/containers/{id}/{action}` |
+| `mqtt_status`, `mqtt_publish` (write) | `GET /api/v1/mqtt`, `POST /api/v1/mqtt/publish` |
+
+Resources: `fleet://status`, `fleet://servers`, `mqtt://status`.
+Prompt: `fleet-health` (status → job gagal → server offline).
+
 ### Operasi (gated `--allow-write`)
 
 | Tool | Sumber existing | Catatan |
@@ -108,10 +121,21 @@ Flag/env:
 ```
 -b localhost:9092                  (default; lawan broker lokal)
 --registry http://localhost:8081   POCKETKAFKA_REGISTRY
+--web http://localhost:8080        POCKETKAFKA_WEB_URL (fleet/mqtt/admin)
+--web-token ...                    POCKETKAFKA_WEB_TOKEN (delegated token web)
 --allow-write                      aktifkan tools write
 --auth-token ...                   POCKETKAFKA_MCP_TOKEN
 --timeout 10s                      POCKETKAFKA_MCP_TIMEOUT
 ```
+
+Web API (`:8080`) butuh delegated token — MCP teruskan via
+`--web-token`, dan warisi authz web yang sudah ada. Tanpa token,
+tool fleet/mqtt balas `web 401`, bukan crash. Fleet lewat proxy web
+(`:8080` forward ke `:18090`); MCP tak pegang token fleet langsung.
+
+Sengaja tak di-expose: `fleet_container_remove`, revoke/delete server,
+enrollments, job submit (tak ada rute POST-nya) — daya rusak tinggi,
+biar operator via UI.
 
 Token dikirim agen di `initialize` params: `{"token": "..."}`.
 Tanpa token cocok → `-32001 unauthorized`. Tanpa `--allow-write`,

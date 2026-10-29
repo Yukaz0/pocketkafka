@@ -24,6 +24,8 @@ var (
 	timeoutFlag   = flag.Duration("timeout", 10*time.Second, "per-call broker timeout")
 	allowWriteFlg = flag.Bool("allow-write", false, "enable write tools (produce, create/delete, reset)")
 	authTokenFlg  = flag.String("auth-token", "", "require token in initialize params (env POCKETKAFKA_MCP_TOKEN)")
+	webFlag       = flag.String("web", "http://localhost:8080", "web UI base URL for fleet/mqtt/admin (env POCKETKAFKA_WEB_URL)")
+	webTokenFlag  = flag.String("web-token", "", "bearer token for web API (env POCKETKAFKA_WEB_TOKEN)")
 )
 
 const protoVersion = "2025-06-18"
@@ -59,6 +61,8 @@ type tool struct {
 type server struct {
 	kc         *client.KafkaClient
 	registry   string
+	web        string
+	webToken   string
 	http       *http.Client
 	allowWrite bool
 	authToken  string
@@ -87,12 +91,20 @@ func main() {
 	if *authTokenFlg == "" {
 		*authTokenFlg = os.Getenv("POCKETKAFKA_MCP_TOKEN")
 	}
+	if *webFlag == "" {
+		*webFlag = os.Getenv("POCKETKAFKA_WEB_URL")
+	}
+	if *webTokenFlag == "" {
+		*webTokenFlag = os.Getenv("POCKETKAFKA_WEB_TOKEN")
+	}
 	kc, err := client.NewClient(split(*brokersFlag), "pocketkafka-mcp")
 	if err != nil {
 		fatal(-32000, "connect broker: "+err.Error())
 	}
 	defer kc.Close()
 	s := &server{kc: kc, registry: strings.TrimRight(*registryFlag, "/"),
+		web:        strings.TrimRight(*webFlag, "/"),
+		webToken:   *webTokenFlag,
 		http:       &http.Client{Timeout: *timeoutFlag},
 		allowWrite: *allowWriteFlg, authToken: *authTokenFlg}
 	s.loop(os.Stdin, os.Stdout)
@@ -241,6 +253,44 @@ func (s *server) runTool(name string, args map[string]any) (interface{}, *callEr
 		return s.resetOffset(args)
 	case "delete_consumer_group":
 		return s.deleteGroup(args)
+	case "fleet_status":
+		return s.webGet("/api/v1/fleet/status")
+	case "fleet_list_servers":
+		return s.webGet("/api/v1/fleet/servers")
+	case "fleet_get_server":
+		id, _ := args["server_id"].(string)
+		if id == "" {
+			return nil, paramErr("missing required param: server_id (string)")
+		}
+		return s.webGet("/api/v1/fleet/servers/" + id)
+	case "fleet_list_containers":
+		return s.webGet("/api/v1/fleet/containers")
+	case "fleet_container_logs":
+		id, _ := args["container_id"].(string)
+		if id == "" {
+			return nil, paramErr("missing required param: container_id (string)")
+		}
+		return s.webGet("/api/v1/fleet/containers/" + id + "/logs")
+	case "fleet_list_jobs":
+		return s.webGet("/api/v1/fleet/jobs")
+	case "fleet_get_job":
+		id, _ := args["job_id"].(string)
+		if id == "" {
+			return nil, paramErr("missing required param: job_id (string)")
+		}
+		return s.webGet("/api/v1/fleet/jobs/" + id)
+	case "fleet_audit_events":
+		return s.webGet("/api/v1/fleet/audit-events")
+	case "fleet_container_start":
+		return s.fleetContainerAction(args, "start")
+	case "fleet_container_stop":
+		return s.fleetContainerAction(args, "stop")
+	case "fleet_container_restart":
+		return s.fleetContainerAction(args, "restart")
+	case "mqtt_status":
+		return s.webGet("/api/v1/mqtt")
+	case "mqtt_publish":
+		return s.mqttPublish(args)
 	default:
 		return nil, &callError{code: -32601, msg: "unknown tool: " + name}
 	}
@@ -708,6 +758,80 @@ func (s *server) registryGet(path string, _ map[string]any) (interface{}, *callE
 	return v, nil
 }
 
+// webGet panggil web API :8080 (fleet, mqtt, admin). Hormati auth web.
+func (s *server) webGet(path string) (interface{}, *callError) {
+	return s.webCall("GET", path, nil)
+}
+
+func (s *server) webCall(method, path string, body interface{}) (interface{}, *callError) {
+	if s.web == "" {
+		return nil, &callError{code: -32000, msg: "web API not configured (use --web)"}
+	}
+	var rdr io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		rdr = strings.NewReader(string(b))
+	}
+	req, err := http.NewRequest(method, s.web+path, rdr)
+	if err != nil {
+		return nil, &callError{code: -32000, msg: "web: " + err.Error()}
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if s.webToken != "" {
+		req.Header.Set("Authorization", "Bearer "+s.webToken)
+	}
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return nil, &callError{code: -32000, msg: "web: " + err.Error()}
+	}
+	defer resp.Body.Close()
+	var v interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		return nil, &callError{code: -32000, msg: "web: bad response"}
+	}
+	if resp.StatusCode >= 400 {
+		return nil, &callError{code: -32000, msg: fmt.Sprintf("web %d: %s", resp.StatusCode, toJSON(v))}
+	}
+	return v, nil
+}
+
+func (s *server) fleetContainerAction(args map[string]any, action string) (interface{}, *callError) {
+	if cerr := s.needWrite(); cerr != nil {
+		return nil, cerr
+	}
+	id, _ := args["container_id"].(string)
+	if id == "" {
+		return nil, paramErr("missing required param: container_id (string)")
+	}
+	out, cerr := s.webCall("POST", "/api/v1/fleet/containers/"+id+"/"+action, map[string]any{})
+	if cerr != nil {
+		return nil, cerr
+	}
+	s.audit("fleet_container_"+action, args)
+	return out, nil
+}
+
+func (s *server) mqttPublish(args map[string]any) (interface{}, *callError) {
+	if cerr := s.needWrite(); cerr != nil {
+		return nil, cerr
+	}
+	topic, _ := args["topic"].(string)
+	if topic == "" {
+		return nil, paramErr("missing required param: topic (string)")
+	}
+	payload, _ := args["payload"].(string)
+	out, cerr := s.webCall("POST", "/api/v1/mqtt/publish", map[string]any{
+		"topic": topic, "payload": payload, "qos": int(numArg(args, "qos", 0)),
+	})
+	if cerr != nil {
+		return nil, cerr
+	}
+	s.audit("mqtt_publish", map[string]any{"topic": topic})
+	return out, nil
+}
+
 func (s *server) health() (interface{}, *callError) {
 	names := s.kc.ListTopics()
 	parts, msgs := 0, int64(0)
@@ -774,6 +898,34 @@ func toolDefs() []tool {
 		{"delete_consumer_group", "Delete group (needs --allow-write)", obj(map[string]any{
 			"group_id": str("group id"),
 		}, "group_id")},
+		{"fleet_status", "Fleet controller status (servers, agents, jobs)", obj(map[string]any{})},
+		{"fleet_list_servers", "List fleet-managed servers", obj(map[string]any{})},
+		{"fleet_get_server", "Server detail + agent", obj(map[string]any{
+			"server_id": str("server id"),
+		}, "server_id")},
+		{"fleet_list_containers", "List containers on fleet hosts", obj(map[string]any{})},
+		{"fleet_container_logs", "Container logs", obj(map[string]any{
+			"container_id": str("container id"),
+		}, "container_id")},
+		{"fleet_list_jobs", "List fleet jobs", obj(map[string]any{})},
+		{"fleet_get_job", "Job detail + result", obj(map[string]any{
+			"job_id": str("job id"),
+		}, "job_id")},
+		{"fleet_audit_events", "Fleet audit trail", obj(map[string]any{})},
+		{"fleet_container_start", "Start container (needs --allow-write)", obj(map[string]any{
+			"container_id": str("container id"),
+		}, "container_id")},
+		{"fleet_container_stop", "Stop container (needs --allow-write)", obj(map[string]any{
+			"container_id": str("container id"),
+		}, "container_id")},
+		{"fleet_container_restart", "Restart container (needs --allow-write)", obj(map[string]any{
+			"container_id": str("container id"),
+		}, "container_id")},
+		{"mqtt_status", "MQTT bridge status + clients", obj(map[string]any{})},
+		{"mqtt_publish", "Publish MQTT message, bridged to Kafka (needs --allow-write)", obj(map[string]any{
+			"topic": str("mqtt topic"), "payload": str("payload"),
+			"qos": num("qos 0-2, default 0"),
+		}, "topic", "payload")},
 	}
 }
 
@@ -784,6 +936,9 @@ func (s *server) listResources() []map[string]any {
 		{"uri": "kafka://topics", "name": "topics", "description": "All topics"},
 		{"uri": "kafka://schemas", "name": "schemas", "description": "Schema subjects"},
 		{"uri": "kafka://health", "name": "health", "description": "Cluster summary"},
+		{"uri": "fleet://status", "name": "fleet status", "description": "Fleet controller status"},
+		{"uri": "fleet://servers", "name": "fleet servers", "description": "Fleet-managed servers"},
+		{"uri": "mqtt://status", "name": "mqtt status", "description": "MQTT bridge status"},
 	}
 	for _, n := range s.kc.ListTopics() {
 		res = append(res, map[string]any{
@@ -836,6 +991,12 @@ func (s *server) readResource(req rpcReq) rpcResp {
 	case strings.HasPrefix(uri, "kafka://schemas/"):
 		subj := strings.TrimPrefix(uri, "kafka://schemas/")
 		out, cerr = s.registryGet("/subjects/"+subj+"/versions/latest", nil)
+	case uri == "fleet://status":
+		out, cerr = s.webGet("/api/v1/fleet/status")
+	case uri == "fleet://servers":
+		out, cerr = s.webGet("/api/v1/fleet/servers")
+	case uri == "mqtt://status":
+		out, cerr = s.webGet("/api/v1/mqtt")
 	default:
 		return errResp(req, -32602, "unknown resource: "+uri, nil)
 	}
@@ -855,6 +1016,8 @@ func promptDefs() []map[string]any {
 			"arguments": []any{map[string]any{"name": "topic", "required": true}}},
 		{"name": "publish-event", "description": "Guide for publishing + verifying an event (needs --allow-write)",
 			"arguments": []any{map[string]any{"name": "topic", "required": true}}},
+		{"name": "fleet-health", "description": "Check fleet: status, failing jobs, unhealthy servers",
+			"arguments": []any{}},
 	}
 }
 
@@ -888,6 +1051,10 @@ func (s *server) getPrompt(req rpcReq) rpcResp {
 	case "publish-event":
 		text = "Publish to " + arg + ": write tools are not enabled in read-only mode. " +
 			"Restart pocketkafka-mcp with --allow-write, then use produce flow and verify with fetch_messages."
+	case "fleet-health":
+		text = "Check fleet health: 1) call fleet_status, " +
+			"2) call fleet_list_jobs and flag failed ones, " +
+			"3) call fleet_list_servers and check for offline agents."
 	default:
 		return errResp(req, -32602, "unknown prompt: "+p.Name, nil)
 	}
