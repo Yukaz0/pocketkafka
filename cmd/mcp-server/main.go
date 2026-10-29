@@ -379,6 +379,9 @@ type partInfo struct {
 }
 
 func (s *server) describeTopic(topic string) (interface{}, *callError) {
+	if err := s.kc.RefreshMetadata(); err != nil {
+		return nil, brokerErr(err)
+	}
 	parts := s.kc.Partitions(topic)
 	if parts == nil {
 		return nil, &callError{code: -32000, msg: "unknown topic: " + topic}
@@ -779,6 +782,7 @@ func (s *server) webCall(method, path string, body interface{}) (interface{}, *c
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("X-PocketKafka-Request", "1")
 	if s.webToken != "" {
 		req.Header.Set("Authorization", "Bearer "+s.webToken)
 	}
