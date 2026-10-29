@@ -270,7 +270,14 @@ func (s *server) runTool(name string, args map[string]any) (interface{}, *callEr
 		if id == "" {
 			return nil, paramErr("missing required param: container_id (string)")
 		}
-		return s.webGet("/api/v1/fleet/containers/" + id + "/logs")
+		path := "/api/v1/fleet/containers/" + id + "/logs"
+		if t := int(numArg(args, "tail", 0)); t > 0 {
+			if t > 1000 {
+				t = 1000
+			}
+			path += fmt.Sprintf("?tail=%d", t)
+		}
+		return s.webGet(path)
 	case "fleet_list_jobs":
 		return s.webGet("/api/v1/fleet/jobs")
 	case "fleet_get_job":
@@ -908,8 +915,8 @@ func toolDefs() []tool {
 			"server_id": str("server id"),
 		}, "server_id")},
 		{"fleet_list_containers", "List containers on fleet hosts", obj(map[string]any{})},
-		{"fleet_container_logs", "Container logs", obj(map[string]any{
-			"container_id": str("container id"),
+		{"fleet_container_logs", "Container logs (tail lines, default 100, max 1000)", obj(map[string]any{
+			"container_id": str("container id"), "tail": num("lines, default 100, max 1000"),
 		}, "container_id")},
 		{"fleet_list_jobs", "List fleet jobs", obj(map[string]any{})},
 		{"fleet_get_job", "Job detail + result", obj(map[string]any{
