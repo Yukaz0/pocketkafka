@@ -67,7 +67,15 @@ for _ in $(seq 1 100); do
 done
 
 echo "==> native client (in-tree SDK)"
-go test ./internal/e2e -run TestEndToEnd -count=1
+# The unit/e2e suite is deliberately not published with this repository (see
+# ci.yml "Unit gate availability"): a clean checkout contains no *_test.go, so
+# internal/e2e does not exist remotely. Skip with a clear message instead of
+# failing the run; the Docker matrix below still exercises the broker.
+if ! find internal/e2e -name '*_test.go' -print -quit 2>/dev/null | grep -q .; then
+  echo "!! internal/e2e test suite not in this checkout; skipping native client check"
+else
+  go test ./internal/e2e -run TestEndToEnd -count=1
+fi
 
 if [[ "${INTEROP_DOCKER:-0}" == "1" ]]; then
   if ! command -v docker >/dev/null 2>&1; then
