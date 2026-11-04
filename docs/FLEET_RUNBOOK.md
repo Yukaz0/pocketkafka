@@ -224,3 +224,44 @@ FLEET_ENROLL_TOKEN=<token> docker compose --profile fleet up -d fleet-agent
 
 Use `--network host` or the host LAN IP if `localhost` inside the
 container does not reach the controller.
+
+---
+
+## 7. Onboarding target via `run-targetfleet.sh`
+
+Skrip `run-targetfleet.sh` (root repo) meng-onboard satu host dari sisi controller: login web API, cocokkan `agent_id` state remote vs registry, terbitkan token hanya bila enroll dibutuhkan, pasang biner dari GitHub Release, enroll satu-kali via SSH, pasang systemd service, verifikasi dari controller.
+
+Syarat: `curl jq ssh` di host controller; target punya `curl`, Docker aktif, `systemd`, SSH bisa login. Biner diambil target dari GitHub Release (`fleet-agent-linux-amd64/arm64` + `SHA256SUMS.txt`); tanpa akses GitHub di target pakai `--binary`.
+
+### Urutan
+
+1. Dry-run, pastikan flag `--controller-url` bernilai IP/DNS LAN yang terjangkau target (bukan loopback; skrip menolak `127.0.0.1`/`localhost`):
+   ```bash
+   export PK_ADMIN_PASSWORD="$(cat secrets/admin_password.txt)"
+   ./run-targetfleet.sh --target root@<target-host> --server-id <id> \
+     --controller-url http://<controller-host>:8080 --dry-run
+   ```
+2. Jalankan onboarding:
+   ```bash
+   ./run-targetfleet.sh --target root@<target-host> --server-id <id> \
+     --controller-url http://<controller-host>:8080
+   ```
+   Urutan otomatis: login -> cocokkan id -> terbitkan token bila enroll -> unduh biner + cek SHA256 -> stop service bila re-enroll -> backup state stale ke `*.stale-*` -> enroll satu-kali -> pasang service -> verifikasi `online` (maks 60 dtk).
+3. Verifikasi: Fleet -> Servers -> `<id>` = `online`; `journalctl -u fleet-agent -f` di target tanpa 401.
+
+### Opsi
+
+| Opsi | Keterangan |
+|---|---|
+| `--arch` | `amd64`/`arm64`/`auto` (default auto via `uname -m` target) |
+| `--release` | `latest` (default, via API GitHub), `<tag>`, atau `local` (go build repo ini) |
+| `--repo` | repo rilis (default `Yukaz0/pocketkafka`) |
+| `--binary <path>` | fallback offline, kirim biner lokal via scp |
+| `--force-reenroll` | backup+reset state walau sudah cocok, enroll ulang |
+| `--token-ttl` | masa berlaku token (default `15m`) |
+| `--ssh-port`, `--sudo` | port SSH; awali perintah remote dgn sudo bila user bukan root |
+| `--password-file` | alternatif `PK_ADMIN_PASSWORD` |
+| `--dry-run`, `--self-test` | cetak rencana; uji unit logika `decide_enroll` |
+
+Logika enroll: `skip` bila `agent_id` cocok; `enroll` + backup bila orphan/stale/force; token tak diterbitkan bila skip. `401 agent ... not found` = state stale, skrip betulkan otomatis; paksa dengan `--force-reenroll`.
+

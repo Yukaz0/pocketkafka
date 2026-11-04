@@ -114,6 +114,9 @@ func loadOrEnroll(ctx context.Context, client *http.Client, serverURL, token, st
 	if data, err := os.ReadFile(statePath); err == nil {
 		var s AgentState
 		if err := json.Unmarshal(data, &s); err == nil && s.AgentID != "" && s.Secret != "" {
+			if token != "" {
+				log.Printf("warning: enrollment token ignored because state file %q already exists (agent_id=%s); move or delete the state file to re-enroll", statePath, s.AgentID)
+			}
 			return &s, nil
 		}
 	}
