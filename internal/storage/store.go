@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,6 +62,11 @@ func (s *Store) recover() error {
 			continue
 		}
 		topic := e.Name()
+		// leftover from a DeleteTopic interrupted between rename and RemoveAll
+		if strings.HasPrefix(topic, ".") && strings.Contains(topic, ".deleted-") {
+			_ = os.RemoveAll(filepath.Join(s.dir, topic))
+			continue
+		}
 		t := &Topic{Name: topic, Partitions: make(map[int32]*Partition)}
 		partitions, err := os.ReadDir(filepath.Join(s.dir, topic))
 		if err != nil {
@@ -164,15 +170,20 @@ func (s *Store) DeleteTopic(name string) error {
 		return fmt.Errorf("unknown topic: %s", name)
 	}
 	delete(s.topics, name)
+
+	for _, p := range t.Partitions {
+		_ = p.Close()
+	}
+
+	topicDir := filepath.Join(s.dir, name)
+	tombstone := filepath.Join(s.dir, fmt.Sprintf(".%s.deleted-%d", name, time.Now().UnixNano()))
+	renamed := os.Rename(topicDir, tombstone) == nil
 	s.mu.Unlock()
 
-	var firstErr error
-	for _, p := range t.Partitions {
-		if err := p.Delete(); err != nil && firstErr == nil {
-			firstErr = err
-		}
+	if renamed {
+		return os.RemoveAll(tombstone)
 	}
-	return firstErr
+	return os.RemoveAll(topicDir)
 }
 
 func (s *Store) GetPartition(topic string, partition int32) *Partition {
