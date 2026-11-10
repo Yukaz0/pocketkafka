@@ -557,6 +557,7 @@ func (gm *GroupManager) Heartbeat(req *protocol.HeartbeatRequest) *protocol.Hear
 		resp.ErrorCode = protocol.ErrUnknownMemberID
 		return resp
 	}
+	member.LastHeartbeat = time.Now()
 	if g.State == StatePreparingRebalance {
 		resp.ErrorCode = protocol.ErrRebalanceInProgress
 		return resp
@@ -565,7 +566,6 @@ func (gm *GroupManager) Heartbeat(req *protocol.HeartbeatRequest) *protocol.Hear
 		resp.ErrorCode = protocol.ErrIllegalGeneration
 		return resp
 	}
-	member.LastHeartbeat = time.Now()
 	return resp
 }
 
@@ -619,7 +619,7 @@ func (gm *GroupManager) OffsetCommit(req *protocol.OffsetCommitRequest) *protoco
 
 	resp := &protocol.OffsetCommitResponse{Version: req.Version}
 	fenceErr := protocol.ErrNone
-	if req.Generation >= 0 {
+	if req.Version >= 1 && req.Generation >= 0 {
 		switch {
 		case g.State == StatePreparingRebalance:
 			fenceErr = protocol.ErrRebalanceInProgress
@@ -872,6 +872,9 @@ func (g *Group) reapExpired(now time.Time, defaultSession int32) int {
 
 	var dead []string
 	for id, m := range g.Members {
+		if g.joined[id] {
+			continue
+		}
 		timeout := m.SessionTimeout
 		if timeout <= 0 {
 			timeout = defaultSession
