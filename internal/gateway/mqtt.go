@@ -455,8 +455,12 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 	handshake := true
 	maxLen := mqttMaxPreConnectBytes
 	conn.SetReadDeadline(time.Now().Add(mqttHandshakeTimeout))
+	var keepAliveTimeout time.Duration
 
 	for {
+		if keepAliveTimeout > 0 {
+			conn.SetReadDeadline(time.Now().Add(keepAliveTimeout))
+		}
 		first, payload, err := readMQTTPacket(c.br, maxLen)
 		if err != nil {
 			return
@@ -507,6 +511,10 @@ func (b *MQTTBridge) serveClient(conn net.Conn) {
 			}
 			if parseErr == nil && info != nil {
 				c.clientID = info.ClientID
+				if info.KeepAlive > 0 {
+					keepAliveTimeout = time.Duration(info.KeepAlive) * time.Second * 3 / 2
+					conn.SetReadDeadline(time.Now().Add(keepAliveTimeout))
+				}
 			}
 			if err := c.writePacket(mqttConnack, []byte{0x00, 0x00}); err != nil {
 				return
@@ -832,6 +840,7 @@ type mqttConnectInfo struct {
 	ClientID    string
 	Username    string
 	Password    string
+	KeepAlive   uint16
 	HasUsername bool
 	HasPassword bool
 }
@@ -851,9 +860,12 @@ func parseConnect(payload []byte) (*mqttConnectInfo, error) {
 	}
 	flags := payload[pos]
 	pos++
+	keepAlive := binary.BigEndian.Uint16(payload[pos : pos+2])
 	pos += 2
 
-	info := &mqttConnectInfo{}
+	info := &mqttConnectInfo{
+		KeepAlive: keepAlive,
+	}
 	clientID, n, err := readMQTTString(payload[pos:])
 	if err != nil {
 		return nil, err
