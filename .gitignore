@@ -45,3 +45,7 @@ fleet-agent.json
 /docs/TESTING_STRATEGY.md
 /docs/RULES.md
 /secrets/
+.codex/
+.serena/
+WATCHDOG.yml
+dist/
