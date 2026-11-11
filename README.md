@@ -365,11 +365,16 @@ Tests cover:
 
 The `pocketkafka-native` client is covered by `go test ./internal/e2e` on every
 PR. The external matrix — `kcat`/librdkafka (modern and the `0.9.0` fallback),
-KafkaJS and franz-go (still planned) — lives in [`test/interop`](test/interop/README.md) and is
+KafkaJS and franz-go — lives in [`test/interop`](test/interop/README.md) and is
 driven by `test/interop/run.sh` (nightly / on demand, requires Docker). The
 auditable list of what is supported vs planned is
 [`test/interop/compatibility.yaml`](test/interop/compatibility.yaml); treat that
 file, not this README, as the source of truth.
+
+Manually checked (produce, consumer-group consume, offset commit) against a local
+broker: `confluent-kafka` 2.16 (librdkafka modern), `franz-go`, `sarama`,
+`kafka-python-ng` (with `api_version=(0, 11, 0)`) and `kafkajs`. The
+`librdkafka` `0.9.0` fallback mode could not produce in this check.
 
 ---
 
