@@ -190,7 +190,7 @@ producer.send('orders', b'{"item":"phone","price":800}').get(timeout=10)
 
 ### 3. Node.js (`kafkajs`)
 
-Produce checked manually against the broker; not yet in the CI matrix (status `planned` in `compatibility.yaml`).
+Covered by `test/interop/kafkajs` (admin, produce, consumer-group consume).
 
 ```javascript
 const { Kafka } = require('kafkajs');

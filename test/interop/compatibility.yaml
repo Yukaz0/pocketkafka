@@ -58,7 +58,8 @@ clients:
   - name: kafkajs
     kind: node
     module: kafkajs
-    status: planned
+    status: supported
+    notes: Covered by test/interop/kafkajs (run by test/interop/run.sh).
 
 # Protocol versions the broker advertises. Adjust together with
 # pkg/protocol/types.go maxVersions.
