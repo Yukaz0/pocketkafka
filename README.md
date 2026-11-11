@@ -9,7 +9,7 @@
 [![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-success.svg?style=flat-square)](go.mod)
-[![Docker Image Size](https://img.shields.io/badge/Docker%20Size-%3C%2029MB-brightgreen.svg?style=flat-square)](#-quick-start)
+[![Docker Image Size](https://img.shields.io/badge/Docker%20Size-%3C%2035MB-brightgreen.svg?style=flat-square)](#-quick-start)
 [![Idle Memory](https://img.shields.io/badge/Idle%20RAM-%3C%2060MB-purple.svg?style=flat-square)](#-why-pocketkafka)
 
 <p align="center">
@@ -137,52 +137,60 @@ package main
 import (
     "context"
     "log"
+    "time"
+
     "github.com/Yukaz0/pocketkafka/pkg/client"
 )
 
 func main() {
-    // 1. High-throughput batch producer
-    producer, err := client.NewProducer(client.ProducerConfig{
-        Brokers: []string{"localhost:9092"},
-        Acks:    client.AcksAll,
-    })
+    kc, err := client.NewClient([]string{"localhost:9092"}, "orders-app")
     if err != nil { log.Fatal(err) }
+    defer kc.Close()
+
+    // 1. Batch producer (SendSync waits for the ack)
+    producer := client.NewProducer(kc, client.DefaultProducerConfig())
     defer producer.Close()
 
-    offset, _ := producer.SendSync(context.Background(), &client.Message{
+    offset, err := producer.SendSync(context.Background(), &client.Message{
         Topic: "orders",
         Key:   []byte("order-101"),
         Value: []byte(`{"item":"laptop","price":1200}`),
     })
+    if err != nil { log.Fatal(err) }
     log.Printf("Produced to offset: %d", offset)
 
     // 2. Rebalancing consumer group
-    cg, _ := client.NewConsumerGroup(client.ConsumerGroupConfig{
-        Brokers: []string{"localhost:9092"},
-        GroupID: "order-processors",
-        Topics:  []string{"orders"},
-    })
-    defer cg.Close()
-
-    cg.Start(context.Background(), func(msg *client.Message) error {
+    cfg := client.DefaultConsumerGroupConfig()
+    cfg.GroupID = "order-processors"
+    cfg.InitialOffset = -2 // read from earliest; default -1 = latest
+    cg := client.NewConsumerGroup(kc, cfg, func(msg *client.ConsumedMessage) error {
         log.Printf("Received: %s", string(msg.Value))
-        return nil // Auto-commit offset
+        return nil // offset is auto-committed
     })
+    cg.SetTopics([]string{"orders"})
+
+    ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+    defer cancel()
+    if err := cg.Start(ctx); err != nil { log.Print(err) }
 }
 ```
 
-### 2. Python (`kafka-python` or `confluent-kafka`) — planned, not yet verified
+### 2. Python (`kafka-python`)
 
-> External-client support is tracked in [`test/interop/compatibility.yaml`](test/interop/compatibility.yaml). Snippets below are the target API; only the Go SDK and REST/MQTT paths are verified today.
+> The broker advertises Produce v3 / Fetch v5 (Kafka 0.11-style). `kafka-python`
+> auto-detection picks newer versions and fails, so pin `api_version`.
+> Checked with `kafka-python-ng` 2.2.3; `confluent-kafka` is not verified.
 
 ```python
-from kafka import KafkaProducer, KafkaConsumer
+from kafka import KafkaProducer
 
-producer = KafkaProducer(bootstrap_servers='localhost:9092')
-producer.send('orders', b'{"item":"phone","price":800}')
+producer = KafkaProducer(bootstrap_servers='localhost:9092', api_version=(0, 11, 0))
+producer.send('orders', b'{"item":"phone","price":800}').get(timeout=10)
 ```
 
-### 3. Node.js (`kafkajs`) — planned, not yet verified
+### 3. Node.js (`kafkajs`)
+
+Produce checked manually against the broker; not yet in the CI matrix (status `planned` in `compatibility.yaml`).
 
 ```javascript
 const { Kafka } = require('kafkajs');
@@ -325,7 +333,7 @@ pocketkafka/
 ├── test/
 │   ├── interop/            # External client compatibility matrix & runners
 │   └── bench/              # Reproducible benchmark runner
-├── Dockerfile              # Ultra-lightweight multi-stage broker container (< 29MB)
+├── Dockerfile              # Ultra-lightweight multi-stage broker container (~33MB)
 ├── Dockerfile.fleet-agent  # Standalone fleet-agent container
 ├── docker-compose.yml      # Multi-service stack (Broker, Postgres, Fleet Agent)
 ├── go.mod                  # 100% clean - zero external requires
@@ -357,7 +365,7 @@ Tests cover:
 
 The `pocketkafka-native` client is covered by `go test ./internal/e2e` on every
 PR. The external matrix — `kcat`/librdkafka (modern and the `0.9.0` fallback),
-KafkaJS and franz-go — lives in [`test/interop`](test/interop/README.md) and is
+KafkaJS and franz-go (still planned) — lives in [`test/interop`](test/interop/README.md) and is
 driven by `test/interop/run.sh` (nightly / on demand, requires Docker). The
 auditable list of what is supported vs planned is
 [`test/interop/compatibility.yaml`](test/interop/compatibility.yaml); treat that
