@@ -132,11 +132,9 @@ func EncodeMetadataResponse(resp *MetadataResponse) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
+// writeInt32Array encodes nil as an empty array: these Metadata arrays are
+// non-nullable and librdkafka rejects a -1 length with a read underflow.
 func writeInt32Array(w *Writer, arr []int32) {
-	if arr == nil {
-		w.WriteArrayLen(-1)
-		return
-	}
 	w.WriteArrayLen(len(arr))
 	for _, v := range arr {
 		w.WriteInt32(v)
