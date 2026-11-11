@@ -5,6 +5,7 @@
 # which is a different codec implementation from the in-tree Go client and so
 # catches encoder/decoder bugs the native tests cannot.
 #
+# stdin must stay attached (-i): kcat -P reads the payload from it, and docker run drops it otherwise.
 # Usage: test/interop/kcat.sh <host:port> [legacy]
 set -euo pipefail
 
@@ -14,10 +15,10 @@ IMAGE="${KCAT_IMAGE:-edenhill/kcat:1.7.1}"
 TOPIC="interop-kcat"
 GROUP="interop-kcat-group"
 
-KCAT=(docker run --rm --network host "$IMAGE" -b "$ADDR")
+KCAT=(docker run --rm -i --network host "$IMAGE" -b "$ADDR")
 if [[ "$LEGACY" == "legacy" ]]; then
   # Force librdkafka onto its 0.9.0 fallback path (ListOffsets v0).
-  KCAT=(docker run --rm --network host "$IMAGE" -b "$ADDR"
+  KCAT=(docker run --rm -i --network host "$IMAGE" -b "$ADDR"
     -X broker.version.fallback=0.9.0
     -X api.version.request=false)
 fi
