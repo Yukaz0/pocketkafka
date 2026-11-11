@@ -1,0 +1,6 @@
+# Dummy fixture keys in config validation tests (not real secrets).
+093c9c15698a2311a271ed3592716d1982f222c4:internal/config/fleet_test.go:generic-api-key:121
+093c9c15698a2311a271ed3592716d1982f222c4:internal/config/fleet_test.go:generic-api-key:129
+093c9c15698a2311a271ed3592716d1982f222c4:internal/config/fleet_test.go:generic-api-key:141
+093c9c15698a2311a271ed3592716d1982f222c4:internal/config/fleet_test.go:generic-api-key:164
+093c9c15698a2311a271ed3592716d1982f222c4:internal/config/fleet_test.go:generic-api-key:186
