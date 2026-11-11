@@ -98,7 +98,7 @@ var maxVersions = map[int16]int16{
 	APKApiVersions:      2,
 	APKCreateTopics:     4,
 	APKDeleteTopics:     3,
-	APKInitProducerID:   2,
+	APKInitProducerID:   1, // v2+ is a flexible (tagged-field) version, unsupported
 	APKSaslAuthenticate: 1,
 	APKDeleteGroups:     1,
 }

@@ -18,14 +18,6 @@ func DecodeInitProducerIdRequest(version int16, body []byte) (*InitProducerIdReq
 	if req.TransactionTimeoutMs, err = r.ReadInt32(); err != nil {
 		return nil, err
 	}
-	if version >= 2 {
-		if req.ProducerID, err = r.ReadInt64(); err != nil {
-			return nil, err
-		}
-		if req.ProducerEpoch, err = r.ReadInt16(); err != nil {
-			return nil, err
-		}
-	}
 	return req, nil
 }
 
@@ -52,10 +44,6 @@ func EncodeInitProducerIdRequest(req *InitProducerIdRequest) ([]byte, error) {
 	w := NewWriter(32)
 	w.WriteNullableString(req.TransactionalID)
 	w.WriteInt32(req.TransactionTimeoutMs)
-	if req.Version >= 2 {
-		w.WriteInt64(req.ProducerID)
-		w.WriteInt16(req.ProducerEpoch)
-	}
 	return w.Bytes(), nil
 }
 
