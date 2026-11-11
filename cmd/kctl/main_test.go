@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -186,4 +188,43 @@ func buildCLI(t *testing.T) string {
 		t.Fatalf("build pkctl: %v\n%s", err, out)
 	}
 	return bin
+}
+
+func TestParseInterspersed(t *testing.T) {
+	cases := []struct {
+		name  string
+		args  []string
+		pos   []string
+		p     int
+		group string
+		topic string
+	}{
+		{"flags first", []string{"-p", "3", "create", "t"}, []string{"create", "t"}, 3, "", ""},
+		{"flags after", []string{"create", "t", "-p", "3"}, []string{"create", "t"}, 3, "", ""},
+		{"mixed with long aliases", []string{"offset", "get", "--group", "g1", "--topic=t1"}, []string{"offset", "get"}, 1, "g1", "t1"},
+		{"short group after cmd", []string{"consume", "t", "-g", "w"}, []string{"consume", "t"}, 1, "w", ""},
+	}
+	for _, c := range cases {
+		fs := flag.NewFlagSet("t", flag.ContinueOnError)
+		p := fs.Int("p", 1, "")
+		g := fs.String("g", "", "")
+		tp := fs.String("t", "", "")
+		fs.StringVar(g, "group", "", "")
+		fs.StringVar(tp, "topic", "", "")
+		pos, err := parseInterspersed(fs, c.args)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if !reflect.DeepEqual(pos, c.pos) || *p != c.p || *g != c.group || *tp != c.topic {
+			t.Errorf("%s: pos=%v p=%d g=%q t=%q", c.name, pos, *p, *g, *tp)
+		}
+	}
+}
+
+func TestParseInterspersedRejectsUnknownFlag(t *testing.T) {
+	fs := flag.NewFlagSet("t", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	if _, err := parseInterspersed(fs, []string{"create", "t", "--nope"}); err == nil {
+		t.Fatal("unknown flag accepted silently")
+	}
 }

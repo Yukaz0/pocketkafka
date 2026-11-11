@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"github.com/Yukaz0/pocketkafka/pkg/client"
 	"os"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -29,37 +27,12 @@ func main() {
 	schemaURL := fs.String("url", "http://localhost:8081", "schema registry URL (schema)")
 	subject := fs.String("subject", "", "schema subject (schema register)")
 
-	valueFlags := map[string]bool{
-		"b": true, "o": true, "p": true, "g": true, "t": true, "n": true,
-		"k": true, "timeout": true, "file": true, "url": true, "subject": true,
-	}
-	var globalArgs, rest []string
-	seenCmd := false
-	for i := 0; i < len(os.Args[1:]); i++ {
-		a := os.Args[1:][i]
-		if !seenCmd && !strings.HasPrefix(a, "-") {
-			seenCmd = true
-			rest = append(rest, a)
-			continue
-		}
-		if seenCmd {
-			rest = append(rest, a)
-			continue
-		}
-		globalArgs = append(globalArgs, a)
-		if strings.HasPrefix(a, "-") && !strings.Contains(a, "=") {
-			name := strings.TrimLeft(a, "-")
-			if valueFlags[name] && i+1 < len(os.Args[1:]) {
-				i++
-				globalArgs = append(globalArgs, os.Args[1:][i])
-			}
-		}
-	}
-	fs.Parse(globalArgs)
-	args := fs.Args()
-	if len(args) > 0 {
+	fs.StringVar(group, "group", "", "consumer group id (alias of -g)")
+	fs.StringVar(topic, "topic", "", "topic (alias of -t)")
 
-		rest = append(args, rest...)
+	rest, err := parseInterspersed(fs, os.Args[1:])
+	if err != nil {
+		os.Exit(2) // FlagSet (ExitOnError) already printed the reason
 	}
 	if len(rest) == 0 {
 		usage()
@@ -69,45 +42,6 @@ func main() {
 
 	if err := checkArity(rest); err != nil {
 		fatal("usage", err)
-	}
-
-	subFlags := map[string]*string{
-		"group":   group,
-		"topic":   topic,
-		"file":    schemaFile,
-		"url":     schemaURL,
-		"subject": subject,
-	}
-	for i := 1; i < len(rest); i++ {
-		a := rest[i]
-		name, val, hasVal := strings.Cut(strings.TrimLeft(a, "-"), "=")
-		if dst, ok := subFlags[name]; ok && hasVal {
-			*dst = val
-			continue
-		}
-		if dst, ok := subFlags[strings.TrimLeft(a, "-")]; ok && i+1 < len(rest) {
-			*dst = rest[i+1]
-			i++
-			continue
-		}
-		if a == "--to-earliest" {
-			*toEarliest = true
-		}
-		if a == "--to-latest" {
-			*toLatest = true
-		}
-
-		if strings.HasPrefix(a, "--to-offset=") {
-			if v, err := strconv.ParseInt(strings.TrimPrefix(a, "--to-offset="), 10, 64); err == nil {
-				*toOffset = v
-			}
-		}
-		if a == "--to-offset" && i+1 < len(rest) {
-			if v, err := strconv.ParseInt(rest[i+1], 10, 64); err == nil {
-				*toOffset = v
-				i++
-			}
-		}
 	}
 
 	kc, err := client.NewClient(splitBrokers(*brokers), "pkctl")
@@ -229,4 +163,22 @@ func checkArity(rest []string) error {
 		}
 	}
 	return nil
+}
+
+// parseInterspersed parses flags that appear before, between or after the
+// positional arguments, and returns the positionals. Unknown flags are an
+// error rather than being silently dropped.
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var pos []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		args = fs.Args()
+		if len(args) == 0 {
+			return pos, nil
+		}
+		pos = append(pos, args[0])
+		args = args[1:]
+	}
 }
