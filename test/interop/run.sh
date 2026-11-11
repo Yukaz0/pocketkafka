@@ -15,7 +15,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 PORT="${INTEROP_PORT:-19092}"
-ADV="localhost:${PORT}"
+# 127.0.0.1, not localhost: librdkafka tries ::1 first and kcat -P exits before falling back to IPv4.
+ADV="127.0.0.1:${PORT}"
 WORK="$(mktemp -d)"
 trap 'cleanup' EXIT
 
