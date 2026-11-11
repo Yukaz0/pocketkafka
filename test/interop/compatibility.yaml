@@ -50,10 +50,12 @@ clients:
     kind: cli
     implementation: librdkafka
     broker_version_fallback: "0.9.0"
-    status: supported
+    status: partial
     notes: >
-      Legacy fallback path. Covered by the ListOffsets v0 OldStyleOffsets fix
-      and internal/e2e/list_offsets_legacy_test.go.
+      Only the ListOffsets v0 OldStyleOffsets path is covered
+      (internal/e2e/list_offsets_legacy_test.go). Produce/Fetch need the legacy
+      MessageSet format (magic 0/1), which the broker does not implement, so
+      clients below Kafka 0.11 cannot produce or consume.
 
   - name: kafkajs
     kind: node
@@ -64,7 +66,7 @@ clients:
 # Protocol versions the broker advertises. Adjust together with
 # pkg/protocol/types.go maxVersions.
 api_versions:
-  Produce: 3
+  Produce: 3   # min 3: v0-2 use legacy MessageSets
   Fetch: 5
   ListOffsets: 5
   Metadata: 8

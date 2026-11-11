@@ -125,7 +125,7 @@ PocketKafka comes with a powerful zero-dependency CLI tool:
 ## 💻 Client SDK & Multi-Language Usage
 
 PocketKafka implements the standard Apache Kafka binary wire protocol (compatible with Kafka 0.11 through 2.4, RecordBatch v2 format). Client options across programming languages:
-- **Native Kafka Protocol (`localhost:9092`)**: Direct TCP streaming with standard Kafka client libraries (in-tree Go SDK and `librdkafka` legacy mode verified; full external matrix tracked in [`test/interop/compatibility.yaml`](test/interop/compatibility.yaml)).
+- **Native Kafka Protocol (`localhost:9092`)**: Direct TCP streaming with standard Kafka client libraries (in-tree Go SDK verified; clients older than Kafka 0.11, which need the legacy MessageSet format, are not supported; full external matrix tracked in [`test/interop/compatibility.yaml`](test/interop/compatibility.yaml)).
 - **HTTP REST Proxy (`localhost:8082`)**: Universal publish/consume over standard HTTP (`curl`, `fetch`, `requests`) without requiring any Kafka client library.
 - **MQTT Bridge (`localhost:1883`)**: Direct sensor and IoT device streaming.
 
@@ -374,7 +374,7 @@ file, not this README, as the source of truth.
 Manually checked (produce, consumer-group consume, offset commit) against a local
 broker: `confluent-kafka` 2.16 (librdkafka modern), `franz-go`, `sarama`,
 `kafka-python-ng` (with `api_version=(0, 11, 0)`) and `kafkajs`. The
-`librdkafka` `0.9.0` fallback mode could not produce in this check.
+`librdkafka` `0.9.0` fallback mode cannot produce (legacy MessageSet format is not implemented).
 
 ---
 

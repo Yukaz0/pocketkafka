@@ -8,8 +8,9 @@ import (
 
 func (h *Handler) supportedKeys() []protocol.ApiKeySupport {
 	return []protocol.ApiKeySupport{
-		{ApiKey: protocol.APKProduce, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKProduce)},
-		{ApiKey: protocol.APKFetch, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKFetch)},
+		{ApiKey: protocol.APKProduce, MinVersion: 3, // v0-2 carry legacy MessageSets (magic 0/1), unsupported
+			MaxVersion: protocol.MaxVersion(protocol.APKProduce)},
+		{ApiKey: protocol.APKFetch, MinVersion: 4, MaxVersion: protocol.MaxVersion(protocol.APKFetch)},
 		{ApiKey: protocol.APKListOffsets, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKListOffsets)},
 		{ApiKey: protocol.APKMetadata, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKMetadata)},
 		{ApiKey: protocol.APKOffsetCommit, MinVersion: 0, MaxVersion: protocol.MaxVersion(protocol.APKOffsetCommit)},
