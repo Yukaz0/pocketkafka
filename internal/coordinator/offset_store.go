@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -97,6 +98,11 @@ func (s *OffsetStore) CommitBatch(records []OffsetCommitRecord) error {
 	}
 	now := time.Now().UnixNano()
 	recs := make([]walRecord, 0, len(records))
+	// walMu before mu (same order as compactLocked) so memory apply and WAL
+	// append stay in one order; otherwise replay can resurrect a stale offset.
+	if s.wal != nil {
+		s.walMu.Lock()
+	}
 	s.mu.Lock()
 	for _, r := range records {
 		off := r.Offset
@@ -130,11 +136,11 @@ func (s *OffsetStore) CommitBatch(records []OffsetCommitRecord) error {
 	if s.wal == nil {
 		return nil
 	}
-	return s.appendAndMaybeCompact(recs)
+	return s.appendAndMaybeCompactLocked(recs)
 }
 
-func (s *OffsetStore) appendAndMaybeCompact(recs []walRecord) error {
-	s.walMu.Lock()
+// appendAndMaybeCompactLocked expects walMu held and releases it.
+func (s *OffsetStore) appendAndMaybeCompactLocked(recs []walRecord) error {
 	if err := s.wal.appendBatch(recs); err != nil {
 		s.walMu.Unlock()
 		return err
@@ -155,7 +161,9 @@ func (s *OffsetStore) appendAndMaybeCompact(recs []walRecord) error {
 
 func (s *OffsetStore) compactAsync() {
 	defer s.compactWG.Done()
-	_ = s.compact()
+	if err := s.compact(); err != nil {
+		slog.Error("offset store compaction failed", "err", err)
+	}
 	s.walMu.Lock()
 	s.compacting = false
 	s.walMu.Unlock()
