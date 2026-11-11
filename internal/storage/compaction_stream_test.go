@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -89,6 +90,9 @@ func TestCompactHeapStaysBelowPartitionSize(t *testing.T) {
 		valueSize = 16 << 10
 	)
 	p := openTestPartition(t, 8<<20)
+	// HeapAlloc counts uncollected garbage; a tight GC target keeps the peak
+	// close to live heap so a loaded runner can't fake a non-streaming scan.
+	defer debug.SetGCPercent(debug.SetGCPercent(10))
 
 	payload := make([]byte, valueSize)
 	for i := range payload {
