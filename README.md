@@ -61,6 +61,16 @@ All services are baked into a single binary and boot in milliseconds:
 | **TLS / SSL** | `9093` | Optional encrypted listener |
 | **Prometheus Metrics** | `8080` `/metrics` | Standard Prometheus metric exporter |
 | **Health Probes** | `8080` `/healthz` | Kubernetes / Docker liveness and readiness endpoints |
+
+Every side surface can be switched off so it opens no port at all:
+
+| Surface | YAML | Environment |
+| :--- | :--- | :--- |
+| Web UI | `web.enabled: false` | `KAFKA_ENABLE_WEB_UI=false` |
+| Schema Registry | `schema_registry.enabled: false` | `KAFKA_ENABLE_SCHEMA_REGISTRY=false` |
+| REST Proxy | `gateway.enabled: false` | `KAFKA_ENABLE_REST_PROXY=false` |
+| MQTT Bridge | `mqtt.enabled: false` | `KAFKA_ENABLE_MQTT=false` |
+
 ---
 
 ## 🚀 Quick Start
@@ -77,6 +87,12 @@ Access the **PocketKafka Web UI** immediately at: **<http://localhost:8080>**
 To stop:
 ```sh
 docker compose -f docker-compose.minimal.yml down
+```
+
+Need only the broker? `docker-compose.kafka-only.yml` turns off the web UI, Schema Registry, REST proxy and MQTT bridge, leaving just `9092`:
+
+```sh
+docker compose -f docker-compose.kafka-only.yml up -d --build
 ```
 
 ---
@@ -336,6 +352,7 @@ pocketkafka/
 ├── Dockerfile              # Ultra-lightweight multi-stage broker container (~33MB)
 ├── Dockerfile.fleet-agent  # Standalone fleet-agent container
 ├── docker-compose.yml      # Multi-service stack (Broker, Postgres, Fleet Agent)
+├── docker-compose.kafka-only.yml # Broker only: web UI, registry, REST and MQTT off
 ├── go.mod                  # 100% clean - zero external requires
 └── LICENSE                 # MIT License
 ```

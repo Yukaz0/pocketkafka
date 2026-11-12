@@ -1,0 +1,33 @@
+# Kafka-only stack: the broker wire protocol and nothing else. The web UI,
+# Schema Registry, REST proxy and MQTT bridge are switched off, so only 9092
+# is listening.
+#
+# Like docker-compose.minimal.yml this is an OPEN broker (no auth, no TLS) for
+# local development. For a network you do not control, set
+# KAFKA_SECURITY_ENABLED=true plus TLS and drop KAFKA_ALLOW_INSECURE_PUBLIC.
+#
+# Clients on another machine: set KAFKA_ADVERTISED_LISTENERS to a name they
+# can resolve, e.g. plain://kafka.lan:9092,internal://pocketkafka:29092.
+services:
+  kafka-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pocketkafka:latest
+    container_name: pocketkafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"   # Kafka API
+    environment:
+      - KAFKA_DATA_DIR=/var/lib/pocketkafka/data
+      - KAFKA_LISTENERS=plain://0.0.0.0:9092,internal://0.0.0.0:29092
+      - KAFKA_ALLOW_INSECURE_PUBLIC=true
+      - KAFKA_ENABLE_WEB_UI=false
+      - KAFKA_ENABLE_SCHEMA_REGISTRY=false
+      - KAFKA_ENABLE_REST_PROXY=false
+      - KAFKA_ENABLE_MQTT=false
+    volumes:
+      - kafka_data:/var/lib/pocketkafka/data
+
+volumes:
+  kafka_data:
