@@ -49,3 +49,4 @@ fleet-agent.json
 .serena/
 WATCHDOG.yml
 dist/
+graphify-out/
