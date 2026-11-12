@@ -35,6 +35,7 @@ type healthThresholds struct {
 	LagRateWarn              float64
 	LagRateCrit              float64
 	SkewWarn                 float64
+	SkewMinMessages          int64
 	IdleAfter                time.Duration
 	DiskWarnPct              float64
 	DiskCritPct              float64
@@ -45,11 +46,13 @@ type healthThresholds struct {
 
 func defaultThresholds() healthThresholds {
 	return healthThresholds{
-		LagWarn:                  1000,
-		LagCritical:              10000,
-		LagRateWarn:              50,
-		LagRateCrit:              500,
-		SkewWarn:                 3,
+		LagWarn:     1000,
+		LagCritical: 10000,
+		LagRateWarn: 50,
+		LagRateCrit: 500,
+		SkewWarn:    3,
+		// A handful of messages is always "skewed"; below this it is noise, not a hot partition.
+		SkewMinMessages:          1000,
 		IdleAfter:                5 * time.Minute,
 		DiskWarnPct:              85,
 		DiskCritPct:              95,
@@ -563,7 +566,7 @@ func evaluateTopic(th healthThresholds, m topicMetrics) (string, []healthReason)
 		})
 	}
 
-	if m.Partitions >= 2 && m.SkewRatio >= th.SkewWarn {
+	if m.Partitions >= 2 && m.Messages >= th.SkewMinMessages && m.SkewRatio >= th.SkewWarn {
 		status = worseStatus(status, StatusDegraded)
 		reasons = append(reasons, healthReason{
 			Code:     "partition_skew",

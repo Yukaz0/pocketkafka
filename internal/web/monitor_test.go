@@ -122,6 +122,11 @@ func TestEvaluateTopic(t *testing.T) {
 			wantCode: "partition_skew",
 		},
 		{
+			name:    "skew on a near-empty topic is ignored",
+			metrics: topicMetrics{Partitions: 3, Messages: 1, SkewRatio: 3},
+			want:    StatusHealthy,
+		},
+		{
 			name:     "consumer stopped with backlog",
 			metrics:  topicMetrics{Partitions: 1, Messages: 4000, Lag: 40, StalledGroups: []string{"billing"}},
 			want:     StatusDegraded,
