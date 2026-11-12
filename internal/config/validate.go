@@ -58,9 +58,15 @@ func bindTargets(c *Config) []bindTarget {
 	if c.Web.Enabled {
 		out = append(out, bindTarget{"web.listen", c.Web.Listen})
 	}
-	out = append(out, bindTarget{"schema_registry.listen", c.SchemaRegistry.Listen})
-	out = append(out, bindTarget{"gateway.listen", c.Gateway.Listen})
-	out = append(out, bindTarget{"mqtt.listen", c.MQTT.Listen})
+	if c.SchemaRegistry.Enabled {
+		out = append(out, bindTarget{"schema_registry.listen", c.SchemaRegistry.Listen})
+	}
+	if c.Gateway.Enabled {
+		out = append(out, bindTarget{"gateway.listen", c.Gateway.Listen})
+	}
+	if c.MQTT.Enabled {
+		out = append(out, bindTarget{"mqtt.listen", c.MQTT.Listen})
+	}
 	if c.Security.TLS.Enabled || c.Security.TLS.HTTP || c.Security.TLS.MQTT {
 		out = append(out, bindTarget{"security.tls.listen", c.Security.TLS.Listen})
 	}

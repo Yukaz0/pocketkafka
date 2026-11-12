@@ -120,15 +120,18 @@ const (
 )
 
 type SchemaRegistry struct {
-	Listen string `yaml:"listen"`
+	Listen  string `yaml:"listen"`
+	Enabled bool   `yaml:"enabled"`
 }
 
 type Gateway struct {
-	Listen string `yaml:"listen"`
+	Listen  string `yaml:"listen"`
+	Enabled bool   `yaml:"enabled"`
 }
 
 type MQTT struct {
-	Listen string `yaml:"listen"`
+	Listen  string `yaml:"listen"`
+	Enabled bool   `yaml:"enabled"`
 }
 
 type SecurityUser struct {
@@ -251,9 +254,9 @@ func Default() Config {
 		},
 		Logging:        Logging{Level: "info", Format: "json"},
 		Web:            Web{Listen: "127.0.0.1:8080", Enabled: true, Auth: false, AuthSecret: "pocketkafka-web-secret"},
-		SchemaRegistry: SchemaRegistry{Listen: "127.0.0.1:8081"},
-		Gateway:        Gateway{Listen: "127.0.0.1:8082"},
-		MQTT:           MQTT{Listen: "127.0.0.1:1883"},
+		SchemaRegistry: SchemaRegistry{Listen: "127.0.0.1:8081", Enabled: true},
+		Gateway:        Gateway{Listen: "127.0.0.1:8082", Enabled: true},
+		MQTT:           MQTT{Listen: "127.0.0.1:1883", Enabled: true},
 		Security: Security{
 			RequireTLSForPlain: true,
 			TLS:                TLS{Listen: "127.0.0.1:9093"},
@@ -353,6 +356,9 @@ func applyEnv(cfg *Config) {
 	setStr(&cfg.MQTT.Listen, os.Getenv("KAFKA_MQTT_LISTEN"))
 
 	setBool(&cfg.Web.Enabled, os.Getenv("KAFKA_ENABLE_WEB_UI"))
+	setBool(&cfg.SchemaRegistry.Enabled, os.Getenv("KAFKA_ENABLE_SCHEMA_REGISTRY"))
+	setBool(&cfg.Gateway.Enabled, os.Getenv("KAFKA_ENABLE_REST_PROXY"))
+	setBool(&cfg.MQTT.Enabled, os.Getenv("KAFKA_ENABLE_MQTT"))
 	setBool(&cfg.Web.Auth, os.Getenv("KAFKA_WEB_AUTH"))
 	setStr(&cfg.Web.AuthSecret, os.Getenv("KAFKA_WEB_AUTH_SECRET"))
 	setStr(&cfg.Web.ClusterToken, os.Getenv("KAFKA_CLUSTER_TOKEN"))

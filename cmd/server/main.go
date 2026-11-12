@@ -143,13 +143,20 @@ func main() {
 	}
 	srHandler := httpauth.New(cfg.Security.Enabled, cfg.Security.Users, authorizer, httpPolicy).
 		Wrap(limitBody(sr.Handler(), cfg.Network.MaxRequestSizeBytes))
-	srSrv := newHTTPServer(cfg, cfg.SchemaRegistry.Listen, srHandler, false)
-	go func() {
-		log.Printf("pocketkafka schema registry on %s", httpScheme(cfg.Security.TLS.HTTP)+cfg.SchemaRegistry.Listen)
-		if err := serveHTTP(srSrv, tlsConf, cfg.Security.TLS.HTTP); err != nil && err != http.ErrServerClosed {
-			log.Printf("schema registry error: %v", err)
-		}
-	}()
+	// The registry itself stays open even when its HTTP listener is off: the
+	// dashboard's Schemas page reads it in-process.
+	var srSrv *http.Server
+	if cfg.SchemaRegistry.Enabled {
+		srSrv = newHTTPServer(cfg, cfg.SchemaRegistry.Listen, srHandler, false)
+		go func() {
+			log.Printf("pocketkafka schema registry on %s", httpScheme(cfg.Security.TLS.HTTP)+cfg.SchemaRegistry.Listen)
+			if err := serveHTTP(srSrv, tlsConf, cfg.Security.TLS.HTTP); err != nil && err != http.ErrServerClosed {
+				log.Printf("schema registry error: %v", err)
+			}
+		}()
+	} else {
+		log.Printf("pocketkafka schema registry disabled (schema_registry.enabled=false)")
+	}
 
 	ws, webSrv := buildWebServer(cfg, store, gm, sr, aclStore, authorizer, version)
 	if webSrv != nil {
@@ -163,15 +170,20 @@ func main() {
 		log.Printf("pocketkafka web UI disabled (web.enabled=false)")
 	}
 
-	restHandler := httpauth.New(cfg.Security.Enabled, cfg.Security.Users, authorizer, httpPolicy).
-		Wrap(limitBody(gateway.NewRESTProxy(store).Handler(), cfg.Network.MaxRequestSizeBytes))
-	gwSrv := newHTTPServer(cfg, cfg.Gateway.Listen, restHandler, false)
-	go func() {
-		log.Printf("pocketkafka REST proxy on %s", httpScheme(cfg.Security.TLS.HTTP)+cfg.Gateway.Listen)
-		if err := serveHTTP(gwSrv, tlsConf, cfg.Security.TLS.HTTP); err != nil && err != http.ErrServerClosed {
-			log.Printf("rest proxy error: %v", err)
-		}
-	}()
+	var gwSrv *http.Server
+	if cfg.Gateway.Enabled {
+		restHandler := httpauth.New(cfg.Security.Enabled, cfg.Security.Users, authorizer, httpPolicy).
+			Wrap(limitBody(gateway.NewRESTProxy(store).Handler(), cfg.Network.MaxRequestSizeBytes))
+		gwSrv = newHTTPServer(cfg, cfg.Gateway.Listen, restHandler, false)
+		go func() {
+			log.Printf("pocketkafka REST proxy on %s", httpScheme(cfg.Security.TLS.HTTP)+cfg.Gateway.Listen)
+			if err := serveHTTP(gwSrv, tlsConf, cfg.Security.TLS.HTTP); err != nil && err != http.ErrServerClosed {
+				log.Printf("rest proxy error: %v", err)
+			}
+		}()
+	} else {
+		log.Printf("pocketkafka REST proxy disabled (gateway.enabled=false)")
+	}
 
 	var fleetSrv *http.Server
 	if cfg.Fleet.Enabled {
@@ -226,20 +238,24 @@ func main() {
 		log.Printf("pocketkafka fleet disabled (fleet.enabled=false)")
 	}
 
-	mqttBridge := gateway.NewMQTTBridge(store).
-		WithSecurity(cfg.Security.Enabled, cfg.Security.Users, authorizer)
-	if cfg.Security.TLS.MQTT {
-		mqttBridge.WithTLS(tlsConf, cfg.Security.RequireTLSForPlain)
-	} else if cfg.Security.Enabled && cfg.Security.RequireTLSForPlain {
-		log.Printf("mqtt: security.require_tls_for_plain is true but security.tls.mqtt is false, so a CONNECT carrying a password is refused; set security.tls.mqtt=true or turn the policy off")
-	}
-	mqttStartErr := mqttBridge.Start(cfg.MQTT.Listen)
-	if mqttStartErr != nil {
-		log.Printf("mqtt bridge error: %v", mqttStartErr)
-	}
-	if ws != nil {
-
-		ws.WithMQTT(mqttBridge, cfg.MQTT.Listen, mqttStartErr == nil)
+	var mqttBridge *gateway.MQTTBridge
+	if cfg.MQTT.Enabled {
+		mqttBridge = gateway.NewMQTTBridge(store).
+			WithSecurity(cfg.Security.Enabled, cfg.Security.Users, authorizer)
+		if cfg.Security.TLS.MQTT {
+			mqttBridge.WithTLS(tlsConf, cfg.Security.RequireTLSForPlain)
+		} else if cfg.Security.Enabled && cfg.Security.RequireTLSForPlain {
+			log.Printf("mqtt: security.require_tls_for_plain is true but security.tls.mqtt is false, so a CONNECT carrying a password is refused; set security.tls.mqtt=true or turn the policy off")
+		}
+		mqttStartErr := mqttBridge.Start(cfg.MQTT.Listen)
+		if mqttStartErr != nil {
+			log.Printf("mqtt bridge error: %v", mqttStartErr)
+		}
+		if ws != nil {
+			ws.WithMQTT(mqttBridge, cfg.MQTT.Listen, mqttStartErr == nil)
+		}
+	} else {
+		log.Printf("pocketkafka MQTT bridge disabled (mqtt.enabled=false)")
 	}
 
 	if ws != nil {
@@ -278,7 +294,9 @@ func main() {
 	<-sig
 	log.Printf("shutting down")
 
-	mqttBridge.Close()
+	if mqttBridge != nil {
+		mqttBridge.Close()
+	}
 	stopRetention()
 	stopCompaction()
 	shutdownHTTP(fleetSrv)
@@ -363,8 +381,8 @@ func buildWebServer(cfg config.Config, store *storage.Store, gm *coordinator.Gro
 		WithAuthorizer(authorizer).
 		WithBrokerInfo(listenerAddrs(cfg), advertisedString(cfg), securityModeOf(cfg)).
 		WithConfig(cfg).
-		WithGateway(cfg.Gateway.Listen).
-		WithSchemaRegistryListen(cfg.SchemaRegistry.Listen)
+		WithGateway(enabledListen(cfg.Gateway.Enabled, cfg.Gateway.Listen)).
+		WithSchemaRegistryListen(enabledListen(cfg.SchemaRegistry.Enabled, cfg.SchemaRegistry.Listen))
 	ws.WithClusterMonitoring(cfg)
 	ws.InstallLogSink()
 	srv := newHTTPServer(cfg, cfg.Web.Listen, limitBody(ws.Handler(), cfg.Network.MaxRequestSizeBytes), true)
@@ -570,6 +588,15 @@ func limitBody(next http.Handler, max int64) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// enabledListen hides the address of a surface that is switched off, so the
+// dashboard reports it as disabled instead of advertising a dead port.
+func enabledListen(enabled bool, listen string) string {
+	if !enabled {
+		return ""
+	}
+	return listen
 }
 
 func shutdownHTTP(srv *http.Server) {

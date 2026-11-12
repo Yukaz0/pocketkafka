@@ -142,12 +142,15 @@ web:
 
 schema_registry:
   listen: "127.0.0.1:8081"  # Confluent-compatible Schema Registry
+  enabled: true             # false starts no listener at all (env: KAFKA_ENABLE_SCHEMA_REGISTRY)
 
 gateway:
   listen: "127.0.0.1:8082"  # HTTP REST Proxy
+  enabled: true             # false starts no listener at all (env: KAFKA_ENABLE_REST_PROXY)
 
 mqtt:
   listen: "127.0.0.1:1883"  # MQTT Bridge (IoT)
+  enabled: true             # false starts no listener at all (env: KAFKA_ENABLE_MQTT)
 
 security:
   # ACL shape (rules live in <data_dir>/__acls.json, editable from the

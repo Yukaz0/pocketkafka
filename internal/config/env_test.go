@@ -79,3 +79,27 @@ func mustHost(t *testing.T, addr string) string {
 	}
 	return host
 }
+
+func TestEnvCanDisableSideSurfaces(t *testing.T) {
+	t.Setenv("KAFKA_ENABLE_SCHEMA_REGISTRY", "false")
+	t.Setenv("KAFKA_ENABLE_REST_PROXY", "false")
+	t.Setenv("KAFKA_ENABLE_MQTT", "false")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SchemaRegistry.Enabled || cfg.Gateway.Enabled || cfg.MQTT.Enabled {
+		t.Fatalf("env did not disable side surfaces: sr=%v gateway=%v mqtt=%v",
+			cfg.SchemaRegistry.Enabled, cfg.Gateway.Enabled, cfg.MQTT.Enabled)
+	}
+}
+
+func TestSideSurfacesDefaultOn(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.SchemaRegistry.Enabled || !cfg.Gateway.Enabled || !cfg.MQTT.Enabled {
+		t.Fatal("schema registry, REST proxy and MQTT must stay on when the config omits enabled")
+	}
+}

@@ -380,7 +380,7 @@ func (s *Server) handleIntegrations(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		"schemaRegistry": map[string]any{
-			"enabled":  s.sr != nil,
+			"enabled":  s.sr != nil && s.schemaRegListen != "",
 			"listen":   s.schemaRegListen,
 			"subjects": subjects,
 		},

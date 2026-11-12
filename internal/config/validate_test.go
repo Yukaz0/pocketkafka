@@ -206,6 +206,13 @@ func TestValidateRejects(t *testing.T) {
 			want: "security.allow_insecure_public=true",
 		},
 		{
+			name: "open REST proxy on a routable address",
+			mutate: func(c *Config) {
+				c.Gateway.Listen = "0.0.0.0:8082"
+			},
+			want: "gateway.listen",
+		},
+		{
 			name: "plaintext tiered endpoint with the default secret",
 			mutate: func(c *Config) {
 				c.Storage.Tiered.Enabled = true
@@ -283,6 +290,11 @@ func TestValidateAccepts(t *testing.T) {
 			c.Security.Users = []SecurityUser{{Username: "admin", Password: "a-good-password"}}
 			c.Security.SuperUsers = []string{"admin"}
 			c.Web.AuthSecret = "a-strong-signing-secret"
+		}},
+		{"disabled side surfaces on a routable address", func(c *Config) {
+			c.SchemaRegistry.Enabled, c.SchemaRegistry.Listen = false, "0.0.0.0:8081"
+			c.Gateway.Enabled, c.Gateway.Listen = false, "0.0.0.0:8082"
+			c.MQTT.Enabled, c.MQTT.Listen = false, "0.0.0.0:1883"
 		}},
 		{"explicit opt-in to an open broker", func(c *Config) {
 			c.Listeners["plain"] = "0.0.0.0:9092"
