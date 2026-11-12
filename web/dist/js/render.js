@@ -32,11 +32,11 @@ const refresh = (...args) => window.refresh?.(...args);
 
 function renderFatal(err){ const v=document.getElementById('view'); if(!v)return; const msg=esc(redactTargetEndpoint(String((err&&err.message)||err||'unknown'))); v.innerHTML='<div class="card"><h3>Something went wrong</h3><div class="muted" style="font-family:var(--font-mono);font-size:11px;margin:8px 0 14px;word-break:break-word">'+msg+'</div><button class="btn" onclick="recoverFatal()">Back to Overview</button></div>'; }
 window.recoverFatal=function(){ state.group=null; state.topicDetail=null; goView('connections'); };
+const DRW_MAX_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
+const DRW_RESTORE_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>';
 function buildNav(){
   const nav=document.getElementById('navItems'); if(!nav)return;
-  const headText=document.querySelector('.appNavHead span');
   if(state.zone==='mqtt'){
-    if(headText)headText.textContent='MQTT Studio';
     const mqttNavItems=[
       ['mqtt-overview','Overview',I.overview],
       ['mqtt-tracker','Live Tracker',I.pulse],
@@ -54,7 +54,6 @@ function buildNav(){
       </div>
     </section>`;
   }else if(state.zone==='fleet'){
-    if(headText)headText.textContent='Fleet Host Control';
     const fleetNavItems=[
       ['fleet-servers','Servers',I.server],
       ['fleet-containers','Containers',I.box],
@@ -72,7 +71,6 @@ function buildNav(){
       </div>
     </section>`;
   }else{
-    if(headText)headText.textContent='Control center';
     nav.innerHTML=`<section class="navGroup" aria-label="Kafka Navigation">
       <div class="navGroupLinks">
         ${navItems.map(([key,name,icon])=>{
@@ -131,40 +129,38 @@ function buildStatusbar(){
     const srvs=state.fleetServers||[];
     const onlineCount=srvs.filter(s=>(s.status||'').toLowerCase()==='online').length;
     sb.innerHTML=`<span><span class="sdot" style="background:#0ea5e9"></span>Fleet Controller</span>`
-      +`<span class="slink" onclick="goView('fleet-servers')">${srvs.length} servers (${onlineCount} online)</span>`
+      +`<button type="button" class="slink" onclick="goView('fleet-servers')">${srvs.length} servers (${onlineCount} online)</button>`
       +`<span style="flex:1"></span>`
-      +`<span class="slink" onclick="goView('fleet-containers')">containers</span>`
-      +`<span class="slink" onclick="goView('fleet-jobs')">jobs</span>`
-      +`<span class="slink" onclick="goView('fleet-audit')">audit</span>`;
+      +`<button type="button" class="slink" onclick="goView('fleet-containers')">containers</button>`
+      +`<button type="button" class="slink" onclick="goView('fleet-jobs')">jobs</button>`
+      +`<button type="button" class="slink" onclick="goView('fleet-audit')">audit</button>`;
     return;
   }
   if(state.zone==='mqtt'){
     const st=state.mqttStatus||{};
     const clientCount=st.connections!=null?st.connections:((st.clients&&st.clients.length)||0);
     sb.innerHTML=`<span><span class="sdot" style="background:#10b981"></span>MQTT Bridge</span>`
-      +`<span class="slink" onclick="goView('mqtt-clients')">${clientCount} clients</span>`
+      +`<button type="button" class="slink" onclick="goView('mqtt-clients')">${clientCount} clients</button>`
       +`<span style="flex:1"></span>`
-      +`<span class="slink" onclick="goView('mqtt-publisher')">publisher</span>`
-      +`<span class="slink" onclick="goView('mqtt-tracker')">tracker</span>`;
+      +`<button type="button" class="slink" onclick="goView('mqtt-publisher')">publisher</button>`
+      +`<button type="button" class="slink" onclick="goView('mqtt-tracker')">tracker</button>`;
     return;
   }
   const c=state.cluster||{};
   const topicChip=state.view==='databrowser'&&state.topic?`<span>p: ${esc(state.partition)}</span>`:'';
   const posChip=(state.view==='databrowser'&&state.leo!=null)?`<span>LEO ${state.leo}</span>`:'';
   sb.innerHTML=`<span><span class="sdot"></span>broker-${esc(String(c.brokerId??'-'))}</span>`
-    +`<span class="slink" onclick="goView('security')">${esc(c.security||'PLAINTEXT')}</span>`
+    +`<button type="button" class="slink" onclick="goView('security')">${esc(c.security||'PLAINTEXT')}</button>`
     +topicChip+posChip
     +`<span style="flex:1"></span>`
-    +`<span class="slink" onclick="goView('storage')">${fmtBytes(c.totalBytes||0)} on disk</span>`
-    +`<span class="slink" onclick="goView('metrics')">throughput</span>`
-    +`<span class="slink" onclick="goView('logs')">logs</span>`
-    +`<span class="slink" onclick="goView('settings')">settings</span>`;
+    +`<button type="button" class="slink" onclick="goView('storage')">${fmtBytes(c.totalBytes||0)} on disk</button>`
+    +`<button type="button" class="slink" onclick="goView('metrics')">throughput</button>`
+    +`<button type="button" class="slink" onclick="goView('logs')">logs</button>`
+    +`<button type="button" class="slink" onclick="goView('settings')">settings</button>`;
 }
 function updateChips(){
   const c=state.cluster||{};
-  const b=document.getElementById('chipBroker'); if(b)b.innerHTML=`<i></i>broker-${esc(String(c.brokerId??'-'))}`;
-  const s=document.getElementById('chipSec'); if(s)s.textContent=c.security||'PLAINTEXT';
-  const v=document.getElementById('chipVer'); if(v)v.textContent=c.version?('v'+c.version):'v-';
+  const v=document.getElementById('chipVer'); if(v)v.textContent=!c.version?'-':(/^\d/.test(c.version)?'v'+c.version:c.version);
 }
 /* Navigasi topik lewat hash: router (applyHash) yang mengisi state.topic, sehingga
    topik tetap terpilih baik dipanggil dari dalam Data Browser maupun dari view lain.
@@ -191,7 +187,7 @@ function openDrw(title,innerHtml,keepMaximized){
   if(!wasMax){
     d.classList.remove('maximized');
     const btn=document.getElementById('drwMaxBtn');
-    if(btn){btn.textContent='[⛶]';btn.title='Maximize drawer';}
+    if(btn){btn.innerHTML=DRW_MAX_ICON;btn.title='Maximize drawer';btn.setAttribute('aria-label','Maximize drawer');}
   }
   d.classList.add('open');
 }
@@ -206,7 +202,7 @@ function closeDrw(){
   const act=document.getElementById('drwActions');
   if(act)act.innerHTML='';
   const btn=document.getElementById('drwMaxBtn');
-  if(btn){btn.textContent='[⛶]';btn.title='Maximize drawer';}
+  if(btn){btn.innerHTML=DRW_MAX_ICON;btn.title='Maximize drawer';btn.setAttribute('aria-label','Maximize drawer');}
 }
 window.closeDrw=closeDrw;
 window.toggleDrwMax=function(){
@@ -214,7 +210,7 @@ window.toggleDrwMax=function(){
   if(!d)return;
   const isMax=d.classList.toggle('maximized');
   const btn=document.getElementById('drwMaxBtn');
-  if(btn){btn.textContent=isMax?'[−]':'[⛶]';btn.title=isMax?'Restore drawer':'Maximize drawer';}
+  if(btn){btn.innerHTML=isMax?DRW_RESTORE_ICON:DRW_MAX_ICON;btn.title=isMax?'Restore drawer':'Maximize drawer';btn.setAttribute('aria-label',btn.title);}
 };
 function setupDrwResizer(){
   const resizer=document.getElementById('drwResizer');
@@ -229,7 +225,7 @@ function setupDrwResizer(){
     d.style.height=newH+'px';
     d.classList.remove('maximized');
     const btn=document.getElementById('drwMaxBtn');
-    if(btn){btn.textContent='[⛶]';btn.title='Maximize drawer';}
+    if(btn){btn.innerHTML=DRW_MAX_ICON;btn.title='Maximize drawer';btn.setAttribute('aria-label','Maximize drawer');}
   }
   function onUp(){
     window.removeEventListener('mousemove',onMove);
@@ -295,23 +291,21 @@ function render(){
     if(state.zone==='fleet'){
       const fleetTitles={'fleet-servers':'Servers','fleet-containers':'Containers','fleet-jobs':'Jobs','fleet-audit':'Audit Logs','fleet-settings':'Fleet Settings'};
       const curTitle=fleetTitles[state.view]||'Fleet';
-      $('#title').textContent=curTitle;
-      $('#crumb').textContent=state.fleetEnabled?('Fleet / '+curTitle):'Fleet / Disabled';
+      setHead(curTitle,state.fleetEnabled?('Fleet / '+curTitle):'Fleet / Disabled');
       $('#topActions').innerHTML=state.fleetEnabled?(`<button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="refreshAll()">Refresh</button>`+(state.view==='fleet-servers'?`<button class="btn" style="padding:5px 12px;font-size:12px" onclick="openEnrollModal()">+ Enroll Server</button>`:'')):'';
     }else if(state.zone==='mqtt'){
       const mqttTitles={'mqtt-overview':'Overview','mqtt-tracker':'Live Tracker','mqtt-clients':'Clients','mqtt-publisher':'Publisher','mqtt-mapping':'Topic Mapping'};
       const curTitle=mqttTitles[state.view]||'MQTT Studio';
-      $('#title').textContent=curTitle;
-      $('#crumb').textContent=state.mqttEnabled?('MQTT / '+curTitle):'MQTT / Disabled';
+      setHead(curTitle,state.mqttEnabled?('MQTT / '+curTitle):'MQTT / Disabled');
       $('#topActions').innerHTML=`<button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="refreshAll()">Refresh</button>`;
     }else{
       const item=navItems.find(([k])=>k===state.view);
-      $('#title').textContent=item?item[1]:(state.view==='settings'?'Settings':'Overview');
-      const tabLabels={general:'General',clusters:'Clusters',connections:'Connections',security:'Security & ACL'};
-      $('#crumb').textContent=state.view==='databrowser'&&state.topic?('Kafka / Topics / '+state.topic):(state.view==='groups'&&state.group?('Kafka / Groups / '+state.group):(state.view==='settings'&&state.settingsTab&&state.settingsTab!=='general'?('Kafka / Settings / '+(tabLabels[state.settingsTab]||state.settingsTab)):('Kafka / '+(item?item[1]:'Overview'))));
+      const tabLabels={general:'General',clusters:'Clusters',connections:'Connections',storage:'Storage',security:'Security & ACL'};
+      const pageTitle=state.view==='topics'&&state.topicDetail?state.topicDetail:(state.view==='groups'&&state.group?state.group:(item?item[1]:(state.view==='settings'?'Settings':'Overview')));
+      setHead(pageTitle,state.view==='databrowser'&&state.topic?('Kafka / Topics / '+state.topic):(state.view==='topics'&&state.topicDetail?'Kafka / Topics':(state.view==='groups'&&state.group?('Kafka / Groups / '+state.group):(state.view==='settings'&&state.settingsTab&&state.settingsTab!=='general'?('Kafka / Settings / '+(tabLabels[state.settingsTab]||state.settingsTab)):('Kafka / '+pageTitle)))));
       const isConnActive=state.view==='connections'||(state.view==='settings'&&(state.settingsTab==='connections'||state.settingsTab==='general'||state.settingsTab==='clusters'));
       $('#topActions').innerHTML=(state.view==='overview'||isConnActive?`<button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="refreshAll()">Refresh</button>`:
-        state.view==='databrowser'?`<button class="btn" style="padding:5px 12px;font-size:12px" onclick="goView('connections')">Connections</button>`:'');
+        state.view==='databrowser'?`<button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="goView('connections')">Connections</button>`:'');
     }
     const v=$('#view');
     if(state.zone==='fleet'&&!state.fleetEnabled)v.innerHTML=viewFleetDisabled();
@@ -352,10 +346,16 @@ function render(){
     window.__renderedView=state.view;
   }catch(err){console.error('render error:',err);renderFatal(err);}
 }
+// The crumb is the path to this page; drop a trailing segment that just repeats the h1.
+function setHead(title,crumb){
+  $('#title').textContent=title;
+  $('#crumb').textContent=crumb.endsWith(' / '+title)?crumb.slice(0,-(title.length+3)):crumb;
+}
 async function refreshAll(){await refresh();render();}
 window.refreshAll=refreshAll;
 function pageHeader(title,description,actions=''){
-  return `<div class="pageHeading"><div><h2>${title}</h2><p>${description}</p></div>${actions?`<div class="pageHeadingActions">${actions}</div>`:''}</div>`;
+  // The topbar h1 already names the page; repeating it here only cost vertical space.
+  return `<div class="pageHeading"><div><p>${description}</p></div>${actions?`<div class="pageHeadingActions">${actions}</div>`:''}</div>`;
 }
 function tableScroll(content){return `<div class="tableScroll">${content}</div>`;}
 

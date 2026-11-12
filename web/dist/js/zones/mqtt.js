@@ -8,7 +8,7 @@ function tableScroll(content) {
 
 function pageHeader(title, desc) {
   return `<div class="pageHeading">
-    <div><h2>${esc(title)}</h2><p>${esc(desc)}</p></div>
+    <div><p>${esc(desc)}</p></div>
   </div>`;
 }
 
@@ -23,17 +23,17 @@ function viewMQTTOverview() {
     ${pageHeader('MQTT Overview', 'Monitor listener status, active connections, and telemetry bridge metrics.')}
     <div class="row" style="gap:12px;flex-wrap:wrap;margin-bottom:16px">
       <div class="card" style="flex:1 1 180px;padding:14px 18px">
-        <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Listener</div>
+        <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Listener</div>
         <div style="font-size:14px;font-weight:600">${enabled
           ? `<span class="badge b-green">ACTIVE</span> <span class="mono" style="font-size:12px">:${esc(port)}</span>`
           : '<span class="badge muted">DISABLED</span>'}</div>
       </div>
       <div class="card" style="flex:1 1 180px;padding:14px 18px">
-        <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Active Connections</div>
+        <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Active Connections</div>
         <div class="statXL" style="font-size:24px">${ms.connections ?? 0}<small>conn</small></div>
       </div>
       <div class="card" style="flex:1 1 180px;padding:14px 18px">
-        <div class="muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Bridged to Kafka</div>
+        <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Bridged to Kafka</div>
         <div class="statXL" style="font-size:24px">${Number(bridged).toLocaleString()}<small>msgs</small></div>
       </div>
     </div>
@@ -117,7 +117,7 @@ function formatStreamItem(msg) {
   return `<div style="padding:4px 0;border-bottom:1px solid var(--border-soft)">
     <span class="muted" style="margin-right:8px">${esc(ts)}</span>
     <span style="color:var(--primary-text);font-weight:600">${esc(msg.mqttTopic || '')}</span>
-    <span class="muted" style="font-size:10px;margin-left:6px">→ ${esc(msg.kafkaTopic || '')}</span>
+    <span class="muted" style="font-size:11px;margin-left:6px">→ ${esc(msg.kafkaTopic || '')}</span>
     <div style="margin-top:3px;padding-left:12px;word-break:break-all;white-space:pre-wrap">${payload}</div>
   </div>`;
 }

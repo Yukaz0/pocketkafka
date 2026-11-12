@@ -344,7 +344,8 @@ function viewGeneralSettings(){
       <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Cluster ID</span><span class="mono">${esc(c.clusterId||'-')}</span></div>
       <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Broker</span><span class="mono">${esc(c.brokerId??'-')}</span></div>
       <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Version</span><span class="mono">${esc(c.version||'-')}</span></div>
-      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0"><span class="k muted">Disk usage</span><span class="mono">${fmtBytes(c.totalBytes||0)}</span></div>
+      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-soft)"><span class="k muted">Disk usage</span><span class="mono">${fmtBytes(c.totalBytes||0)}</span></div>
+      <div class="row" style="display:flex;justify-content:space-between;padding:8px 0"><span class="k muted">Author</span><span>Muhammad Jafar Ikbal (Yukaz0)</span></div>
       <div style="margin-top:12px"><button class="btn ghost" onclick="refreshAll()">Refresh</button></div>
     </div>
     <div class="card">
@@ -415,20 +416,28 @@ function viewConnections(){
     <div id="connectionsIngress">${ingressBody}</div>
   </div>`;
 }
+// datetime-local wants local "YYYY-MM-DDTHH:MM:SS"; state keeps epoch ms for the API.
+function msToLocalInput(ms){const d=new Date(Number(ms));if(!ms||isNaN(d))return '';return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,19);}
 function viewDataBrowser(){
   const readOnly=isKafkaTarget(),readOnlyNote='Kafka targets are read-only; import and replay are disabled.';
-  const opts=(state.topics||[]).map(t=>`<option value="${esc(t.name)}" ${state.topic===t.name?'selected':''}>${esc(t.name)}</option>`).join('');
   const parts=state.topic?state.topics.find(t=>t.name===state.topic)?.partitions||[]:[];
   const act=(on)=>on?'background:var(--primary-soft);color:var(--primary-text)':'';
   const pills='<button class="pill'+(state.partition==='all'?' active':'')+'" onclick="setPart(\'all\')">All</button>'
     +parts.map(p=>`<button class="pill part" style="${act(state.partition===p.partition)}" onclick="setPart('${p.partition}')">P-${p.partition}</button>`).join('');
-  return `${pageHeader('Data Browser','Inspect, filter, and tail topic messages.')}
+  return `<div>${pageHeader('Data Browser','Inspect, filter, and tail topic messages.')}
     ${readOnly?`<p class="muted" style="font-size:11px;margin:0 0 8px">${readOnlyNote}</p>`:''}
     <div class="dbDeck">
-      <!-- Bar 1: Stream controls (Topic, Decoder, Live Tail) -->
-      <div class="dbRow dbRowTopic">
-        <select id="topicSel" onchange="state.filters=[];pickTopicNav(this.value)" class="dbTopicSelect"><option value="" ${state.topic?'':'selected'}>Select topic</option>${opts}</select>
-        <select id="decoder" onchange="state.decoder=this.value;renderMsgRows()" class="dbDecoderSelect">
+      <!-- Bar 1: Seek, decoder, live tail (topic is picked from the topic list) -->
+      <div class="dbRow dbRowSeek">
+        <div class="group dbSeekGroup">
+          <button class="pill" onclick="seek('begin')">Beginning</button>
+          <button class="pill" onclick="seek('latest')">Latest</button>
+          <input id="offInput" class="mono dbOffInput" aria-label="Offset" placeholder="offset" onkeydown="if(event.key==='Enter')seekOffsetGo()">
+          <button class="pill" onclick="seekOffsetGo()">Go</button>
+        </div>
+        <span class="updatedAgo" id="posInfo"></span>
+        <span style="flex:1"></span>
+        <select id="decoder" aria-label="Decoder" onchange="state.decoder=this.value;renderMsgRows()" class="dbDecoderSelect">
           <option value="auto" ${state.decoder==='auto'?'selected':''}>Auto-Detect</option>
           <option value="json" ${state.decoder==='json'?'selected':''}>JSON Pretty</option>
           <option value="text" ${state.decoder==='text'?'selected':''}>Plaintext</option>
@@ -440,21 +449,11 @@ function viewDataBrowser(){
       <!-- Bar 2: Horizontal Partition Pills -->
       ${parts.length?`<div class="dbPillBar"><div class="dbPillScroll">${pills}</div></div>`:''}
 
-      <!-- Bar 3: Seek & Offset bar -->
-      <div class="dbRow dbRowSeek">
-        <div class="group dbSeekGroup">
-          <button class="pill" onclick="seek('begin')">Beginning</button>
-          <button class="pill" onclick="seek('latest')">Latest</button>
-          <input id="offInput" class="mono dbOffInput" placeholder="offset" onkeydown="if(event.key==='Enter')seekOffsetGo()">
-          <button class="pill" onclick="seekOffsetGo()">Go</button>
-        </div>
-        <span class="updatedAgo" id="posInfo"></span>
-      </div>
       <!-- Bar 3: Search and Date Range -->
       <div class="dbRow dbRowSearch">
-        <input id="searchBox" class="dbSearchInput" placeholder="Search key/value…" value="${esc(state.search)}" oninput="state.search=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
-        <input id="fromTs" class="dbTsInput" placeholder="From (ms)" value="${esc(state.fromTs)}" oninput="state.fromTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
-        <input id="toTs" class="dbTsInput" placeholder="To (ms)" value="${esc(state.toTs)}" oninput="state.toTs=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
+        <input id="searchBox" class="dbSearchInput" aria-label="Search key or value" placeholder="Search key/value…" value="${esc(state.search)}" oninput="state.search=this.value" onkeydown="if(event.key==='Enter')loadMsgs()">
+        <input id="fromTs" type="datetime-local" step="1" class="dbTsInput" aria-label="From time" title="From" value="${msToLocalInput(state.fromTs)}" oninput="state.fromTs=this.value?String(new Date(this.value).getTime()):''" onkeydown="if(event.key==='Enter')loadMsgs()">
+        <input id="toTs" type="datetime-local" step="1" class="dbTsInput" aria-label="To time" title="To" value="${msToLocalInput(state.toTs)}" oninput="state.toTs=this.value?String(new Date(this.value).getTime()):''" onkeydown="if(event.key==='Enter')loadMsgs()">
         <button class="btn dbApplyBtn" onclick="loadMsgs()">Apply</button>
       </div>
 
@@ -538,7 +537,7 @@ function viewDataBrowser(){
       <div class="bmain">
         <div class="card tableScroll" style="padding:0;overflow-y:hidden;margin-bottom:0">
           <table><thead><tr><th class="chkCell"></th><th>Timestamp</th><th>Partition</th><th>Offset</th><th>Key</th><th>Headers</th>${state.projCols.map(c=>`<th class="mono">${esc(c)}</th>`).join('')}<th>Value</th><th></th></tr></thead>
-          <tbody id="rows"><tr><td colspan="${8+state.projCols.length}" style="padding:20px">${state.topic?'<span class="skel" style="width:120px"></span> <span class="skel" style="width:80px"></span> <span class="skel" style="width:160px"></span>':'<span class="muted">Select a topic</span>'}</td></tr></tbody></table>
+          <tbody id="rows"><tr><td colspan="${8+state.projCols.length}" style="padding:20px">${state.topic?'<span class="skel" style="width:120px"></span> <span class="skel" style="width:80px"></span> <span class="skel" style="width:160px"></span>':'<span class="muted">Pick a topic from the Topics list to browse its messages.</span>'}</td></tr></tbody></table>
         </div>
         <div id="diffPanel"></div>
       </div>
@@ -551,7 +550,7 @@ function viewDataBrowser(){
           <button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="closeInspector()">Close</button>
         </div>
       </aside>
-    </div>`;
+    </div></div>`;
 }
 window.setPart=p=>{state.partition=p;state.off=null;loadMsgs();loadPosMeta();};
 async function loadMsgs(){ if(!state.topic)return; try{
@@ -659,7 +658,7 @@ function jnode(key,val,force){tnId++;const id=tnId;
   return '<div><div class="jrow" onclick="toggleNode('+id+')"><span class="jarrow" id="ta-'+id+'">'+(open?'v':'>')+'</span><span class="jkey">"'+esc(key)+'"</span>: <span class="jnum">'+label+'</span></div><div class="jnode" id="tn-'+id+'" style="'+(open?'':'display:none')+'">'+(body||'<div class="muted" style="padding-left:14px">(empty)</div>')+'</div></div>';}
 window.toggleNode=function(id){const b=document.getElementById('tn-'+id),a=document.getElementById('ta-'+id);if(b){const o=b.style.display!=='none';b.style.display=o?'none':'block';a.innerHTML=o?'>':'v';}};
 let _inspCur=null;
-window.insp=function(m){_inspCur=m;$('#inspector').classList.remove('hidden');let val=m.value;if(state.decoder==='hex')val=hex(m.valueB64);else if(m.isJSON){try{val=JSON.parse(m.value||'null');}catch(e){val=m.value;}}const metaEl=document.getElementById('inspMeta');if(metaEl){const hdrs=Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('');metaEl.innerHTML=`<span class="chip">P${m.partition}</span> <span class="chip">offset ${m.offset}</span> <span class="chip">${fmtBytes(m.valueSize||0)}</span> ${m.key?`<span class="chip">key: ${esc(m.key)}</span>`:''}${hdrs} <span style="margin-left:auto;font-size:10px" class="muted">${new Date(m.timestamp).toISOString()}</span>`;}let body='';if(val!==null&&typeof val==='object'){if(Array.isArray(val)){body=val.map((item,idx)=>jnode(idx,item,true)).join('');}else{for(const k in val)body+=jnode(k,val[k],true);}}else{body=`<div style="padding:4px 0">${esc(val)}</div>`;}$('#insp').innerHTML='<div class="jnode" style="border:none;margin:0;padding-left:0">'+(body||'<span class="muted">(empty)</span>')+'</div>';};
+window.insp=function(m){_inspCur=m;$('#inspector').classList.remove('hidden');let val=m.value;if(state.decoder==='hex')val=hex(m.valueB64);else if(m.isJSON){try{val=JSON.parse(m.value||'null');}catch(e){val=m.value;}}const metaEl=document.getElementById('inspMeta');if(metaEl){const hdrs=Object.entries(m.headers||{}).map(([k,v])=>`<span class="chip">${esc(k)}=${esc(v)}</span>`).join('');metaEl.innerHTML=`<span class="chip">P${m.partition}</span> <span class="chip">offset ${m.offset}</span> <span class="chip">${fmtBytes(m.valueSize||0)}</span> ${m.key?`<span class="chip">key: ${esc(m.key)}</span>`:''}${hdrs} <span style="margin-left:auto;font-size:11px" class="muted">${new Date(m.timestamp).toISOString()}</span>`;}let body='';if(val!==null&&typeof val==='object'){if(Array.isArray(val)){body=val.map((item,idx)=>jnode(idx,item,true)).join('');}else{for(const k in val)body+=jnode(k,val[k],true);}}else{body=`<div style="padding:4px 0">${esc(val)}</div>`;}$('#insp').innerHTML='<div class="jnode" style="border:none;margin:0;padding-left:0">'+(body||'<span class="muted">(empty)</span>')+'</div>';};
 window.closeInspector=function(){_inspCur=null;const el=document.getElementById('inspector');if(el)el.classList.add('hidden');};
 function inspJsonText(){
   const m=_inspCur; if(!m)return '';
@@ -901,10 +900,10 @@ function prependMsgRow(m){const rows=$('#rows');if(!rows)return;const tr=documen
 /* Topics */
 function viewTopics(){
   const readOnly=isKafkaTarget(),readOnlyNote='Kafka targets are read-only; topic mutations are disabled.',canDetail=!isKafkaTarget()||hasTargetCapability('topic.partitions.read'),detailUnavailable='Topic partition details are not supported by this Kafka target.';
-  const createControl=readOnly?`<button class="btn" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Create</button>`:`<input id="newT" placeholder="new topic name" style="max-width:220px"><input id="newP" type="number" min="1" max="64" value="1" title="Partitions" style="max-width:70px"><button class="btn" onclick="createTopic()">Create</button>`;
+  const createControl=readOnly?`<button class="btn" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Create</button>`:`<input id="newT" aria-label="New topic name" placeholder="new topic name" style="max-width:220px"><label class="muted" for="newP" style="font-size:12px">Partitions</label><input id="newP" type="number" min="1" max="64" value="1" style="max-width:70px"><button class="btn" onclick="createTopic()">Create</button>`;
   return `<div>${pageHeader('Topics','Create and inspect topics, partitions, and log positions.')}<div class="card"><div class="topicsHeaderRow" style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap">
-    <div><div class="kicker">Namespace</div><div class="statXL">${(state.topics||[]).length}<small>topics</small></div></div>
-    <div class="topicsCreateBar" style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${createControl}</div>
+    <div><div class="kicker">Namespace</div><div class="statXL">${(state.topics||[]).length}<small>topic${(state.topics||[]).length===1?'':'s'}</small></div></div>
+    <div class="topicsCreateBar" style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:nowrap">${createControl}</div>
   </div>${readOnly?`<div class="card" style="padding:10px 12px;border-color:var(--warn-line);margin-bottom:10px"><span class="badge b-amber">Read-only</span><span class="muted" style="font-size:12px;margin-left:8px">${readOnlyNote}</span></div>`:''}
   <div class="tableScroll"><table><thead><tr><th class="sortable" onclick="sortRows('topics','name')">Topic<span class="sortInd">${sortInd('topics','name')}</span></th><th class="sortable" onclick="sortRows('topics','leo')">Log End<span class="sortInd">${sortInd('topics','leo')}</span></th><th class="sortable" onclick="sortRows('topics','size')">Size<span class="sortInd">${sortInd('topics','size')}</span></th><th>Partitions</th><th></th></tr></thead><tbody>
   ${sortedTopics().map(t=>{
@@ -914,7 +913,7 @@ function viewTopics(){
     const detail=canDetail?`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="openTopicDetail(${jsArg(t.name)})">Detail</button>`:`<button class="btn ghost" aria-disabled="true" title="${detailUnavailable}" onclick="toast('${detailUnavailable}')">Detail</button>`;
     const remove=readOnly?`<button class="btn danger" aria-disabled="true" title="${readOnlyNote}" onclick="toast('${readOnlyNote}')">Delete</button>`:`<button class="btn danger" style="padding:4px 10px;font-size:11px" onclick="delTopic(${jsArg(t.name)})">Delete</button>`;
     const roFlag=readOnly?'<span class="badge muted">Read-only</span>':'';
-    return `<tr><td class="mono">${topicLink}</td><td>${p.logEndOffset??0}</td><td>${fmtBytesOpt(t.totalBytes)}</td><td style="min-width:90px">${bars}</td><td><div class="clRowActions">${detail}${remove}${roFlag}</div></td></tr>`;
+    return `<tr><td class="mono">${topicLink}</td><td>${p.logEndOffset??0}</td><td>${fmtBytesOpt(t.totalBytes)}</td><td style="min-width:90px">${bars}<div class="muted mono" style="font-size:11px;margin-top:2px">${ps.length} partition${ps.length===1?'':'s'}</div></td><td><div class="clRowActions">${detail}${remove}${roFlag}</div></td></tr>`;
   }).join('')||`<tr><td colspan="5" class="muted" style="padding:20px">No topics yet.${readOnly?'':' <button class="btn" style="padding:4px 12px;font-size:12px" onclick="document.getElementById(\'newT\').focus()">Create the first one</button>'}</td></tr>`}
   </tbody></table></div></div></div>`;
 }
@@ -937,11 +936,11 @@ function viewTopicDetail(){
   const bars=ps.map(p=>{const leo=((p.logEndOffset||0)/max)*100,hwm=((p.highWatermark||0)/max)*100;
     return `<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;margin-bottom:4px"><span>P${p.partition}</span><span class="muted">LEO ${p.logEndOffset??'n/a'} / HWM ${p.highWatermark??'n/a'} / earliest ${p.earliestOffset??'n/a'}</span></div>
       <div class="pbar" style="height:14px"><span style="width:${leo}%"></span></div><div class="pbar" style="height:6px;margin-top:2px"><span style="width:${hwm}%;background:var(--live)"></span></div>
-      <div class="muted" style="font-size:10px;margin-top:4px">${fmtBytesOpt(p.bytes)} &middot; ${(p.segments||[]).length} segment(s)</div><div style="margin-top:6px;display:flex;gap:6px">${readOnly?`<button class="btn ghost" aria-disabled="true" title="${reason}" onclick="toast('${reason}')">Truncate</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="truncateTopic(${p.partition})">Truncate</button>`}</div></div>`;
+      <div class="muted" style="font-size:11px;margin-top:4px">${fmtBytesOpt(p.bytes)} &middot; ${(p.segments||[]).length} segment(s)</div><div style="margin-top:6px;display:flex;gap:6px">${readOnly?`<button class="btn ghost" aria-disabled="true" title="${reason}" onclick="toast('${reason}')">Truncate</button>`:`<button class="btn ghost" style="padding:3px 8px;font-size:11px" onclick="truncateTopic(${p.partition})">Truncate</button>`}</div></div>`;
   }).join('');
   const policy=readOnly?'cleanup.policy unavailable':(state.topicCfg&&state.topicCfg.compacted?'cleanup.policy=compact':'cleanup.policy=delete');
   return `<div>${pageHeader(esc(t),'Partition offsets, watermarks, and compaction controls.')}<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
-    <h3 style="font-size:15px">${esc(t)}</h3><span class="badge ${state.topicCfg&&state.topicCfg.compacted?'b-purple':'b-amber'}">${policy}</span>
+    <span class="badge ${state.topicCfg&&state.topicCfg.compacted?'b-purple':'b-amber'}">${policy}</span>
     ${readOnly?`<button class="btn ghost" aria-disabled="true" title="${reason}" onclick="toast('${reason}')">Enable/disable compaction</button><button class="btn ghost" aria-disabled="true" title="${reason}" onclick="toast('${reason}')">Compact now</button>`:`<button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="toggleTopicCompact()">${state.topicCfg&&state.topicCfg.compacted?'Disable compaction':'Enable compaction'}</button><button class="btn ghost" style="padding:4px 10px;font-size:11px" onclick="compactTopic()">Compact now</button>`}
     <button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.topicDetail=null;render()">Back</button></div>
     ${readOnly?`<p class="muted" style="font-size:11px;margin-bottom:8px">${reason}</p>`:''}<div style="margin-bottom:6px" class="muted">LEO (log end) vs HWM (high watermark) per partition</div>${bars||'<div class="muted">No partitions</div>'}
@@ -1026,7 +1025,7 @@ function viewGroupDetail(){
   }).join('')||'<span class="muted">No members reported.</span>':'<span class="muted">Member details unavailable.</span>';
   const memberCount=memberRecords?`${memberRecords.length} member(s)`:'n/a (member details unavailable)';
   const lh=(state.lagHist||{})[gid]||[],maxLag=Math.max(1,...lh),spark=lh.length>1?`<div class="spark" title="Lag history (last ${lh.length} polls)">${lh.map(v=>`<span style="height:${Math.max(3,v/maxLag*100)}%"></span>`).join('')}</div>`:'';
-  return `<div>${pageHeader(esc(gid),'Consumer membership and committed offsets.')}<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap"><h3 style="font-size:15px">${esc(gid)}</h3><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span><button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.group=null;state.groupDetail=null;state.groupError=null;location.hash='#/groups';">Back</button></div>
+  return `<div>${pageHeader(esc(gid),'Consumer membership and committed offsets.')}<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap"><span class="badge ${online(g.state)?'b-green':'b-amber'}">${esc(g.state)}</span><button class="btn ghost" style="padding:4px 10px;font-size:11px;margin-left:auto" onclick="state.group=null;state.groupDetail=null;state.groupError=null;location.hash='#/groups';">Back</button></div>
     <div class="muted" style="margin-bottom:14px">Protocol: ${esc(g.protocol||'range')} &middot; ${memberCount}</div><div style="margin-bottom:16px">${members}</div>${spark}${readOnly?`<p class="muted" style="font-size:11px;margin:8px 0">${reason}</p>`:''}${tableScroll(`<table><thead><tr><th>Topic</th><th>Partition</th><th>Current</th><th>Log End</th><th>Lag</th><th></th></tr></thead><tbody>${lagRows}</tbody></table>`)}</div></div>`;
 }
 window.resetGroupOffset=async function(topic,part){
@@ -1550,7 +1549,7 @@ function viewOverview(){
   if(overviewErr){
     content=`<section class="card" role="alert"><h2>Overview unavailable</h2><p class="muted" style="margin-top:8px">Could not load broker health: ${esc(overviewErr)}</p><button class="btn" style="margin-top:12px" onclick="loadOverview()">Retry</button></section>`;
   }else if(overviewLoading&&!overviewData){
-    content=`<div class="pageHeading"><div><h2>Overview</h2><p>Broker health, active issues, traffic, and consumer lag.</p></div></div><section class="card" aria-label="Loading broker overview" aria-busy="true">${skel(220)} <span style="margin-left:12px">${skel(140)}</span></section>`;
+    content=`<div class="pageHeading"><div><p>Broker health, active issues, traffic, and consumer lag.</p></div></div><section class="card" aria-label="Loading broker overview" aria-busy="true">${skel(220)} <span style="margin-left:12px">${skel(140)}</span></section>`;
   }else if(!overviewData){
     content=`<section class="card"><h2>Overview unavailable</h2><p class="muted" style="margin-top:8px">No broker overview data is available yet.</p><button class="btn" style="margin-top:12px" onclick="loadOverview()">Retry</button></section>`;
   }else{
@@ -1564,13 +1563,12 @@ function viewOverview(){
     const warmup=s.warmup===true?`<div class="statSub" style="margin-top:6px">Broker sampling is warming up (${count(s.samples)} samples, ${Number.isFinite(s.ageSeconds)?Math.max(0,Math.floor(s.ageSeconds)):0}s elapsed).</div>`:'';
     const lag=Number.isFinite(c.lag)?count(c.lag):'n/a';
     content=`
-      <div id="overviewHead" class="pageHeading"><div><h2>Overview</h2><p>Broker health, active issues, traffic, and consumer lag.</p></div><div class="statSub" style="margin-left:auto">${esc(activeClusterLabel())}</div></div>
+      <div id="overviewHead" class="pageHeading"><div><p>Broker health, active issues, traffic, and consumer lag.</p></div></div>
       <div id="overviewTop" class="overviewTop"><section class="card" aria-labelledby="overviewHealthTitle"><div class="kicker">Operations</div><h3 id="overviewHealthTitle">Broker health</h3><div class="row" style="margin-top:10px;justify-content:space-between"><span class="mono">${esc(c.clusterId||'Broker identity unavailable')}</span>${hStatusBadge(c.status||'unknown')}</div>${Array.isArray(c.reasons)&&c.reasons.length?`<div class="overviewAttention">${c.reasons.map(r=>`<div class="overviewIssue"><span class="mono">${esc(r.severity||'status')}</span><span class="muted">${esc(r.message||'')}</span></div>`).join('')}</div>`:''}<div class="overviewLinks"><a class="btn ghost" href="#/health">Open Health</a><a class="btn ghost" href="#/settings/clusters">View Clusters</a></div></section>
       <section class="card"><div class="row" style="justify-content:space-between"><h3>Needs attention</h3><span class="mono">${att.length} ${att.length===1?'topic':'topics'}</span></div><div class="overviewAttention">${issues}</div></section></div>
-      <dl id="overviewFacts" class="overviewFacts" aria-label="Broker summary"><div class="overviewFact"><dt>Broker status</dt><dd>${esc(c.status||'n/a')}</dd></div><div class="overviewFact"><dt>Active topic issues</dt><dd>${att.length}</dd></div><div class="overviewFact"><dt>Throughput</dt><dd>${rate}<small style="font-size:10px;color:var(--muted)"> msg/s</small></dd></div><div class="overviewFact"><dt>Consumer lag</dt><dd>${lag}</dd></div></dl>
+      <dl id="overviewFacts" class="overviewFacts" aria-label="Broker summary"><div class="overviewFact"><dt>Topics</dt><dd><a href="#/topics">${count(c.topics)}</a><small style="font-size:11px;color:var(--muted)"> · ${count(c.partitions)} partitions</small></dd></div><div class="overviewFact"><dt>Consumer groups</dt><dd><a href="#/groups">${count(c.groups)}</a></dd></div><div class="overviewFact"><dt>Throughput</dt><dd>${rate}<small style="font-size:11px;color:var(--muted)"> msg/s</small></dd></div><div class="overviewFact"><dt>Consumer lag</dt><dd>${lag}</dd></div></dl>
       <div id="overviewNotes">${rateNote}${warmup}</div>
-      <div id="overviewCharts" class="overviewCharts" style="margin-top:12px"><section class="card"><h3 class="overviewChartTitle">Messages per second · last ${win}s</h3>${overviewSpark(hist.map(x=>x.messagesPerSec),`Messages per second over the last ${win} seconds`)}<div class="statSub">Messages / second</div></section><section class="card"><h3 class="overviewChartTitle">Total consumer lag · last ${win}s</h3>${overviewSpark(hist.map(x=>x.lag),`Total consumer lag over the last ${win} seconds`)}<div class="statSub">Messages behind latest offsets</div></section></div>
-      <section id="overviewFactsCard" class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><h3>Broker facts</h3><span class="statSub">${count(c.topics)} topics · ${count(c.partitions)} partitions · ${count(c.groups)} groups</span></div><div class="overviewLinks"><a class="btn ghost" href="#/topics">Topics</a><a class="btn ghost" href="#/groups">Consumer Groups</a><a class="btn ghost" href="#/databrowser">Data Browser</a><a class="btn ghost" href="#/settings/connections">Connections</a></div></section>`;
+      <div id="overviewCharts" class="overviewCharts" style="margin-top:12px"><section class="card"><h3 class="overviewChartTitle">Messages per second · last ${win}s</h3>${overviewSpark(hist.map(x=>x.messagesPerSec),`Messages per second over the last ${win} seconds`)}<div class="statSub">Messages / second</div></section><section class="card"><h3 class="overviewChartTitle">Total consumer lag · last ${win}s</h3>${overviewSpark(hist.map(x=>x.lag),`Total consumer lag over the last ${win} seconds`)}<div class="statSub">Messages behind latest offsets</div></section></div>`;
   }
   return `<div id="overviewRoot">${content}</div>`;
 }
@@ -1579,7 +1577,7 @@ function patchOverview(){
   if(!root)return false;
   const tmp=document.createElement('div');tmp.innerHTML=viewOverview();
   const next=tmp.firstElementChild;
-  const sectionIds=['overviewHead','overviewTop','overviewFacts','overviewNotes','overviewCharts','overviewFactsCard'];
+  const sectionIds=['overviewHead','overviewTop','overviewFacts','overviewNotes','overviewCharts'];
   const currentIds=sectionIds.filter(id=>document.getElementById(id));
   const nextIds=sectionIds.filter(id=>next.querySelector('#'+id));
   if(currentIds.join('|')!==nextIds.join('|')){root.innerHTML=next.innerHTML;return true;}
@@ -1953,7 +1951,7 @@ window.testCluster=async function(){
     if(out){
       out.style.color=ok?'var(--success)':'var(--danger)';
       const bits=[];
-      if(r.topics>0)bits.push(r.topics+' topics');
+      if(r.topics>0)bits.push(r.topics+(r.topics===1?' topic':' topics'));
       if(r.groups>0)bits.push(r.groups+' groups');
       if(r.latencyMs>0)bits.push(r.latencyMs+' ms');
       out.textContent=ok?`Reachable: ${r.clusterId||'cluster'}${bits.length?' - '+bits.join(', '):''}`:`Not reachable: ${redactTargetEndpoint(r.error||'unknown error')}`;

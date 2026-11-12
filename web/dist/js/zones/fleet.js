@@ -141,8 +141,8 @@ function renderPortBadges(portsStr){
       const isLoopback = ip === '127.0.0.1' || ip === 'localhost';
       const portText = pub === priv ? pub : (pub + '➔' + priv);
       const protoText = proto === 'udp' ? '/udp' : '';
-      const prefix = isLoopback ? '<span class="muted" style="font-size:9.5px;margin-right:2px">local:</span>' : '';
-      badges.push(`<span class="chip mono" style="font-size:10.5px;padding:1px 6px;border-radius:3px;white-space:nowrap;display:inline-block" title="${esc(it)}">${prefix}<b>${esc(portText)}</b>${protoText}</span>`);
+      const prefix = isLoopback ? '<span class="muted" style="font-size:11px;margin-right:2px">local:</span>' : '';
+      badges.push(`<span class="chip mono" style="font-size:11px;padding:1px 6px;border-radius:3px;white-space:nowrap;display:inline-block" title="${esc(it)}">${prefix}<b>${esc(portText)}</b>${protoText}</span>`);
     } else {
       const m2 = it.match(/^(\d+)(?:\/(\w+))?$/);
       if(m2){
@@ -151,7 +151,7 @@ function renderPortBadges(portsStr){
         const key = priv + '/' + proto;
         if(seen.has(key)) continue;
         seen.add(key);
-        badges.push(`<span class="chip mono muted" style="font-size:10.5px;padding:1px 6px;border-radius:3px;white-space:nowrap;display:inline-block;opacity:.7" title="Exposed in container: ${esc(it)}">${esc(priv)}/${esc(proto)}</span>`);
+        badges.push(`<span class="chip mono muted" style="font-size:11px;padding:1px 6px;border-radius:3px;white-space:nowrap;display:inline-block;opacity:.7" title="Exposed in container: ${esc(it)}">${esc(priv)}/${esc(proto)}</span>`);
       }
     }
   }
@@ -335,14 +335,14 @@ function viewFleetContainers(){
     return `<tr>
       <td class="mono">
         <a href="javascript:void(0)" data-id="${esc(c.id)}" onclick="viewContainerInspect(this.dataset.id)" style="font-weight:600;color:var(--text);text-decoration:none;border-bottom:1px dashed var(--border)" title="Inspect container details">${esc(rawName)}</a>
-        <div class="muted" style="font-size:10px">${esc(shortId)}</div>
+        <div class="muted" style="font-size:11px">${esc(shortId)}</div>
       </td>
       <td class="mono" style="font-size:11px">
         ${srvId ? `<button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" data-srv="${esc(srvId)}" onclick="state.fleetServerFilter=this.dataset.srv;render()" title="Filter containers on ${esc(srvLabel)}">${esc(srvLabel)}</button>` : `<span class="muted">${esc(srvLabel)}</span>`}
       </td>
       <td class="mono" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.image||'')}">${esc(c.image || '-')}</td>
       <td>${badge}</td>
-      <td class="mono" style="font-size:10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.command||'')}">${esc(c.command || '-')}</td>
+      <td class="mono" style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(c.command||'')}">${esc(c.command || '-')}</td>
       <td class="mono" style="min-width:140px;max-width:320px">${renderPortBadges(c.ports)}</td>
       <td><div class="clRowActions">${actions}</div></td>
     </tr>`;
@@ -897,53 +897,53 @@ window.viewContainerInspect = function(id){
   const labels = Object.entries(c.labels || {});
 
   const labelsHtml = labels.length
-    ? `<div style="display:flex;flex-wrap:wrap;gap:5px">${labels.map(([k, v]) => `<span class="chip mono" style="font-size:10px" title="${esc(k)}=${esc(v)}"><strong>${esc(k)}</strong>: ${esc(v)}</span>`).join('')}</div>`
+    ? `<div style="display:flex;flex-wrap:wrap;gap:5px">${labels.map(([k, v]) => `<span class="chip mono" style="font-size:11px" title="${esc(k)}=${esc(v)}"><strong>${esc(k)}</strong>: ${esc(v)}</span>`).join('')}</div>`
     : '<span class="muted" style="font-size:11px">No labels defined</span>';
 
   const body = `<div style="display:grid;gap:14px;font-family:var(--font-mono);font-size:12px">
     <div class="row" style="gap:16px;flex-wrap:wrap;background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px">
       <div style="flex:1 1 180px">
-        <div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:2px">Container Name</div>
+        <div class="muted" style="font-size:11px;text-transform:uppercase;margin-bottom:2px">Container Name</div>
         <div style="font-weight:600;font-size:13px">${esc(rawName)}</div>
       </div>
       <div style="flex:1 1 180px">
-        <div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:2px">Status</div>
+        <div class="muted" style="font-size:11px;text-transform:uppercase;margin-bottom:2px">Status</div>
         <div>${badge}</div>
       </div>
       <div style="flex:1 1 180px">
-        <div class="muted" style="font-size:10px;text-transform:uppercase;margin-bottom:2px">Host Server</div>
+        <div class="muted" style="font-size:11px;text-transform:uppercase;margin-bottom:2px">Host Server</div>
         <button class="slink mono" style="font-size:11px;background:none;border:none;padding:0;cursor:pointer;color:var(--primary-text)" data-srv="${esc(c.server_id||'')}" onclick="state.fleetServerFilter=this.dataset.srv;closeDrw();goView('fleet-containers')">${esc(c.server_id || 'local-host')}</button>
       </div>
     </div>
 
     <div style="background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px;display:grid;gap:10px">
       <div>
-        <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:2px">Full Container ID</span>
+        <span class="muted" style="font-size:11px;text-transform:uppercase;display:block;margin-bottom:2px">Full Container ID</span>
         <div style="display:flex;align-items:center;gap:8px">
           <code style="font-size:11px;word-break:break-all">${esc(c.id)}</code>
           <button class="cbtn" data-copy="${esc(c.id)}" onclick="copyText2(this.dataset.copy, this)">Copy</button>
         </div>
       </div>
       <div>
-        <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:2px">Image</span>
+        <span class="muted" style="font-size:11px;text-transform:uppercase;display:block;margin-bottom:2px">Image</span>
         <code style="font-size:11px">${esc(c.image || '-')}</code>
       </div>
       <div>
-        <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:2px">Command</span>
+        <span class="muted" style="font-size:11px;text-transform:uppercase;display:block;margin-bottom:2px">Command</span>
         <code style="font-size:11px">${esc(c.command || '-')}</code>
       </div>
       <div>
-        <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:4px">Ports & Network Bindings</span>
+        <span class="muted" style="font-size:11px;text-transform:uppercase;display:block;margin-bottom:4px">Ports & Network Bindings</span>
         <div>${renderPortBadges(c.ports)}</div>
       </div>
       <div>
-        <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:2px">Created At</span>
+        <span class="muted" style="font-size:11px;text-transform:uppercase;display:block;margin-bottom:2px">Created At</span>
         <span style="font-size:11px">${esc(createdDate)}</span>
       </div>
     </div>
 
     <div style="background:var(--bg-canvas);border:1px solid var(--border);border-radius:4px;padding:12px">
-      <span class="muted" style="font-size:10px;text-transform:uppercase;display:block;margin-bottom:6px">Docker Labels (${labels.length})</span>
+      <span class="muted" style="font-size:11px;text-transform:uppercase;display:block;margin-bottom:6px">Docker Labels (${labels.length})</span>
       ${labelsHtml}
     </div>
   </div>`;
@@ -1191,7 +1191,7 @@ function renderLogLines(entries){
       : parsed.lvl === 'INFO' ? '<span class="badge b-green">INFO</span>'
       : parsed.lvl === 'DEBUG' ? '<span class="badge muted">DEBUG</span>'
       : parsed.lvl ? '<span class="badge muted">' + esc(parsed.lvl) + '</span>' : '';
-    const cntBadge = container ? `<span class="chip mono" style="font-size:9.5px;padding:1px 5px;flex:0 0 auto;background:var(--surface2)">${esc(container)}</span>` : '';
+    const cntBadge = container ? `<span class="chip mono" style="font-size:11px;padding:1px 5px;flex:0 0 auto;background:var(--surface2)">${esc(container)}</span>` : '';
     return '<div style="display:flex;gap:8px;padding:2px 12px;max-width:100%;min-width:0;align-items:baseline">'
       + '<span class="muted" style="flex:0 0 34px;min-width:34px;text-align:right;user-select:none">' + (i + 1) + '</span>'
       + cntBadge
