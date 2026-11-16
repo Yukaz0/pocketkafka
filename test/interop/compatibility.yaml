@@ -87,7 +87,7 @@ api_versions:
   ApiVersions: 2
   CreateTopics: 4
   DeleteTopics: 3
-  InitProducerID: 2
+  InitProducerID: 1   # v2+ is a flexible (tagged-field) version, unsupported
   SaslAuthenticate: 1
   DeleteGroups: 1
   # Transactional APIs (AddPartitionsToTxn=24, AddOffsetsToTxn=25, EndTxn=26)
