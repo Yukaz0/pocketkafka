@@ -103,3 +103,74 @@ func TestStartupIgnoresLeftoverTempFiles(t *testing.T) {
 		t.Fatalf("offset store rejected leftover temp files: %v", err)
 	}
 }
+
+// copyTree mirrors what `cp -a data_dir backup/` does for the documented cold backup.
+func copyTree(t *testing.T, src, dst string) {
+	t.Helper()
+	err := filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, b, info.Mode())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Documented procedure (docs/OPERATIONS.md): stop the broker, copy data_dir,
+// restore into an empty directory, start. Records and group offsets must survive,
+// and the restored broker must keep accepting writes at the right offset.
+func TestBackupRestoreFromColdCopy(t *testing.T) {
+	live, backup, restored := t.TempDir(), t.TempDir(), t.TempDir()
+
+	kc, stop := bootAt(t, live, freePort(t))
+	if err := kc.CreateTopic("bk", 1); err != nil {
+		t.Fatal(err)
+	}
+	prod := client.NewProducer(kc, client.DefaultProducerConfig())
+	for i := 0; i < 6; i++ {
+		m := &client.Message{Topic: "bk", Value: []byte(fmt.Sprintf("v%d", i))}
+		if _, err := prod.SendSync(context.Background(), m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := kc.ResetOffset("g-bk", "bk", 0, 2); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+
+	copyTree(t, live, backup)
+	// Disaster: the original data_dir is gone.
+	if err := os.RemoveAll(live); err != nil {
+		t.Fatal(err)
+	}
+	copyTree(t, backup, restored)
+
+	kc2, stop2 := bootAt(t, restored, freePort(t))
+	defer stop2()
+
+	if leo, err := kc2.QueryOffset("bk", 0, -1); err != nil || leo != 6 {
+		t.Fatalf("LEO after restore = %d err=%v, want 6", leo, err)
+	}
+	if off, err := kc2.CommittedOffset("g-bk", "bk", 0); err != nil || off != 2 {
+		t.Fatalf("committed offset after restore = %d err=%v, want 2", off, err)
+	}
+	prod2 := client.NewProducer(kc2, client.DefaultProducerConfig())
+	off, err := prod2.SendSync(context.Background(), &client.Message{Topic: "bk", Value: []byte("after")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off != 6 {
+		t.Fatalf("first write after restore got offset %d, want 6", off)
+	}
+}
