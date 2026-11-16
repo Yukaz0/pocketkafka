@@ -38,13 +38,14 @@ clients:
   - name: franz-go
     kind: go
     module: github.com/twmb/franz-go
-    status: planned
+    status: supported
+    notes: Covered by test/interop/franzgo (run by test/interop/run.sh).
 
   - name: kcat
     kind: cli
     implementation: librdkafka
-    status: planned
-    notes: Modern librdkafka.
+    status: supported
+    notes: Modern librdkafka; covered by test/interop/kcat.sh (run by test/interop/run.sh).
 
   - name: librdkafka-legacy
     kind: cli

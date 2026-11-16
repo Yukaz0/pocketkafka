@@ -17,6 +17,7 @@ group, commit/fetch offset, reconnect, restart/resume).
 | `kcat` / librdkafka (modern) | `kcat.sh` (Docker) | nightly / manual |
 | `librdkafka` legacy (`broker.version.fallback=0.9.0`) | not supported: needs MessageSet magic 0/1 (`kcat.sh <addr> legacy` fails at produce) | manual only |
 | `kafkajs` | `kafkajs/` (Docker) | nightly / manual |
+| `franz-go` | `franzgo/` (Docker) | nightly / manual |
 
 ## Running locally
 
