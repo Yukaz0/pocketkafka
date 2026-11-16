@@ -93,6 +93,9 @@ if [[ "${INTEROP_DOCKER:-0}" == "1" ]]; then
   echo "==> franz-go"
   docker build -t pocketkafka-interop-franzgo test/interop/franzgo
   docker run --rm --network host pocketkafka-interop-franzgo "$ADV"
+  echo "==> sarama"
+  docker build -t pocketkafka-interop-sarama test/interop/sarama
+  docker run --rm --network host pocketkafka-interop-sarama "$ADV"
 else
   echo "==> external clients skipped (set INTEROP_DOCKER=1 to enable)"
 fi
