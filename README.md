@@ -382,13 +382,15 @@ Tests cover:
 
 Backup, restore and the (non-)replication model are in [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
+What is stable from v1.0 (wire versions, REST proxy, transactions fail-closed) is in [`docs/STABILITY.md`](docs/STABILITY.md).
+
 ### Client compatibility
 
 The `pocketkafka-native` client is covered by `go test ./internal/e2e` on every
 PR. The external matrix — `kcat`/librdkafka (modern and the `0.9.0` fallback),
 KafkaJS and franz-go — lives in [`test/interop`](test/interop/README.md) and is
 driven by `test/interop/run.sh` (nightly / on demand, requires Docker). The
-auditable list of what is supported vs planned is
+auditable list of what is supported vs unsupported is
 [`test/interop/compatibility.yaml`](test/interop/compatibility.yaml); treat that
 file, not this README, as the source of truth.
 

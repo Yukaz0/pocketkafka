@@ -28,6 +28,7 @@ Fleet server & token lifecycle management, flat core navigation, dan dynamic ass
 
 - API wire + REST yang diiklankan dibekukan; perubahan breaking naik major.
 - Transaksi: implementasi penuh atau tetap fail-closed permanen (diputuskan eksplisit).
+- Status: kontrak di `docs/STABILITY.md`; wire dikunci `TestWireSurfaceFrozen` + `TestCompatibilityManifestMatchesWire`, REST dikunci `TestRESTProxyContractFrozen`; transaksi diputuskan fail-closed permanen.
 - Done: tidak ada `planned` tersisa di README; compatibility matrix penuh hijau.
 
 ## Fleet (Pre-v1.0 Experimental)
