@@ -42,3 +42,4 @@ Subkomponen manajemen host dan container jarak jauh (`fleet-agent` + UI zona Fle
   - Rate limiting, batasan koneksi/job/agen, dan isolasi kegagalan (panic recovery di tiap handler).
   - UI zona Fleet di SPA terintegrasi dan sistem packaging systemd + GitHub Release artifact.
 - **Kriteria stabil (v1.0)**: evaluasi ketahanan multi-host pada rilis v0.2–v0.3 sebelum promosi ke fitur stabil di v1.0.
+  - Evaluasi awal (1 mesin, 3 agen, Docker nyata) selesai; temuan dan batasannya di `docs/FLEET_RUNBOOK.md` bagian 7. Multi-host fisik belum diuji, jadi Fleet tetap experimental.

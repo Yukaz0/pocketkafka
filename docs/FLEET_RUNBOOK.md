@@ -265,3 +265,23 @@ Syarat: `curl jq ssh` di host controller; target punya `curl`, Docker aktif, `sy
 
 Logika enroll: `skip` bila `agent_id` cocok; `enroll` + backup bila orphan/stale/force; token tak diterbitkan bila skip. `401 agent ... not found` = state stale, skrip betulkan otomatis; paksa dengan `--force-reenroll`.
 
+
+---
+
+## 7. Evaluasi ketahanan multi-agen (drill)
+
+Drill dijalankan dengan biner rilis dan Docker nyata, **satu mesin**: 1 broker + 3 `fleet-agent` (`h1`-`h3`) dengan state terpisah, tiap agen mengelola satu container. HTTP polos di loopback.
+
+| Skenario | Hasil |
+|---|---|
+| Enroll 3 agen dengan token sekali-pakai | semua `online` |
+| `restart` bersamaan di 3 host | 3 job `succeeded`, container hidup kembali |
+| `stop` ke `h1` dan `h2` | `succeeded`, container `Exited` |
+| Agen `h2` dimatikan paksa (SIGKILL) | **sebelum perbaikan** tetap `online` selamanya; sesudah, `offline` setelah `fleet.heartbeat_timeout` |
+| Job ke `h3` saat `h2` mati | `h3` tetap berjalan, tidak terpengaruh |
+| Agen `h2` dinyalakan lagi dari state (tanpa token) | kembali `online` |
+| Broker di-restart, agen tetap jalan | semua kembali `online` |
+
+Temuan dan perbaikan: `FleetServer` tidak pernah menandai server `offline` (`heartbeat_timeout` ada di config tetapi tidak dipakai). Kini `Registry.SetHeartbeatTimeout` dipasang dari `fleet.heartbeat_timeout` (default 30 dtk); tes: `TestServerGoesOfflineWhenAgentSilent`.
+
+Belum dievaluasi: beberapa host fisik, TLS/mTLS dan CA privat, partisi jaringan, drift jam antar host, skala puluhan agen, dan job yang berjalan saat agen putus. Karena itu Fleet **tetap experimental** (`fleet.enabled: false` secara default) dan di luar kontrak `docs/STABILITY.md`.
