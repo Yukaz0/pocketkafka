@@ -374,3 +374,32 @@ func TestRevokeAndReissueEnrollment(t *testing.T) {
 		t.Fatalf("consume new token must succeed: %v", err)
 	}
 }
+
+func TestServerGoesOfflineWhenAgentSilent(t *testing.T) {
+	reg, err := NewRegistry("", "0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetHeartbeatTimeout(50 * time.Millisecond)
+	tok, err := reg.Enroll("h1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.ConsumeToken(tok); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := reg.GetServer("h1"); s.Status != "online" {
+		t.Fatalf("fresh server status = %q, want online", s.Status)
+	}
+	time.Sleep(80 * time.Millisecond)
+	if s, _ := reg.GetServer("h1"); s.Status != "offline" {
+		t.Fatalf("silent server status = %q, want offline", s.Status)
+	}
+	if l := reg.ListServers(); l[0].Status != "offline" {
+		t.Fatalf("list status = %q, want offline", l[0].Status)
+	}
+	reg.TouchServer("h1")
+	if s, _ := reg.GetServer("h1"); s.Status != "online" {
+		t.Fatalf("after heartbeat status = %q, want online", s.Status)
+	}
+}

@@ -200,6 +200,7 @@ func main() {
 		}
 		stopFleetRetention := startFleetRetention(fleetJobs, fleetAudit, time.Hour)
 		defer stopFleetRetention()
+		fleetReg.SetHeartbeatTimeout(time.Duration(cfg.Fleet.HeartbeatTimeout) * time.Second)
 		fleetMgr := fleet.NewAgentManager(fleetReg, fleetJobs)
 		fleetProxyToken := fleet.NewProxyToken()
 		fleetUseTLS := cfg.Fleet.TLS.CertFile != "" && cfg.Fleet.TLS.KeyFile != ""

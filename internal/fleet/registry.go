@@ -42,6 +42,7 @@ type Registry struct {
 	enrollments map[string]*Enrollment
 	servers     map[string]*Server
 	maxAgents   int
+	staleAfter  time.Duration // 0 disables offline detection
 }
 
 func NewRegistry(dirOrPath, masterKey string) (*Registry, error) {
@@ -72,6 +73,23 @@ func NewRegistry(dirOrPath, masterKey string) (*Registry, error) {
 		return nil, err
 	}
 	return r, nil
+}
+
+// SetHeartbeatTimeout makes servers whose agent has not been heard from for d
+// report "offline" instead of a stale "online". Zero disables it.
+func (r *Registry) SetHeartbeatTimeout(d time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.staleAfter = d
+}
+
+// withLiveness returns a copy of s with Status downgraded when the agent is silent.
+func (r *Registry) withLiveness(s *Server) *Server {
+	cp := *s
+	if cp.Status == "online" && r.staleAfter > 0 && time.Since(cp.UpdatedAt) > r.staleAfter {
+		cp.Status = "offline"
+	}
+	return &cp
 }
 
 func (r *Registry) SetMaxAgents(limit int) {
@@ -439,8 +457,7 @@ func (r *Registry) ListServers() []*Server {
 
 	out := make([]*Server, 0, len(r.servers))
 	for _, s := range r.servers {
-		cp := *s
-		out = append(out, &cp)
+		out = append(out, r.withLiveness(s))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -454,8 +471,7 @@ func (r *Registry) GetServer(serverID string) (*Server, bool) {
 	if !ok {
 		return nil, false
 	}
-	cp := *s
-	return &cp, true
+	return r.withLiveness(s), true
 }
 
 func (r *Registry) ListEnrollments() []*Enrollment {
