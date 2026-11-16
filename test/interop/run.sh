@@ -35,8 +35,10 @@ broker:
   cluster_id: "interop"
 listeners:
   plain: "127.0.0.1:${PORT}"
+  internal: "127.0.0.1:$((PORT + 1))"
 advertised_listeners:
   plain: "${ADV}"
+  internal: "127.0.0.1:$((PORT + 1))"
 storage:
   data_dir: "${WORK}/data"
 web:
@@ -88,6 +90,9 @@ if [[ "${INTEROP_DOCKER:-0}" == "1" ]]; then
   echo "==> KafkaJS"
   docker build -t pocketkafka-interop-kafkajs test/interop/kafkajs
   docker run --rm --network host pocketkafka-interop-kafkajs "$ADV"
+  echo "==> franz-go"
+  docker build -t pocketkafka-interop-franzgo test/interop/franzgo
+  docker run --rm --network host pocketkafka-interop-franzgo "$ADV"
 else
   echo "==> external clients skipped (set INTEROP_DOCKER=1 to enable)"
 fi

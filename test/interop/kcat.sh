@@ -41,6 +41,6 @@ if [[ "$(echo "$out" | wc -l)" -lt 3 ]]; then
 fi
 
 echo "-- consume with consumer group"
-"${KCAT[@]}" -G "$GROUP" "$TOPIC" -e -c 3 >/dev/null
+timeout 60 "${KCAT[@]}" -e -c 3 -G "$GROUP" "$TOPIC" >/dev/null
 
 echo "kcat OK"
