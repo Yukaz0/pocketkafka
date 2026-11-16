@@ -392,6 +392,7 @@ Manually checked (produce, consumer-group consume, offset commit) against a loca
 broker: `confluent-kafka` 2.16 (librdkafka modern), `franz-go`, `sarama`,
 `kafka-python-ng` (with `api_version=(0, 11, 0)`) and `kafkajs`. The
 `librdkafka` `0.9.0` fallback mode cannot produce (legacy MessageSet format is not implemented).
+`sarama` does not negotiate via ApiVersions, so set `Config.Version` to `V0_11_0_0` or lower; newer values send Produce v5+, which the broker rejects (it advertises Produce up to v3).
 
 ---
 
