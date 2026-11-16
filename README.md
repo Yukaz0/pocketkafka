@@ -378,6 +378,10 @@ Tests cover:
 - Tiered storage against mock S3 server.
 - End-to-end tests through the bundled SDK, including transactional fail-closed and restart recovery.
 
+### Operations
+
+Backup, restore and the (non-)replication model are in [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+
 ### Client compatibility
 
 The `pocketkafka-native` client is covered by `go test ./internal/e2e` on every

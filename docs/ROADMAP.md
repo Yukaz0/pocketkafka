@@ -21,6 +21,7 @@ Fleet server & token lifecycle management, flat core navigation, dan dynamic ass
 - Replika / failover terdokumentasi (atau dinyatakan non-goal eksplisit).
 - Backup-restore `data_dir` terdokumentasi + teruji.
 - Dashboard Grafana selaras metrik `pocketkafka_*`.
+- Status: dikerjakan di `docs/OPERATIONS.md` (replika = non-goal eksplisit; backup/restore cold teruji via `TestBackupRestoreFromColdCopy` + drill binary; dashboard diperluas + `TestDashboardMetricsExist`).
 - Done: runbook restore teruji dari backup nyata.
 
 ## v1.0 — Janji stabil
