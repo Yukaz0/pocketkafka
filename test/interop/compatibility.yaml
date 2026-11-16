@@ -32,8 +32,11 @@ clients:
   - name: sarama
     kind: go
     module: github.com/IBM/sarama
-    status: planned
-    notes: Requires an external interop job (test/interop).
+    status: supported
+    notes: >
+      Covered by test/interop/sarama (run by test/interop/run.sh). Sarama does
+      not negotiate via ApiVersions, so Config.Version must be <= V0_11_0_0
+      or it sends Produce v5+ and the broker drops the connection.
 
   - name: franz-go
     kind: go
